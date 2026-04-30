@@ -31,6 +31,12 @@ export class SMTPManager {
 
     this.accounts = data || [];
     
+    console.log(`Loaded ${this.accounts.length} SMTP accounts for user ${userId}`);
+    
+    if (this.accounts.length === 0) {
+      console.warn('No active SMTP accounts found. Please add SMTP accounts to send emails.');
+    }
+    
     // Reset daily counters if needed
     await this.resetDailyCounters();
   }

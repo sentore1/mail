@@ -344,7 +344,10 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
   };
 
   const sendTestEmail = async () => {
-    if (bulkEmails.length === 0) return;
+    if (bulkEmails.length === 0) {
+      toast.error("No emails generated yet. Please generate emails first.");
+      return;
+    }
     
     const testEmail = prompt("Enter your email address to receive a test:");
     if (!testEmail || !testEmail.includes('@')) {
@@ -358,29 +361,37 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
       
       // Send only the current preview email as a test
       const currentEmail = bulkEmails[previewIndex];
+      
+      // Match the expected data structure from sendBulkEmailsChunkedAction
       const testEmailData = [{
-        lead: currentEmail.lead,
+        lead_id: currentEmail.lead?.id || 'test-lead',
+        lead_email: testEmail,
+        company_name: currentEmail.lead?.company_name || 'Test Company',
         subject: `[TEST] ${currentEmail.subject}`,
-        body: currentEmail.body,
-        model: currentEmail.model,
-        lead_email: testEmail
+        body: currentEmail.body
       }];
       
       const result = await sendBulkEmailsChunkedAction(userId, testEmailData, {
         chunkSize: 1,
         delayBetweenEmails: 0,
-        yourCompany,
-        yourService
+        verifyEmails: false // Skip email verification for test sends
       });
       
       if (result.success) {
         toast.success(`Test email sent to ${testEmail}!`);
       } else {
-        toast.error(result.error || "Failed to send test email");
+        // Provide more detailed error message
+        const errorMsg = result.error || "Failed to send test email";
+        if (errorMsg.includes('No SMTP accounts')) {
+          toast.error("No SMTP accounts configured. Please add an SMTP account first.");
+        } else {
+          toast.error(errorMsg);
+        }
       }
     } catch (error) {
       console.error('Test email error:', error);
-      toast.error("Failed to send test email");
+      const errorMsg = error instanceof Error ? error.message : "Failed to send test email";
+      toast.error(errorMsg);
     } finally {
       setIsSending(false);
     }

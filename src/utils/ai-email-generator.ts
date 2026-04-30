@@ -17,26 +17,18 @@ interface EmailGenerationParams {
 export async function generateAIEmail(params: EmailGenerationParams): Promise<{ subject: string; body: string }> {
   const { lead, yourCompany, yourService, tone, customPainPoint, userId } = params;
   
-  const supabase = createClient();
+  console.log("Fetching AI provider for userId:", userId);
   
-  // Debug: Check what user is authenticated
-  const { data: { user } } = await supabase.auth.getUser();
-  console.log("Authenticated user ID:", user?.id);
-  console.log("Passed userId param:", userId);
+  // Fetch AI provider via API route (uses service role key on server)
+  const response = await fetch(`/api/ai-provider?userId=${userId}`);
   
-  // Fetch AI provider settings
-  // RLS policies automatically filter by auth.uid(), so we don't need to filter by user_id
-  const { data: aiProvider, error } = await supabase
-    .from("ai_providers")
-    .select("*")
-    .eq("is_active", true)
-    .single();
-  
-  if (!aiProvider) {
+  if (!response.ok) {
+    const error = await response.json();
     console.error("AI provider fetch error:", error);
-    console.error("No AI provider found for authenticated user:", user?.id);
     throw new Error("No active AI provider configured. Please set up AI in Settings.");
   }
+  
+  const aiProvider = await response.json();
   
   // Build the prompt based on tone
   const toneInstructions = {
@@ -86,7 +78,7 @@ BODY: [email body here]`;
           "Authorization": `Bearer ${aiProvider.api_key}`
         },
         body: JSON.stringify({
-          model: aiProvider.model_name || "gpt-4o-mini",
+          model: aiProvider.active_model || "gpt-4o-mini",
           messages: [
             { role: "system", content: "You are an expert cold email copywriter." },
             { role: "user", content: prompt }
@@ -112,7 +104,7 @@ BODY: [email body here]`;
           "anthropic-version": "2023-06-01"
         },
         body: JSON.stringify({
-          model: aiProvider.model_name || "claude-3-5-sonnet-20241022",
+          model: aiProvider.active_model || "claude-3-5-sonnet-20241022",
           max_tokens: 500,
           messages: [
             { role: "user", content: prompt }
@@ -128,6 +120,14 @@ BODY: [email body here]`;
       aiResponse = data.content[0].text;
       
     } else if (aiProvider.provider === "groq") {
+      console.log('=== GROQ API CALL ===');
+      console.log('Model:', aiProvider.active_model || "llama-3.3-70b-versatile");
+      console.log('API Key present:', !!aiProvider.api_key);
+      console.log('API Key length:', aiProvider.api_key?.length);
+      console.log('API Key prefix:', aiProvider.api_key?.substring(0, 10));
+      console.log('Prompt length:', prompt.length);
+      console.log('====================');
+      
       const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -135,7 +135,7 @@ BODY: [email body here]`;
           "Authorization": `Bearer ${aiProvider.api_key}`
         },
         body: JSON.stringify({
-          model: aiProvider.model_name || "llama-3.3-70b-versatile",
+          model: aiProvider.active_model || "llama-3.3-70b-versatile",
           messages: [
             { role: "system", content: "You are an expert cold email copywriter." },
             { role: "user", content: prompt }
@@ -146,7 +146,57 @@ BODY: [email body here]`;
       });
       
       if (!response.ok) {
-        throw new Error(`Groq API error: ${response.statusText}`);
+        let errorText = '';
+        let errorJson = null;
+        
+        try {
+          errorText = await response.text();
+          console.log('Raw error text from Groq:', errorText);
+          
+          if (errorText) {
+            try {
+              errorJson = JSON.parse(errorText);
+              console.log('Parsed error JSON:', JSON.stringify(errorJson, null, 2));
+            } catch (parseError) {
+              console.log('Could not parse error as JSON');
+            }
+          }
+        } catch (e) {
+          console.error('Error reading response text:', e);
+        }
+        
+        // Log each piece separately for better visibility
+        console.error('=== GROQ API ERROR ===');
+        console.error('Status:', response.status);
+        console.error('Status Text:', response.statusText);
+        console.error('Error Text:', errorText);
+        console.error('Error JSON:', errorJson);
+        console.error('Response Headers:', Object.fromEntries(response.headers.entries()));
+        console.error('API Key (first 10 chars):', aiProvider.api_key?.substring(0, 10));
+        console.error('Model:', aiProvider.active_model || "llama-3.3-70b-versatile");
+        console.error('======================');
+        
+        // Build detailed error message
+        let errorMessage = 'Unknown error';
+        
+        if (errorJson?.error?.message) {
+          errorMessage = errorJson.error.message;
+        } else if (errorText) {
+          errorMessage = errorText;
+        } else if (response.statusText) {
+          errorMessage = response.statusText;
+        }
+        
+        // Add helpful context based on status code
+        if (response.status === 401) {
+          errorMessage += ' - Check your Groq API key is valid';
+        } else if (response.status === 429) {
+          errorMessage += ' - Rate limit exceeded. Wait a moment and try again';
+        } else if (response.status === 404) {
+          errorMessage += ' - Model not found. Check the model name is correct';
+        }
+        
+        throw new Error(`Groq API error (${response.status}): ${errorMessage}`);
       }
       
       const data = await response.json();
