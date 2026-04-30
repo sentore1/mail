@@ -103,6 +103,8 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
   const [isSending, setIsSending] = useState(false);
   const [yourCompany, setYourCompany] = useState("");
   const [yourService, setYourService] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [categories, setCategories] = useState<string[]>([]);
 
   const supabase = createClient();
 
@@ -120,8 +122,23 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
       .select("*")
       .eq("user_id", userId)
       .order("created_at", { ascending: false });
-    if (data) setLeads(data as Lead[]);
+    if (data) {
+      setLeads(data as Lead[]);
+      
+      // Extract unique categories from niche
+      const uniqueCategories = [...new Set(
+        data
+          .map((l: any) => l.niche)
+          .filter(Boolean)
+      )] as string[];
+      setCategories(uniqueCategories);
+    }
   };
+  
+  // Filter leads by category
+  const filteredLeads = categoryFilter === "all" 
+    ? leads 
+    : leads.filter((l: any) => l.niche === categoryFilter);
 
   const generateEmail = async () => {
     if (!selectedLead) {
@@ -219,10 +236,16 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
   };
 
   const selectAllLeads = () => {
-    if (selectedLeadIds.size === leads.length) {
-      setSelectedLeadIds(new Set());
+    if (selectedLeadIds.size === filteredLeads.length && filteredLeads.every(l => selectedLeadIds.has(l.id))) {
+      // Deselect all filtered leads
+      const newSet = new Set(selectedLeadIds);
+      filteredLeads.forEach(l => newSet.delete(l.id));
+      setSelectedLeadIds(newSet);
     } else {
-      setSelectedLeadIds(new Set(leads.map(l => l.id)));
+      // Select all filtered leads
+      const newSet = new Set(selectedLeadIds);
+      filteredLeads.forEach(l => newSet.add(l.id));
+      setSelectedLeadIds(newSet);
     }
   };
 
@@ -421,6 +444,49 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
             </div>
           </div>
 
+          {/* Category Filter */}
+          {categories.length > 0 && (
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Filter by Category
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setCategoryFilter("all")}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                  style={{
+                    background: categoryFilter === "all" ? "#2563EB" : "#FFFFFF",
+                    borderWidth: "2px",
+                    borderStyle: "solid",
+                    borderColor: categoryFilter === "all" ? "#2563EB" : "#E5E7EB",
+                    color: categoryFilter === "all" ? "#FFFFFF" : "#6B7280"
+                  }}
+                >
+                  All ({leads.length})
+                </button>
+                {categories.map((cat) => {
+                  const count = leads.filter((l: any) => l.niche === cat).length;
+                  return (
+                    <button
+                      key={cat}
+                      onClick={() => setCategoryFilter(cat)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                      style={{
+                        background: categoryFilter === cat ? "#2563EB" : "#FFFFFF",
+                        borderWidth: "2px",
+                        borderStyle: "solid",
+                        borderColor: categoryFilter === cat ? "#2563EB" : "#E5E7EB",
+                        color: categoryFilter === cat ? "#FFFFFF" : "#6B7280"
+                      }}
+                    >
+                      {cat} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Lead Selection */}
           <div className="border border-gray-200 rounded-xl overflow-hidden">
             <div className="bg-gray-50 px-4 py-3 flex items-center justify-between border-b border-gray-200">
@@ -431,16 +497,19 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
                 onClick={selectAllLeads}
                 className="text-sm text-blue-600 hover:text-blue-700 font-medium"
               >
-                {selectedLeadIds.size === leads.length ? "Deselect All" : "Select All"}
+                {selectedLeadIds.size === filteredLeads.length ? "Deselect All" : "Select All"}
               </button>
             </div>
             <div className="max-h-96 overflow-y-auto">
-              {leads.length === 0 ? (
+              {filteredLeads.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">
-                  No leads in CRM. Add leads from the Scraper.
+                  {categoryFilter === "all" 
+                    ? "No leads in CRM. Add leads from the Scraper."
+                    : `No leads found in "${categoryFilter}" category.`
+                  }
                 </div>
               ) : (
-                leads.map((lead) => (
+                filteredLeads.map((lead) => (
                   <div
                     key={lead.id}
                     onClick={() => toggleLeadSelection(lead.id)}

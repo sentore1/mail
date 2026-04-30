@@ -71,20 +71,30 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
   const supabase = createClient();
 
   const fetchLeads = useCallback(async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("leads")
       .select("*")
       .eq("user_id", userId)
       .order("created_at", { ascending: false });
+    
+    if (error) {
+      console.error('Error fetching leads:', error);
+    }
+    
     if (data) {
       setLeads(data as Lead[]);
       
-      // Extract unique categories
+      // Extract unique categories from niche field (fallback since category column has schema issues)
       const uniqueCategories = [...new Set(
         data
-          .map((l: any) => l.category)
+          .map((l: any) => l.niche)
           .filter(Boolean)
       )] as string[];
+      
+      console.log('📊 Categories found (from niche):', uniqueCategories);
+      console.log('📊 Total leads:', data.length);
+      console.log('📊 Sample lead:', data[0]);
+      
       setCategories(uniqueCategories);
     }
     setLoading(false);
@@ -174,7 +184,7 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
 
   const filteredLeads = leads.filter((l) => {
     const statusMatch = filterStatus === "all" || l.status === filterStatus;
-    const categoryMatch = filterCategory === "all" || (l as any).category === filterCategory;
+    const categoryMatch = filterCategory === "all" || (l as any).niche === filterCategory;
     return statusMatch && categoryMatch;
   });
 
@@ -271,15 +281,16 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
               className="px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all"
               style={{
                 background: filterCategory === "all" ? "#8B5CF6" : "#FFFFFF",
+                borderWidth: "2px",
+                borderStyle: "solid",
                 borderColor: filterCategory === "all" ? "#8B5CF6" : "#E5E7EB",
-                color: filterCategory === "all" ? "#FFFFFF" : "#6B7280",
-                border: "2px solid"
+                color: filterCategory === "all" ? "#FFFFFF" : "#6B7280"
               }}
             >
               All Categories
             </button>
             {categories.map((cat) => {
-              const count = leads.filter((l: any) => l.category === cat).length;
+              const count = leads.filter((l: any) => l.niche === cat).length;
               return (
                 <button
                   key={cat}
@@ -287,9 +298,10 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
                   className="px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all"
                   style={{
                     background: filterCategory === cat ? "#8B5CF6" : "#FFFFFF",
+                    borderWidth: "2px",
+                    borderStyle: "solid",
                     borderColor: filterCategory === cat ? "#8B5CF6" : "#E5E7EB",
-                    color: filterCategory === cat ? "#FFFFFF" : "#6B7280",
-                    border: "2px solid"
+                    color: filterCategory === cat ? "#FFFFFF" : "#6B7280"
                   }}
                 >
                   {cat} ({count})
@@ -360,7 +372,7 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
           // Kanban view
           <div className="flex gap-4 min-w-max pb-2">
             {STATUSES.map((status, index) => {
-              const columnLeads = leads.filter((l) => l.status === status.value);
+              const columnLeads = filteredLeads.filter((l) => l.status === status.value);
               const isOver = dragOver === status.value;
               const isLastColumn = index === STATUSES.length - 1;
 
