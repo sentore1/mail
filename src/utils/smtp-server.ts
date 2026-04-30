@@ -4,7 +4,7 @@
  */
 
 import nodemailer from 'nodemailer';
-import { createClient } from '../../supabase/server';
+import { createServiceClient } from '../../supabase/service';
 import type { SMTPAccount } from './smtp-manager';
 
 export class SMTPManager {
@@ -15,7 +15,7 @@ export class SMTPManager {
    * Load SMTP accounts from database
    */
   async loadAccounts(userId: string): Promise<void> {
-    const supabase = await createClient();
+    const supabase = createServiceClient();
     
     const { data, error } = await supabase
       .from('smtp_accounts')
@@ -45,7 +45,7 @@ export class SMTPManager {
    * Reset daily counters for accounts that haven't been reset today
    */
   async resetDailyCounters(): Promise<void> {
-    const supabase = await createClient();
+    const supabase = createServiceClient();
     const today = new Date().toISOString().split('T')[0];
     
     for (const account of this.accounts) {
@@ -139,7 +139,7 @@ export class SMTPManager {
       });
 
       // Update sent count
-      const supabase = await createClient();
+      const supabase = createServiceClient();
       await supabase
         .from('smtp_accounts')
         .update({
@@ -157,7 +157,7 @@ export class SMTPManager {
       console.error(`Error sending email with account ${account.email}:`, error);
       
       // Mark account as error if it fails
-      const supabase = await createClient();
+      const supabase = createServiceClient();
       await supabase
         .from('smtp_accounts')
         .update({ status: 'error' })
