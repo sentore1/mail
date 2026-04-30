@@ -176,7 +176,7 @@ export const scrapeLeadsAction = async (niche: string, location: string) => {
     
     // Method 1: Try Puppeteer scraping (no API needed, most accurate)
     console.log('Attempting Puppeteer scraping (Google Maps, Yelp, Yellow Pages)...');
-    const puppeteerLeads = await scrapeWithoutAPI(niche, location);
+    const puppeteerLeads = await scrapeWithoutAPI(niche, location, 1000);
     
     if (puppeteerLeads.length > 0) {
       console.log(`✓ Puppeteer scraping successful: ${puppeteerLeads.length} leads found`);

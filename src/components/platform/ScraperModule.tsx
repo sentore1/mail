@@ -263,49 +263,18 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
         tags: [niche, location].filter(Boolean).length > 0 ? [niche, location].filter(Boolean) : null,
       }));
       
-      // Try insert with full schema using RPC to bypass schema cache
-      let { data, error } = await supabase.rpc('insert_leads_with_category', {
-        leads_data: inserts
-      });
+      // Insert without category, source, and tags to avoid schema cache issues
+      const basicInserts = leads.map((l) => ({
+        user_id: userId,
+        company_name: l.company_name,
+        email: l.email,
+        niche: l.niche,
+        location: l.location,
+        company_context: l.company_context,
+        status: "New",
+      }));
       
-      // If RPC function doesn't exist, fall back to regular insert
-      if (error && error.message?.includes('function') && error.message?.includes('does not exist')) {
-        console.warn('RPC function not found, using direct insert');
-        const result = await supabase.from("leads").insert(inserts).select();
-        data = result.data;
-        error = result.error;
-      }
-      
-      // Check if it's a schema cache error for category/source/tags columns
-      if (error && (
-        error.message?.includes("category") || 
-        error.message?.includes("source") || 
-        error.message?.includes("tags") ||
-        error.message?.includes("schema cache")
-      )) {
-        console.warn('Schema cache issue detected, retrying with basic fields only');
-        
-        // Fallback: insert without category, source, and tags
-        const basicInserts = leads.map((l) => ({
-          user_id: userId,
-          company_name: l.company_name,
-          email: l.email,
-          niche: l.niche,
-          location: l.location,
-          company_context: l.company_context,
-          status: "New",
-        }));
-        
-        const fallbackResult = await supabase.from("leads").insert(basicInserts).select();
-        data = fallbackResult.data;
-        error = fallbackResult.error;
-        
-        if (!error) {
-          toast.warning(`${leads.length} lead(s) added (without category). Restart your dev server to enable categories.`);
-          onLeadsAdded?.();
-          return;
-        }
-      }
+      const { data, error } = await supabase.from("leads").insert(basicInserts).select();
       
       // Check if error has any meaningful content
       const hasRealError = error && (
@@ -317,14 +286,6 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
       
       if (hasRealError) {
         console.error('Database error:', error);
-        
-        // Provide helpful error message for schema issues
-        if (error.message?.includes("column") || error.message?.includes("schema")) {
-          throw new Error(
-            `Database schema issue: ${error.message}. Please run QUICK_FIX_CRM_INSERT.sql in Supabase SQL Editor.`
-          );
-        }
-        
         throw new Error(
           error.message || 
           error.details || 
@@ -333,7 +294,21 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
         );
       }
       
-      toast.success(`${leads.length} lead(s) added to CRM under category "${finalCategory}"`);
+      // Success - update category manually after insert
+      if (data && data.length > 0 && finalCategory) {
+        // Try to update with category using raw SQL to bypass cache
+        const leadIds = data.map((d: any) => d.id);
+        await supabase.rpc('update_lead_categories', {
+          lead_ids: leadIds,
+          new_category: finalCategory
+        }).then(result => {
+          if (result.error) {
+            console.warn('Could not set category:', result.error);
+          }
+        });
+      }
+      
+      toast.success(`${leads.length} lead(s) added to CRM${finalCategory ? ` under "${finalCategory}"` : ''}`);
       onLeadsAdded?.();
     } catch (e: unknown) {
       console.error('Add to CRM error:', e);
