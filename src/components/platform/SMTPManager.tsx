@@ -9,14 +9,13 @@ interface SMTPManagerProps {
   userId: string;
 }
 
-const SMTP_PROVIDERS = [
-  { name: "Gmail", host: "smtp.gmail.com", port: 587, limit: 100 },
-  { name: "Outlook", host: "smtp-mail.outlook.com", port: 587, limit: 100 },
-  { name: "SendGrid", host: "smtp.sendgrid.net", port: 587, limit: 100 },
-  { name: "Mailgun", host: "smtp.mailgun.org", port: 587, limit: 100 },
-  { name: "SMTP2GO", host: "mail.smtp2go.com", port: 2525, limit: 100 },
-  { name: "Custom", host: "", port: 587, limit: 100 },
-];
+// Only Gmail SMTP is supported
+const GMAIL_SMTP = {
+  name: "Gmail",
+  host: "smtp.gmail.com",
+  port: 587,
+  limit: 500, // Gmail allows 500 emails per day for free accounts
+};
 
 export default function SMTPManager({ userId }: SMTPManagerProps) {
   const [accounts, setAccounts] = useState<any[]>([]);
@@ -27,11 +26,11 @@ export default function SMTPManager({ userId }: SMTPManagerProps) {
   const [formData, setFormData] = useState({
     provider: "Gmail",
     email: "",
-    host: "smtp.gmail.com",
-    port: 587,
+    host: GMAIL_SMTP.host,
+    port: GMAIL_SMTP.port,
     user: "",
     password: "",
-    daily_limit: 100,
+    daily_limit: GMAIL_SMTP.limit,
   });
 
   useEffect(() => {
@@ -46,17 +45,17 @@ export default function SMTPManager({ userId }: SMTPManagerProps) {
     }
   };
 
-  const handleProviderChange = (provider: string) => {
-    const selected = SMTP_PROVIDERS.find(p => p.name === provider);
-    if (selected) {
-      setFormData({
-        ...formData,
-        provider,
-        host: selected.host,
-        port: selected.port,
-        daily_limit: selected.limit,
-      });
+  const handleEmailChange = (email: string) => {
+    // Validate that it's a Gmail address
+    if (email && !email.toLowerCase().endsWith('@gmail.com')) {
+      toast.error("Only Gmail addresses are supported");
+      return;
     }
+    setFormData({
+      ...formData,
+      email,
+      user: email, // Use email as username
+    });
   };
 
   const handleAddAccount = async (e: React.FormEvent) => {
@@ -85,16 +84,16 @@ export default function SMTPManager({ userId }: SMTPManagerProps) {
       console.log('Add SMTP result:', result);
 
       if (result.success) {
-        toast.success("SMTP account added successfully");
+        toast.success("Gmail SMTP account added successfully");
         setShowAddForm(false);
         setFormData({
           provider: "Gmail",
           email: "",
-          host: "smtp.gmail.com",
-          port: 587,
+          host: GMAIL_SMTP.host,
+          port: GMAIL_SMTP.port,
           user: "",
           password: "",
-          daily_limit: 100,
+          daily_limit: GMAIL_SMTP.limit,
         });
         loadAccounts();
       } else {
@@ -127,9 +126,9 @@ export default function SMTPManager({ userId }: SMTPManagerProps) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">SMTP Accounts</h2>
+          <h2 className="text-2xl font-bold text-gray-900">Gmail SMTP Accounts</h2>
           <p className="text-sm text-gray-600 mt-1">
-            Manage your email sending accounts
+            Manage your Gmail accounts for sending emails
           </p>
         </div>
         <button
@@ -174,102 +173,83 @@ export default function SMTPManager({ userId }: SMTPManagerProps) {
       {/* Add Account Form */}
       {showAddForm && (
         <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Add New SMTP Account</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Add Gmail SMTP Account</h3>
+          <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-sm text-blue-800">
+              <strong>Note:</strong> Only Gmail accounts are supported. You'll need to use an App Password, not your regular Gmail password.
+              <a 
+                href="https://support.google.com/accounts/answer/185833" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="underline ml-1"
+              >
+                Learn how to create an App Password
+              </a>
+            </p>
+          </div>
           <form onSubmit={handleAddAccount} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
+              <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Provider
-                </label>
-                <select
-                  value={formData.provider}
-                  onChange={(e) => handleProviderChange(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  {SMTP_PROVIDERS.map((p) => (
-                    <option key={p.name} value={p.name}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Email Address
+                  Gmail Address *
                 </label>
                 <input
                   type="email"
                   value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  onChange={(e) => handleEmailChange(e.target.value)}
+                  placeholder="your-email@gmail.com"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   required
+                  pattern=".*@gmail\.com$"
+                  title="Please enter a valid Gmail address"
                 />
               </div>
 
-              <div>
+              <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  SMTP Host
-                </label>
-                <input
-                  type="text"
-                  value={formData.host}
-                  onChange={(e) => setFormData({ ...formData, host: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Port
-                </label>
-                <input
-                  type="number"
-                  value={formData.port}
-                  onChange={(e) => setFormData({ ...formData, port: parseInt(e.target.value) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Username (optional)
-                </label>
-                <input
-                  type="text"
-                  value={formData.user}
-                  onChange={(e) => setFormData({ ...formData, user: e.target.value })}
-                  placeholder="Leave empty to use email"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Password / App Password
+                  App Password *
                 </label>
                 <input
                   type="password"
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  placeholder="16-character app password"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   required
                 />
+                <p className="text-xs text-gray-500 mt-1">
+                  Use a 16-character App Password from your Google Account settings
+                </p>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Daily Limit
+                  Daily Sending Limit
                 </label>
                 <input
                   type="number"
                   value={formData.daily_limit}
                   onChange={(e) => setFormData({ ...formData, daily_limit: parseInt(e.target.value) })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  min="1"
+                  max="500"
                   required
                 />
+                <p className="text-xs text-gray-500 mt-1">
+                  Gmail allows up to 500 emails per day
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  SMTP Configuration
+                </label>
+                <div className="px-3 py-2 bg-gray-100 border border-gray-300 rounded-lg text-sm text-gray-600">
+                  {GMAIL_SMTP.host}:{GMAIL_SMTP.port}
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Automatically configured for Gmail
+                </p>
               </div>
             </div>
 
@@ -286,7 +266,7 @@ export default function SMTPManager({ userId }: SMTPManagerProps) {
                 disabled={loading}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
               >
-                {loading ? "Adding..." : "Add Account"}
+                {loading ? "Adding..." : "Add Gmail Account"}
               </button>
             </div>
           </form>
@@ -356,8 +336,8 @@ export default function SMTPManager({ userId }: SMTPManagerProps) {
         {accounts.length === 0 && (
           <div className="text-center py-12">
             <Mail size={48} className="mx-auto text-gray-300 mb-4" />
-            <p className="text-gray-600">No SMTP accounts configured</p>
-            <p className="text-sm text-gray-500 mt-1">Add your first account to start sending emails</p>
+            <p className="text-gray-600">No Gmail accounts configured</p>
+            <p className="text-sm text-gray-500 mt-1">Add your first Gmail account to start sending emails</p>
           </div>
         )}
       </div>

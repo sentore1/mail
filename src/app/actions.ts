@@ -418,19 +418,47 @@ export const addSMTPAccountAction = async (
 
     const supabase = await createClient();
     
+    // Verify user is authenticated
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      console.error('Authentication error:', authError);
+      return {
+        success: false,
+        error: 'You must be logged in to add SMTP accounts'
+      };
+    }
+    
+    if (user.id !== userId) {
+      console.error('User ID mismatch:', { authUserId: user.id, providedUserId: userId });
+      return {
+        success: false,
+        error: 'User ID mismatch. Please refresh and try again.'
+      };
+    }
+    
+    // Validate Gmail email
+    if (!account.email.toLowerCase().endsWith('@gmail.com')) {
+      return {
+        success: false,
+        error: 'Only Gmail addresses are supported'
+      };
+    }
+    
     const insertData = {
       user_id: userId,
       email: account.email,
       host: account.host,
       port: account.port,
-      user_name: account.user,
+      user_name: account.user || account.email,
       password: account.password,
       provider: account.provider,
       daily_limit: account.daily_limit,
-      status: 'active'
+      status: 'active',
+      sent_today: 0
     };
 
-    console.log('Inserting into smtp_accounts:', insertData);
+    console.log('Inserting into smtp_accounts:', { ...insertData, password: '***' });
     
     const { data, error } = await supabase
       .from('smtp_accounts')
@@ -439,11 +467,35 @@ export const addSMTPAccountAction = async (
       .single();
     
     if (error) {
-      console.error('Supabase insert error:', error);
-      throw error;
+      console.error('Supabase insert error:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      });
+      
+      // Provide more specific error messages
+      if (error.code === '23505') {
+        return {
+          success: false,
+          error: 'This email address is already added to your SMTP accounts'
+        };
+      }
+      
+      if (error.code === '42501') {
+        return {
+          success: false,
+          error: 'Permission denied. Please check your account permissions.'
+        };
+      }
+      
+      return {
+        success: false,
+        error: error.message || 'Failed to add SMTP account'
+      };
     }
 
-    console.log('SMTP account added successfully:', data);
+    console.log('SMTP account added successfully:', data?.id);
     
     return {
       success: true,
@@ -462,17 +514,38 @@ export const getSMTPAccountsAction = async (userId: string) => {
   try {
     const supabase = await createClient();
     
+    // Verify user is authenticated
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      console.error('Authentication error in getSMTPAccountsAction:', authError);
+      return {
+        success: false,
+        accounts: [],
+        capacity: { total: 0, used: 0, remaining: 0 },
+        error: 'Authentication required'
+      };
+    }
+    
     const { data, error } = await supabase
       .from('smtp_accounts')
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
     
-    if (error) throw error;
+    if (error) {
+      console.error('Error fetching SMTP accounts:', error);
+      return {
+        success: false,
+        accounts: [],
+        capacity: { total: 0, used: 0, remaining: 0 },
+        error: error.message
+      };
+    }
     
     // Calculate total capacity
     const totalCapacity = data?.reduce((sum, acc) => sum + acc.daily_limit, 0) || 0;
-    const totalUsed = data?.reduce((sum, acc) => sum + acc.sent_today, 0) || 0;
+    const totalUsed = data?.reduce((sum, acc) => sum + (acc.sent_today || 0), 0) || 0;
     
     return {
       success: true,
@@ -487,6 +560,8 @@ export const getSMTPAccountsAction = async (userId: string) => {
     console.error('Get SMTP accounts error:', error);
     return {
       success: false,
+      accounts: [],
+      capacity: { total: 0, used: 0, remaining: 0 },
       error: error instanceof Error ? error.message : 'Failed to get SMTP accounts'
     };
   }
