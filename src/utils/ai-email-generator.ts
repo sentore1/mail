@@ -19,15 +19,22 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{ 
   
   const supabase = createClient();
   
+  // Debug: Check what user is authenticated
+  const { data: { user } } = await supabase.auth.getUser();
+  console.log("Authenticated user ID:", user?.id);
+  console.log("Passed userId param:", userId);
+  
   // Fetch AI provider settings
-  const { data: aiProvider } = await supabase
+  // RLS policies automatically filter by auth.uid(), so we don't need to filter by user_id
+  const { data: aiProvider, error } = await supabase
     .from("ai_providers")
     .select("*")
-    .eq("user_id", userId)
     .eq("is_active", true)
     .single();
   
   if (!aiProvider) {
+    console.error("AI provider fetch error:", error);
+    console.error("No AI provider found for authenticated user:", user?.id);
     throw new Error("No active AI provider configured. Please set up AI in Settings.");
   }
   
