@@ -25,30 +25,30 @@ interface CRMModuleProps {
 }
 
 const STATUSES: { value: LeadStatus; color: string; dot: string }[] = [
-  { value: "New", color: "#00D4FF", dot: "status-dot-cyan" },
-  { value: "Email Sent", color: "#F5A623", dot: "status-dot-amber" },
-  { value: "Replied", color: "#9B6DFF", dot: "status-dot-cyan" },
-  { value: "Interested", color: "#00E87A", dot: "status-dot-green" },
-  { value: "Closed", color: "#00E87A", dot: "status-dot-green" },
-  { value: "Dead", color: "#FF4D6D", dot: "status-dot-rose" },
+  { value: "New", color: "#2563EB", dot: "status-dot-blue" },
+  { value: "Email Sent", color: "#F59E0B", dot: "status-dot-amber" },
+  { value: "Replied", color: "#8B5CF6", dot: "status-dot-purple" },
+  { value: "Interested", color: "#10B981", dot: "status-dot-green" },
+  { value: "Closed", color: "#059669", dot: "status-dot-emerald" },
+  { value: "Dead", color: "#EF4444", dot: "status-dot-red" },
 ];
 
 const STATUS_COLORS: Record<LeadStatus, string> = {
-  New: "#00D4FF",
-  "Email Sent": "#F5A623",
-  Replied: "#9B6DFF",
-  Interested: "#00E87A",
-  Closed: "#00E87A",
-  Dead: "#FF4D6D",
+  New: "#2563EB",
+  "Email Sent": "#F59E0B",
+  Replied: "#8B5CF6",
+  Interested: "#10B981",
+  Closed: "#059669",
+  Dead: "#EF4444",
 };
 
 const STATUS_BG: Record<LeadStatus, string> = {
-  New: "rgba(0,212,255,0.08)",
-  "Email Sent": "rgba(245,166,35,0.08)",
-  Replied: "rgba(155,109,255,0.08)",
-  Interested: "rgba(0,232,122,0.08)",
-  Closed: "rgba(0,232,122,0.08)",
-  Dead: "rgba(255,77,109,0.08)",
+  New: "#EFF6FF",
+  "Email Sent": "#FEF3C7",
+  Replied: "#F3E8FF",
+  Interested: "#D1FAE5",
+  Closed: "#D1FAE5",
+  Dead: "#FEE2E2",
 };
 
 interface LeadWithEmails extends Lead {
@@ -196,30 +196,30 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
   return (
     <div className="flex flex-col h-full">
       {/* Stats Strip */}
-      <div className="px-6 pt-5 pb-4">
+      <div className="px-6 pt-5 pb-4" style={{ background: "#F9FAFB" }}>
         <div className="grid grid-cols-4 gap-3">
           {[
-            { label: "Total Leads", value: stats.total, icon: Users, color: "#00D4FF" },
-            { label: "Emails Sent", value: stats.emailSent, icon: Send, color: "#F5A623" },
-            { label: "Interested", value: stats.interested, icon: TrendingUp, color: "#00E87A" },
-            { label: "Closed", value: stats.closed, icon: MessageSquare, color: "#9B6DFF" },
+            { label: "Total Leads", value: stats.total, icon: Users, color: "#2563EB" },
+            { label: "Emails Sent", value: stats.emailSent, icon: Send, color: "#F59E0B" },
+            { label: "Interested", value: stats.interested, icon: TrendingUp, color: "#10B981" },
+            { label: "Closed", value: stats.closed, icon: MessageSquare, color: "#8B5CF6" },
           ].map((stat) => {
             const Icon = stat.icon;
             return (
               <div
                 key={stat.label}
                 className="rounded-xl p-3 flex items-center justify-between"
-                style={{ background: "rgba(16,19,26,0.8)", border: "1px solid #1A1D24" }}
+                style={{ background: "#FFFFFF", border: "1px solid #E5E7EB" }}
               >
                 <div>
-                  <p className="text-[10px] mb-1" style={{ color: "#555", fontFamily: "JetBrains Mono, monospace" }}>
+                  <p className="text-[10px] mb-1" style={{ color: "#6B7280" }}>
                     {stat.label.toUpperCase()}
                   </p>
-                  <p className="text-2xl font-bold" style={{ color: stat.color, fontFamily: "Syne, sans-serif" }}>
+                  <p className="text-2xl font-bold" style={{ color: stat.color }}>
                     {stat.value}
                   </p>
                 </div>
-                <Icon size={18} style={{ color: stat.color + "66" }} />
+                <Icon size={18} style={{ color: stat.color, opacity: 0.4 }} />
               </div>
             );
           })}
@@ -227,7 +227,7 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
       </div>
 
       {/* Filter Bar */}
-      <div className="px-6 pb-4 space-y-3">
+      <div className="px-6 pb-4 space-y-3" style={{ background: "#F9FAFB" }}>
         {/* Status Filter */}
         <div className="flex items-center gap-2 flex-wrap">
           <Filter size={13} style={{ color: "#555" }} />
@@ -265,14 +265,15 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
         {/* Category Filter */}
         {categories.length > 0 && (
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-gray-500 font-medium ml-5">Category:</span>
+            <span className="text-xs font-semibold text-gray-700 ml-5">📁 Category:</span>
             <button
               onClick={() => setFilterCategory("all")}
-              className="px-3 py-1 rounded-full text-[11px] font-medium transition-all bg-white border border-gray-300 hover:border-blue-400"
+              className="px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all"
               style={{
-                background: filterCategory === "all" ? "rgba(139,92,246,0.1)" : "white",
-                borderColor: filterCategory === "all" ? "rgba(139,92,246,0.4)" : "#d1d5db",
-                color: filterCategory === "all" ? "#8B5CF6" : "#666",
+                background: filterCategory === "all" ? "#8B5CF6" : "#FFFFFF",
+                borderColor: filterCategory === "all" ? "#8B5CF6" : "#E5E7EB",
+                color: filterCategory === "all" ? "#FFFFFF" : "#6B7280",
+                border: "2px solid"
               }}
             >
               All Categories
@@ -283,11 +284,12 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
                 <button
                   key={cat}
                   onClick={() => setFilterCategory(cat)}
-                  className="px-3 py-1 rounded-full text-[11px] font-medium transition-all bg-white border hover:border-purple-400"
+                  className="px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all"
                   style={{
-                    background: filterCategory === cat ? "rgba(139,92,246,0.1)" : "white",
-                    borderColor: filterCategory === cat ? "rgba(139,92,246,0.4)" : "#d1d5db",
-                    color: filterCategory === cat ? "#8B5CF6" : "#666",
+                    background: filterCategory === cat ? "#8B5CF6" : "#FFFFFF",
+                    borderColor: filterCategory === cat ? "#8B5CF6" : "#E5E7EB",
+                    color: filterCategory === cat ? "#FFFFFF" : "#6B7280",
+                    border: "2px solid"
                   }}
                 >
                   {cat} ({count})
@@ -299,7 +301,34 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
       </div>
 
       {/* Kanban Board */}
-      <div className="flex-1 px-6 pb-6 overflow-x-auto">
+      <div className="flex-1 px-6 pb-6 overflow-hidden" style={{ background: "#F3F4F6" }}>
+        <style>{`
+          .kanban-scroll {
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding-bottom: 8px;
+          }
+          .kanban-scroll::-webkit-scrollbar {
+            height: 14px;
+          }
+          .kanban-scroll::-webkit-scrollbar-track {
+            background: #E5E7EB;
+            border-radius: 8px;
+            margin: 0 24px;
+          }
+          .kanban-scroll::-webkit-scrollbar-thumb {
+            background: #9CA3AF;
+            border-radius: 8px;
+            border: 3px solid #E5E7EB;
+          }
+          .kanban-scroll::-webkit-scrollbar-thumb:hover {
+            background: #6B7280;
+          }
+          .kanban-scroll::-webkit-scrollbar-thumb:active {
+            background: #4B5563;
+          }
+        `}</style>
+        <div className="kanban-scroll">
         {leads.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
@@ -330,20 +359,26 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
         ) : (
           // Kanban view
           <div className="flex gap-4 min-w-max pb-2">
-            {STATUSES.map((status) => {
+            {STATUSES.map((status, index) => {
               const columnLeads = leads.filter((l) => l.status === status.value);
               const isOver = dragOver === status.value;
+              const isLastColumn = index === STATUSES.length - 1;
 
               return (
                 <div
                   key={status.value}
                   className="flex flex-col gap-3 w-64 flex-shrink-0"
+                  style={{
+                    borderRight: isLastColumn ? "none" : "2px dashed #D1D5DB",
+                    paddingRight: isLastColumn ? "0" : "16px",
+                    marginRight: isLastColumn ? "0" : "16px"
+                  }}
                   onDrop={(e) => handleDrop(e, status.value)}
                   onDragOver={(e) => handleDragOver(e, status.value)}
                   onDragLeave={() => setDragOver(null)}
                 >
                   {/* Column header */}
-                  <div className="flex items-center gap-2 pb-2" style={{ borderBottom: `1px solid ${status.color}22` }}>
+                  <div className="flex items-center gap-2 pb-2" style={{ borderBottom: `2px solid ${status.color}` }}>
                     <div style={{ background: status.color, borderRadius: "50%", width: 6, height: 6, boxShadow: `0 0 6px ${status.color}` }} />
                     <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: status.color, fontFamily: "JetBrains Mono, monospace" }}>
                       {status.value}
@@ -360,8 +395,8 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
                   <div
                     className={`flex flex-col gap-2 min-h-24 rounded-xl p-2 transition-all`}
                     style={{
-                      background: isOver ? `${status.color}08` : "transparent",
-                      border: isOver ? `1px dashed ${status.color}44` : "1px dashed transparent",
+                      background: isOver ? `${status.color}15` : "#F9FAFB",
+                      border: isOver ? `2px dashed ${status.color}` : "2px dashed transparent",
                     }}
                   >
                     {columnLeads.map((lead) => (
@@ -376,8 +411,15 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
                       />
                     ))}
                     {columnLeads.length === 0 && (
-                      <div className="flex items-center justify-center h-16 rounded-lg" style={{ border: "1px dashed #1A1D24" }}>
-                        <p className="text-[10px]" style={{ color: "#333" }}>Drop here</p>
+                      <div className="flex flex-col items-center justify-center h-32 rounded-lg" style={{ border: "2px dashed #D1D5DB", background: "#F9FAFB" }}>
+                        <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" className="mb-2">
+                          <circle cx="20" cy="20" r="3" fill="#D1D5DB"/>
+                          <circle cx="20" cy="10" r="2" fill="#E5E7EB"/>
+                          <circle cx="20" cy="30" r="2" fill="#E5E7EB"/>
+                          <circle cx="10" cy="20" r="2" fill="#E5E7EB"/>
+                          <circle cx="30" cy="20" r="2" fill="#E5E7EB"/>
+                        </svg>
+                        <p className="text-[10px] text-gray-400">Drop cards here</p>
                       </div>
                     )}
                   </div>
@@ -386,29 +428,30 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
             })}
           </div>
         )}
+        </div>
       </div>
 
       {/* Lead Detail Drawer */}
       {drawerLead && (
         <div className="fixed inset-0 z-50" onClick={() => setDrawerLead(null)}>
-          <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }} />
+          <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.4)", backdropFilter: "blur(4px)" }} />
           <div
             className="absolute right-0 top-0 bottom-0 w-full max-w-lg flex flex-col overflow-hidden"
-            style={{ background: "#0A0D14", borderLeft: "1px solid #2A2D35" }}
+            style={{ background: "#FFFFFF", borderLeft: "1px solid #E5E7EB" }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Drawer header */}
-            <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: "1px solid #1A1D24" }}>
+            <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: "1px solid #E5E7EB" }}>
               <div>
-                <h2 className="text-base font-bold" style={{ fontFamily: "Syne, sans-serif", color: "#e8eaed" }}>
+                <h2 className="text-base font-bold" style={{ color: "#111827" }}>
                   {drawerLead.company_name}
                 </h2>
-                <p className="text-xs mt-0.5" style={{ color: "#555", fontFamily: "JetBrains Mono, monospace" }}>
+                <p className="text-xs mt-0.5" style={{ color: "#6B7280" }}>
                   {drawerLead.email}
                 </p>
               </div>
               <button onClick={() => setDrawerLead(null)}>
-                <X size={18} style={{ color: "#555" }} />
+                <X size={18} style={{ color: "#6B7280" }} />
               </button>
             </div>
 
@@ -442,7 +485,7 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
 
               {/* Quick status change */}
               <div>
-                <p className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "#444", fontFamily: "JetBrains Mono, monospace" }}>
+                <p className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "#6B7280" }}>
                   Update Status
                 </p>
                 <div className="flex flex-wrap gap-1.5">
@@ -455,9 +498,9 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
                       }}
                       className="text-[10px] px-2.5 py-1 rounded-full transition-all"
                       style={{
-                        background: drawerLead.status === s.value ? `${s.color}15` : "rgba(255,255,255,0.03)",
-                        border: `1px solid ${drawerLead.status === s.value ? s.color + "44" : "#2A2D35"}`,
-                        color: drawerLead.status === s.value ? s.color : "#666",
+                        background: drawerLead.status === s.value ? STATUS_BG[s.value] : "#F9FAFB",
+                        border: `1px solid ${drawerLead.status === s.value ? s.color : "#E5E7EB"}`,
+                        color: drawerLead.status === s.value ? s.color : "#6B7280",
                       }}
                     >
                       {s.value}
@@ -469,10 +512,10 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
               {/* Company context */}
               {drawerLead.company_context && (
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "#444", fontFamily: "JetBrains Mono, monospace" }}>
+                  <p className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "#6B7280" }}>
                     Company Context
                   </p>
-                  <p className="text-xs leading-relaxed p-3 rounded-lg" style={{ color: "#aaa", background: "rgba(255,255,255,0.03)", border: "1px solid #1A1D24", fontFamily: "Space Grotesk, sans-serif" }}>
+                  <p className="text-xs leading-relaxed p-3 rounded-lg" style={{ color: "#374151", background: "#F9FAFB", border: "1px solid #E5E7EB" }}>
                     {drawerLead.company_context}
                   </p>
                 </div>
@@ -481,7 +524,7 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
               {/* Generated emails */}
               {drawerEmails && drawerEmails.length > 0 && (
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "#444", fontFamily: "JetBrains Mono, monospace" }}>
+                  <p className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "#6B7280" }}>
                     Generated Emails ({drawerEmails.length})
                   </p>
                   <div className="flex flex-col gap-2">
@@ -489,17 +532,17 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
                       <div
                         key={em.id}
                         className="p-3 rounded-lg"
-                        style={{ background: "rgba(255,255,255,0.03)", border: "1px solid #1A1D24" }}
+                        style={{ background: "#F9FAFB", border: "1px solid #E5E7EB" }}
                       >
                         <div className="flex items-center justify-between mb-1">
-                          <p className="text-xs font-medium" style={{ color: "#e8eaed", fontFamily: "Space Grotesk, sans-serif" }}>
+                          <p className="text-xs font-medium" style={{ color: "#111827" }}>
                             {em.subject}
                           </p>
-                          <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ color: "#F5A623", background: "rgba(245,166,35,0.08)", fontFamily: "JetBrains Mono, monospace" }}>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ color: "#F59E0B", background: "#FEF3C7" }}>
                             {em.tone}
                           </span>
                         </div>
-                        <p className="text-[10px] truncate" style={{ color: "#555", fontFamily: "JetBrains Mono, monospace" }}>
+                        <p className="text-[10px] truncate" style={{ color: "#6B7280" }}>
                           {em.model_used}
                         </p>
                       </div>
@@ -510,7 +553,7 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
 
               {/* Notes */}
               <div>
-                <p className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "#444", fontFamily: "JetBrains Mono, monospace" }}>
+                <p className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "#6B7280" }}>
                   Notes
                 </p>
                 <textarea
@@ -520,10 +563,9 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
                   placeholder="Add notes about this lead..."
                   className="w-full px-3 py-2.5 rounded-lg text-xs outline-none resize-none"
                   style={{
-                    background: "rgba(255,255,255,0.03)",
-                    border: "1px solid #2A2D35",
-                    color: "#aaa",
-                    fontFamily: "Space Grotesk, sans-serif",
+                    background: "#F9FAFB",
+                    border: "1px solid #E5E7EB",
+                    color: "#374151",
                     lineHeight: "1.6",
                   }}
                 />
@@ -531,7 +573,7 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
                   onClick={saveNotes}
                   disabled={savingNotes}
                   className="mt-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
-                  style={{ background: "rgba(0,232,122,0.08)", border: "1px solid rgba(0,232,122,0.2)", color: "#00E87A" }}
+                  style={{ background: "#D1FAE5", border: "1px solid #10B981", color: "#059669" }}
                 >
                   {savingNotes ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
                   Save Notes
@@ -540,11 +582,11 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
             </div>
 
             {/* Drawer footer */}
-            <div className="px-6 py-4 flex gap-2" style={{ borderTop: "1px solid #1A1D24" }}>
+            <div className="px-6 py-4 flex gap-2" style={{ borderTop: "1px solid #E5E7EB" }}>
               <button
                 onClick={() => { onWriteEmail?.(drawerLead); setDrawerLead(null); }}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium"
-                style={{ background: "rgba(0,212,255,0.1)", border: "1px solid rgba(0,212,255,0.3)", color: "#00D4FF" }}
+                style={{ background: "#EFF6FF", border: "1px solid #2563EB", color: "#2563EB" }}
               >
                 <Mail size={14} />
                 Generate Email
@@ -579,31 +621,48 @@ function LeadCard({
       onDragEnd={onDragEnd}
       className="rounded-xl p-3 cursor-grab active:cursor-grabbing transition-all group"
       style={{
-        background: isDragging ? "rgba(0,212,255,0.08)" : "rgba(16,19,26,0.9)",
-        border: "1px solid #2A2D35",
+        background: isDragging ? "rgba(37,99,235,0.08)" : "#FFFFFF",
+        border: "1px solid #E5E7EB",
         opacity: isDragging ? 0.5 : 1,
         transform: isDragging ? "rotate(1deg)" : undefined,
       }}
       onMouseEnter={(e) => {
-        (e.currentTarget as HTMLElement).style.borderColor = "#2A2D3588";
+        (e.currentTarget as HTMLElement).style.borderColor = "#2563EB";
         (e.currentTarget as HTMLElement).style.transform = "translateY(-1px)";
       }}
       onMouseLeave={(e) => {
-        (e.currentTarget as HTMLElement).style.borderColor = "#2A2D35";
+        (e.currentTarget as HTMLElement).style.borderColor = "#E5E7EB";
         (e.currentTarget as HTMLElement).style.transform = "";
       }}
     >
-      <p className="text-xs font-semibold leading-tight" style={{ color: "#e8eaed", fontFamily: "Space Grotesk, sans-serif" }}>
+      <p className="text-xs font-semibold leading-tight" style={{ color: "#111827" }}>
         {lead.company_name}
       </p>
       {lead.email && (
-        <p className="text-[10px] mt-1 truncate" style={{ color: "#00D4FF", fontFamily: "JetBrains Mono, monospace" }}>
+        <p className="text-[10px] mt-1 truncate" style={{ color: "#2563EB" }}>
           {lead.email}
         </p>
       )}
-      <div className="flex items-center gap-2 mt-2">
+      <div className="flex items-center gap-2 mt-2 flex-wrap">
+        {/* Status Badge */}
+        <span 
+          className="text-[9px] px-2 py-0.5 rounded-full font-medium"
+          style={{ 
+            background: STATUS_BG[lead.status], 
+            color: STATUS_COLORS[lead.status],
+            border: `1px solid ${STATUS_COLORS[lead.status]}33`
+          }}
+        >
+          {lead.status}
+        </span>
+        {/* Category Badge */}
+        {(lead as any).category && (
+          <span className="text-[9px] px-2 py-0.5 rounded-full font-medium" style={{ background: "#F3E8FF", color: "#8B5CF6", border: "1px solid #8B5CF633" }}>
+            📁 {(lead as any).category}
+          </span>
+        )}
         {lead.niche && (
-          <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: "rgba(0,212,255,0.06)", color: "#555" }}>
+          <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: "rgba(37,99,235,0.1)", color: "#2563EB" }}>
             {lead.niche}
           </span>
         )}
@@ -614,7 +673,7 @@ function LeadCard({
         <button
           onClick={(e) => { e.stopPropagation(); onOpen(lead); }}
           className="text-[9px] px-1.5 py-0.5 rounded flex items-center gap-0.5 transition-colors"
-          style={{ background: "rgba(255,255,255,0.05)", color: "#777" }}
+          style={{ background: "#F3F4F6", color: "#6B7280" }}
         >
           <ChevronRight size={9} />
           View
@@ -622,7 +681,7 @@ function LeadCard({
         <button
           onClick={(e) => { e.stopPropagation(); onWriteEmail?.(lead); }}
           className="text-[9px] px-1.5 py-0.5 rounded flex items-center gap-0.5 transition-colors"
-          style={{ background: "rgba(0,212,255,0.06)", color: "#00D4FF" }}
+          style={{ background: "rgba(37,99,235,0.1)", color: "#2563EB" }}
         >
           <Mail size={9} />
           Email

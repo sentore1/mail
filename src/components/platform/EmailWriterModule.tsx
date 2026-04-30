@@ -368,7 +368,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
                 value={yourCompany}
                 onChange={(e) => setYourCompany(e.target.value)}
                 placeholder="e.g., Acme Solutions"
-                className="w-full px-4 py-3 rounded-xl text-sm border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full px-4 py-3 rounded-xl text-sm border border-gray-300 focus:border-gray-400 focus:ring-2 focus:ring-gray-200 bg-white text-gray-800 placeholder:text-gray-400"
               />
             </div>
             <div>
@@ -380,7 +380,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
                 value={yourService}
                 onChange={(e) => setYourService(e.target.value)}
                 placeholder="e.g., AI-powered marketing automation"
-                className="w-full px-4 py-3 rounded-xl text-sm border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full px-4 py-3 rounded-xl text-sm border border-gray-300 focus:border-gray-400 focus:ring-2 focus:ring-gray-200 bg-white text-gray-800 placeholder:text-gray-400"
               />
             </div>
           </div>
@@ -416,7 +416,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
                 placeholder="e.g., reducing churn, scaling sales team..."
                 value={customPainPoint}
                 onChange={(e) => setCustomPainPoint(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl text-sm border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full px-4 py-3 rounded-xl text-sm border border-gray-300 focus:border-gray-400 focus:ring-2 focus:ring-gray-200 bg-white text-gray-800 placeholder:text-gray-400"
               />
             </div>
           </div>
@@ -580,7 +580,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Lead Selector */}
         <div className="lg:col-span-2">
-          <label className="block text-[10px] uppercase tracking-widest mb-2" style={{ color: "#444", fontFamily: "JetBrains Mono, monospace" }}>
+          <label className="block text-[10px] uppercase tracking-widest mb-2" style={{ color: "#000000", fontFamily: "Poppins, sans-serif", fontWeight: 600 }}>
             Select Lead
           </label>
           <div className="relative">
@@ -591,7 +591,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
                 background: "rgba(255,255,255,0.03)",
                 border: "1px solid #2A2D35",
                 color: selectedLead ? "#e8eaed" : "#555",
-                fontFamily: "Space Grotesk, sans-serif",
+                fontFamily: "Poppins, sans-serif",
               }}
             >
               <span>
@@ -602,29 +602,41 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
 
             {leadDropdownOpen && (
               <div
-                className="absolute top-full mt-1 left-0 right-0 rounded-xl z-20 overflow-hidden"
-                style={{ background: "#0F1117", border: "1px solid #2A2D35", maxHeight: "260px", overflowY: "auto" }}
+                className="absolute top-full mt-1 left-0 right-0 rounded-lg z-20 overflow-hidden shadow-lg"
+                style={{ 
+                  background: "#F3F4F6", 
+                  border: "1px solid #D1D5DB", 
+                  maxHeight: "400px", 
+                  overflowY: "auto",
+                  scrollbarWidth: "none",
+                  msOverflowStyle: "none"
+                }}
               >
+                <style jsx>{`
+                  div::-webkit-scrollbar {
+                    display: none;
+                  }
+                `}</style>
                 {leads.length === 0 ? (
-                  <div className="px-4 py-3 text-xs text-center" style={{ color: "#555" }}>
+                  <div className="px-4 py-3 text-sm text-center" style={{ color: "#6B7280", fontFamily: "Poppins, sans-serif" }}>
                     No leads in CRM yet. Add leads from the Scraper.
                   </div>
                 ) : (
                   leads.map((lead) => (
                     <button
                       key={lead.id}
-                      className="w-full text-left px-4 py-3 hover:bg-[#00D4FF08] transition-colors border-b"
-                      style={{ borderColor: "#1A1D24" }}
+                      className="w-full text-left px-4 py-3 hover:bg-gray-200 transition-colors border-b"
+                      style={{ borderColor: "#E5E7EB" }}
                       onClick={() => {
                         setSelectedLead(lead);
                         setLeadDropdownOpen(false);
                         setGeneratedEmail(null);
                       }}
                     >
-                      <p className="text-sm font-medium" style={{ color: "#e8eaed", fontFamily: "Space Grotesk, sans-serif" }}>
+                      <p className="text-sm font-medium" style={{ color: "#111827", fontFamily: "Poppins, sans-serif" }}>
                         {lead.company_name}
                       </p>
-                      <p className="text-xs mt-0.5" style={{ color: "#555", fontFamily: "JetBrains Mono, monospace" }}>
+                      <p className="text-xs mt-0.5" style={{ color: "#6B7280", fontFamily: "Poppins, sans-serif" }}>
                         {lead.email} · {lead.niche}
                       </p>
                     </button>
@@ -637,7 +649,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
 
         {/* Tone selector */}
         <div>
-          <label className="block text-[10px] uppercase tracking-widest mb-2" style={{ color: "#444", fontFamily: "JetBrains Mono, monospace" }}>
+          <label className="block text-[10px] uppercase tracking-widest mb-2" style={{ color: "#000000", fontFamily: "Poppins, sans-serif", fontWeight: 600 }}>
             Tone
           </label>
           <div className="flex gap-1.5">
@@ -647,17 +659,17 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
                 onClick={() => setTone(t.value)}
                 className="flex-1 py-3 rounded-xl text-xs font-semibold transition-all"
                 style={{
-                  background: tone === t.value ? "rgba(0,212,255,0.12)" : "rgba(255,255,255,0.03)",
-                  border: tone === t.value ? "1px solid rgba(0,212,255,0.4)" : "1px solid #2A2D35",
-                  color: tone === t.value ? "#00D4FF" : "#666",
-                  fontFamily: "Space Grotesk, sans-serif",
+                  background: tone === t.value ? "#2563EB" : "rgba(255,255,255,0.03)",
+                  border: tone === t.value ? "1px solid #2563EB" : "1px solid #2A2D35",
+                  color: tone === t.value ? "#FFFFFF" : "#666",
+                  fontFamily: "Poppins, sans-serif",
                 }}
               >
                 {t.value}
               </button>
             ))}
           </div>
-          <p className="text-[10px] mt-1.5" style={{ color: "#444", fontFamily: "Space Grotesk, sans-serif" }}>
+          <p className="text-[10px] mt-1.5" style={{ color: "#000000", fontFamily: "Poppins, sans-serif" }}>
             {TONE_OPTIONS.find((t) => t.value === tone)?.desc}
           </p>
         </div>
@@ -671,17 +683,17 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
         >
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1">
-              <p className="text-sm font-semibold" style={{ color: "#e8eaed", fontFamily: "Syne, sans-serif" }}>
+              <p className="text-sm font-semibold" style={{ color: "#e8eaed", fontFamily: "Poppins, sans-serif" }}>
                 {selectedLead.company_name}
               </p>
               <div className="flex items-center gap-3 mt-1.5">
                 {selectedLead.niche && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: "rgba(0,212,255,0.08)", color: "#00D4FF", border: "1px solid rgba(0,212,255,0.15)" }}>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: "rgba(0,212,255,0.08)", color: "#00D4FF", border: "1px solid rgba(0,212,255,0.15)", fontFamily: "Poppins, sans-serif" }}>
                     {selectedLead.niche}
                   </span>
                 )}
                 {selectedLead.location && (
-                  <span className="text-xs" style={{ color: "#666", fontFamily: "Space Grotesk, sans-serif" }}>
+                  <span className="text-xs" style={{ color: "#666", fontFamily: "Poppins, sans-serif" }}>
                     📍 {selectedLead.location}
                   </span>
                 )}
@@ -691,13 +703,14 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
                     background: selectedLead.status === "Email Sent" ? "rgba(245,166,35,0.1)" : "rgba(0,232,122,0.1)",
                     color: selectedLead.status === "Email Sent" ? "#F5A623" : "#00E87A",
                     border: `1px solid ${selectedLead.status === "Email Sent" ? "rgba(245,166,35,0.2)" : "rgba(0,232,122,0.2)"}`,
+                    fontFamily: "Poppins, sans-serif"
                   }}
                 >
                   {selectedLead.status}
                 </span>
               </div>
               {selectedLead.company_context && (
-                <p className="text-xs mt-2 line-clamp-2" style={{ color: "#666", fontFamily: "Space Grotesk, sans-serif" }}>
+                <p className="text-xs mt-2 line-clamp-2" style={{ color: "#666", fontFamily: "Poppins, sans-serif" }}>
                   {selectedLead.company_context}
                 </p>
               )}
@@ -708,7 +721,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
 
       {/* Custom pain point */}
       <div>
-        <label className="block text-[10px] uppercase tracking-widest mb-2" style={{ color: "#444", fontFamily: "JetBrains Mono, monospace" }}>
+        <label className="block text-[10px] uppercase tracking-widest mb-2" style={{ color: "#000000", fontFamily: "Poppins, sans-serif", fontWeight: 600 }}>
           Custom Pain Point Override (Optional)
         </label>
         <input
@@ -716,15 +729,10 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
           placeholder="e.g. reducing churn, scaling sales team, automating outreach..."
           value={customPainPoint}
           onChange={(e) => setCustomPainPoint(e.target.value)}
-          className="w-full px-4 py-3 rounded-xl text-sm outline-none transition-all"
+          className="w-full px-4 py-3 rounded-xl text-sm outline-none transition-all bg-white text-gray-800 placeholder:text-gray-400 border border-gray-300 focus:border-gray-400 focus:ring-2 focus:ring-gray-200"
           style={{
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid #2A2D35",
-            color: "#ccc",
-            fontFamily: "Space Grotesk, sans-serif",
+            fontFamily: "Poppins, sans-serif",
           }}
-          onFocus={(e) => (e.target.style.borderColor = "#00D4FF44")}
-          onBlur={(e) => (e.target.style.borderColor = "#2A2D35")}
         />
       </div>
 
@@ -734,10 +742,10 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
         disabled={isGenerating || !selectedLead}
         className="flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all disabled:opacity-40"
         style={{
-          background: "rgba(0,212,255,0.12)",
-          border: "1px solid rgba(0,212,255,0.4)",
-          color: "#00D4FF",
-          fontFamily: "Syne, sans-serif",
+          background: "#2563EB",
+          border: "1px solid #2563EB",
+          color: "#FFFFFF",
+          fontFamily: "Poppins, sans-serif",
         }}
       >
         {isGenerating ? (
@@ -792,7 +800,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
           <div className="p-4 flex flex-col gap-3">
             {/* Subject */}
             <div>
-              <label className="block text-[9px] uppercase tracking-widest mb-1.5" style={{ color: "#444", fontFamily: "JetBrains Mono, monospace" }}>
+              <label className="block text-[9px] uppercase tracking-widest mb-1.5" style={{ color: "#000000", fontFamily: "JetBrains Mono, monospace" }}>
                 Subject
               </label>
               {isEditing ? (
@@ -817,7 +825,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
 
             {/* Body */}
             <div>
-              <label className="block text-[9px] uppercase tracking-widest mb-1.5" style={{ color: "#444", fontFamily: "JetBrains Mono, monospace" }}>
+              <label className="block text-[9px] uppercase tracking-widest mb-1.5" style={{ color: "#000000", fontFamily: "JetBrains Mono, monospace" }}>
                 Body
               </label>
               {isEditing ? (
@@ -899,7 +907,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
         >
           <div className="text-center">
             <Mail size={28} className="mx-auto mb-2" style={{ color: "#2A2D35" }} />
-            <p className="text-sm" style={{ color: "#444", fontFamily: "Space Grotesk, sans-serif" }}>
+            <p className="text-sm" style={{ color: "#000000", fontFamily: "Space Grotesk, sans-serif" }}>
               Click Generate Email to create a personalized cold email
             </p>
           </div>

@@ -9,6 +9,7 @@ import EmailWriterModule from "./EmailWriterModule";
 import CRMModule from "./CRMModule";
 import AISettingsModule from "./AISettingsModule";
 import SMTPManager from "./SMTPManager";
+import FollowUpModule from "./FollowUpModule";
 import { createClient } from "../../../supabase/client";
 import { useRouter } from "next/navigation";
 
@@ -101,6 +102,9 @@ export default function PlatformLayout({ userId, userEmail }: PlatformLayoutProp
           )}
           {activeModule === "smtp-manager" && (
             <SMTPManager userId={userId} />
+          )}
+          {activeModule === "follow-up" && (
+            <FollowUpModule userId={userId} />
           )}
         </main>
       </div>

@@ -1,7 +1,8 @@
 "use client";
 
 import { ActiveModule } from "@/types/platform";
-import { Radio, Mail, Settings, Layout, Zap, Server } from "lucide-react";
+import { Radio, Mail, Settings, Layout, Zap, Server, Send } from "lucide-react";
+import Image from "next/image";
 
 interface SidebarProps {
   activeModule: ActiveModule;
@@ -12,6 +13,7 @@ const navItems = [
   { id: "scraper" as ActiveModule, label: "Scraper", icon: Radio },
   { id: "email-writer" as ActiveModule, label: "Email Writer", icon: Mail },
   { id: "crm" as ActiveModule, label: "CRM", icon: Layout },
+  { id: "follow-up" as ActiveModule, label: "Follow-Up", icon: Send },
   { id: "smtp-manager" as ActiveModule, label: "SMTP Manager", icon: Server },
   { id: "ai-settings" as ActiveModule, label: "AI Settings", icon: Settings },
 ];
@@ -27,12 +29,12 @@ export default function PlatformSidebar({ activeModule, onModuleChange }: Sideba
       }}
     >
       {/* Logo */}
-      <div className="flex items-center gap-2.5 px-4 py-5 border-b border-gray-200">
-        <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-          <Zap size={16} className="text-white" />
-        </div>
-        <span className="hidden lg:block font-bold text-sm text-gray-900">
-          OUTREACH
+      <div className="flex items-end gap-4 px-4 py-5 border-b border-gray-200">
+        <span className="font-bold text-4xl" style={{ color: "#007FDE", fontFamily: "Arial, sans-serif" }}>
+          pryro
+        </span>
+        <span className="hidden lg:block font-semibold text-sm text-gray-700 pb-1">
+          mail
         </span>
       </div>
 
@@ -46,10 +48,10 @@ export default function PlatformSidebar({ activeModule, onModuleChange }: Sideba
               key={item.id}
               onClick={() => onModuleChange(item.id)}
               className={`
-                flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 w-full text-left
+                flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors duration-200 w-full text-left
                 ${isActive
-                  ? "text-blue-600 bg-blue-50 border-l-2 border-blue-600"
-                  : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                  ? "text-white bg-blue-600"
+                  : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
                 }
               `}
             >

@@ -888,3 +888,354 @@ async function verifyEmailDNS(email: string): Promise<boolean> {
     return true; // Assume valid if verification fails
   }
 }
+
+
+// Email Reply Tracking and AI Response Actions
+
+export const checkEmailRepliesAction = async (userId: string) => {
+  try {
+    const supabase = await createClient();
+    
+    // In production, this would:
+    // 1. Connect to IMAP/Gmail API
+    // 2. Fetch new emails since last check
+    // 3. Match replies to sent emails using Message-ID/In-Reply-To headers
+    // 4. Parse sentiment using AI
+    // 5. Store in email_replies table
+    
+    // For now, return existing replies
+    const { data: replies, error } = await supabase
+      .from("email_replies")
+      .select("*")
+      .eq("user_id", userId)
+      .order("received_at", { ascending: false });
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      replies: replies || [],
+      newReplies: 0,
+    };
+  } catch (error: any) {
+    console.error("Check replies error:", error);
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+};
+
+export const generateAIReplyAction = async (
+  userId: string,
+  replyId: string,
+  options?: {
+    tone?: string;
+    includeContext?: boolean;
+  }
+) => {
+  try {
+    const supabase = await createClient();
+    
+    // Fetch the original reply
+    const { data: reply, error: replyError } = await supabase
+      .from("email_replies")
+      .select("*, leads(*)")
+      .eq("id", replyId)
+      .single();
+
+    if (replyError) throw replyError;
+
+    // Fetch the original sent email for context
+    const { data: sentEmail } = await supabase
+      .from("sent_emails")
+      .select("*")
+      .eq("id", reply.sent_email_id)
+      .single();
+
+    // Fetch AI provider settings
+    const { data: aiProvider } = await supabase
+      .from("ai_providers")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("is_active", true)
+      .single();
+
+    if (!aiProvider || !aiProvider.api_key) {
+      throw new Error("No active AI provider configured");
+    }
+
+    // Generate AI response using the configured provider
+    const lead = reply.leads;
+    const tone = options?.tone || "professional";
+    
+    // Build context for AI
+    const context = `
+Original Email Subject: ${sentEmail?.subject || "N/A"}
+Original Email Body: ${sentEmail?.body || "N/A"}
+
+Lead Information:
+- Company: ${lead.company_name}
+- Niche: ${lead.niche || "N/A"}
+- Location: ${lead.location || "N/A"}
+- Context: ${lead.company_context || "N/A"}
+
+Their Reply:
+${reply.body}
+
+Sentiment: ${reply.sentiment || "neutral"}
+`;
+
+    // Call AI API (example with OpenAI-compatible endpoint)
+    let aiResponse;
+    
+    if (aiProvider.provider === "openai") {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${aiProvider.api_key}`,
+        },
+        body: JSON.stringify({
+          model: aiProvider.active_model || "gpt-4",
+          messages: [
+            {
+              role: "system",
+              content: `You are a professional sales representative writing a reply to a potential client. 
+Tone: ${tone}
+Write a personalized, engaging response that:
+1. Acknowledges their interest
+2. Provides relevant information
+3. Suggests next steps (call, demo, meeting)
+4. Keeps it concise (under 200 words)
+
+Format your response as JSON with "subject" and "body" fields.`,
+            },
+            {
+              role: "user",
+              content: context,
+            },
+          ],
+          temperature: 0.7,
+        }),
+      });
+
+      const data = await response.json();
+      const content = data.choices[0].message.content;
+      
+      // Try to parse as JSON, fallback to plain text
+      try {
+        aiResponse = JSON.parse(content);
+      } catch {
+        aiResponse = {
+          subject: `Re: ${reply.subject}`,
+          body: content,
+        };
+      }
+    } else {
+      // Fallback template-based response
+      aiResponse = {
+        subject: `Re: ${reply.subject}`,
+        body: `Hi ${lead.company_name} team,\n\nThank you for your interest! I'd be happy to provide more details.\n\nBased on your ${lead.niche} business in ${lead.location}, I believe we can help you achieve your goals.\n\nWould you be available for a quick call this week to discuss further?\n\nBest regards,\n[Your Name]`,
+      };
+    }
+
+    // Save AI reply to database
+    const { data: aiReply, error: insertError } = await supabase
+      .from("ai_replies")
+      .insert({
+        user_id: userId,
+        reply_id: replyId,
+        lead_id: reply.lead_id,
+        subject: aiResponse.subject,
+        body: aiResponse.body,
+        tone,
+        model_used: aiProvider.active_model,
+        status: "draft",
+      })
+      .select()
+      .single();
+
+    if (insertError) throw insertError;
+
+    // Update reply as having AI response generated
+    await supabase
+      .from("email_replies")
+      .update({ ai_response_generated: true })
+      .eq("id", replyId);
+
+    return {
+      success: true,
+      aiReply,
+      response: aiResponse,
+    };
+  } catch (error: any) {
+    console.error("Generate AI reply error:", error);
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+};
+
+export const sendAIReplyAction = async (
+  userId: string,
+  aiReplyId: string
+) => {
+  try {
+    const supabase = await createClient();
+    
+    // Fetch AI reply with related data
+    const { data: aiReply, error: fetchError } = await supabase
+      .from("ai_replies")
+      .select("*, email_replies(*), leads(*)")
+      .eq("id", aiReplyId)
+      .single();
+
+    if (fetchError) throw fetchError;
+
+    const lead = aiReply.leads;
+    const originalReply = aiReply.email_replies;
+
+    // Send email via SMTP
+    const smtpManager = new SMTPManager();
+    await smtpManager.initialize();
+
+    const result = await smtpManager.sendEmail({
+      to: originalReply.from_email,
+      subject: aiReply.subject || `Re: ${originalReply.subject}`,
+      html: aiReply.body.replace(/\n/g, "<br>"),
+      inReplyTo: originalReply.smtp_message_id,
+      references: originalReply.smtp_message_id,
+    });
+
+    if (!result.success) {
+      throw new Error(result.error || "Failed to send email");
+    }
+
+    // Update AI reply status
+    await supabase
+      .from("ai_replies")
+      .update({
+        status: "sent",
+        sent_at: new Date().toISOString(),
+      })
+      .eq("id", aiReplyId);
+
+    // Update email reply as having AI response sent
+    await supabase
+      .from("email_replies")
+      .update({ ai_response_sent: true })
+      .eq("id", aiReply.reply_id);
+
+    // Update lead status to "Interested" if sentiment was positive
+    if (originalReply.is_positive) {
+      await supabase
+        .from("leads")
+        .update({ status: "Interested" })
+        .eq("id", lead.id);
+    }
+
+    return {
+      success: true,
+      message: "AI reply sent successfully",
+    };
+  } catch (error: any) {
+    console.error("Send AI reply error:", error);
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+};
+
+export const updateLeadStatusFromReplyAction = async (
+  userId: string,
+  leadId: string,
+  newStatus: string
+) => {
+  try {
+    const supabase = await createClient();
+    
+    const { error } = await supabase
+      .from("leads")
+      .update({
+        status: newStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", leadId)
+      .eq("user_id", userId);
+
+    if (error) throw error;
+
+    // Log the automation
+    await supabase
+      .from("crm_automation_log")
+      .insert({
+        user_id: userId,
+        lead_id: leadId,
+        action_type: "manual_status_update",
+        new_status: newStatus,
+        details: { source: "follow_up_module" },
+      });
+
+    return {
+      success: true,
+      message: "Lead status updated",
+    };
+  } catch (error: any) {
+    console.error("Update lead status error:", error);
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+};
+
+export const analyzeSentimentAction = async (text: string) => {
+  try {
+    // Simple sentiment analysis (in production, use AI API)
+    const positiveKeywords = [
+      "interested", "yes", "sounds good", "tell me more", "schedule",
+      "call", "meeting", "demo", "pricing", "how much", "when can",
+      "available", "love", "great", "perfect", "exactly"
+    ];
+    
+    const negativeKeywords = [
+      "not interested", "no thanks", "unsubscribe", "remove", "stop",
+      "don't contact", "not right now", "maybe later", "too expensive",
+      "already have", "not looking"
+    ];
+
+    const lowerText = text.toLowerCase();
+    
+    const positiveCount = positiveKeywords.filter(kw => lowerText.includes(kw)).length;
+    const negativeCount = negativeKeywords.filter(kw => lowerText.includes(kw)).length;
+
+    let sentiment: string;
+    let isPositive: boolean;
+
+    if (positiveCount > negativeCount) {
+      sentiment = "interested";
+      isPositive = true;
+    } else if (negativeCount > positiveCount) {
+      sentiment = "not_interested";
+      isPositive = false;
+    } else {
+      sentiment = "neutral";
+      isPositive = false;
+    }
+
+    return {
+      success: true,
+      sentiment,
+      isPositive,
+      confidence: Math.max(positiveCount, negativeCount) / (positiveKeywords.length + negativeKeywords.length),
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+};

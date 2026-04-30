@@ -1,7 +1,7 @@
 "use client";
 
 import { ActiveModule } from "@/types/platform";
-import { Radio, Mail, Settings, Layout, LogOut, Server } from "lucide-react";
+import { Radio, Mail, Settings, Layout, LogOut, Server, Clock } from "lucide-react";
 
 interface TopBarProps {
   activeModule: ActiveModule;
@@ -15,6 +15,7 @@ const moduleInfo: Record<ActiveModule, { label: string; desc: string; icon: Reac
   crm: { label: "CRM Pipeline", desc: "Manage and track your outreach pipeline", icon: Layout },
   "smtp-manager": { label: "SMTP Manager", desc: "Manage your email sending accounts (60 Gmail accounts)", icon: Server },
   "ai-settings": { label: "AI Settings", desc: "Configure AI providers and active model", icon: Settings },
+  "follow-up": { label: "Follow-Up System", desc: "Manage automated email follow-up sequences", icon: Clock },
 };
 
 export default function TopBar({ activeModule, userEmail, onLogout }: TopBarProps) {

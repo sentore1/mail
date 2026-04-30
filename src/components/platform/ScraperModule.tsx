@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ScrapedLead } from "@/types/platform";
 import {
   Radio,
@@ -106,6 +106,9 @@ const NICHES = [
 export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }: ScraperModuleProps) {
   const [niche, setNiche] = useState("");
   const [location, setLocation] = useState("");
+  const [category, setCategory] = useState("");
+  const [categories, setCategories] = useState<string[]>([]);
+  const [showNewCategory, setShowNewCategory] = useState(false);
   const [isScaping, setIsScraping] = useState(false);
   const [results, setResults] = useState<ScrapedLead[]>([]);
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
@@ -117,6 +120,20 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
   const pageSize = 5;
 
   const supabase = createClient();
+
+  useEffect(() => {
+    fetchCategories();
+  }, []);
+
+  const fetchCategories = async () => {
+    const { data } = await supabase
+      .from("lead_categories")
+      .select("name")
+      .eq("user_id", userId);
+    if (data) {
+      setCategories(data.map((c: any) => c.name));
+    }
+  };
 
   const handleNicheInput = (val: string) => {
     setNiche(val);
@@ -214,11 +231,25 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
   const addToCRM = async (leads: ScrapedLead[]) => {
     setAddingToCrm(true);
     try {
-      // Create category name from niche and location
-      const categoryName = niche && location 
-        ? `${niche} - ${location}` 
-        : niche || location || 'Uncategorized';
+      // Use selected category or create from niche/location
+      let finalCategory = category;
       
+      if (!finalCategory) {
+        finalCategory = niche && location 
+          ? `${niche} - ${location}` 
+          : niche || location || 'Uncategorized';
+      }
+      
+      // Save category if new
+      if (finalCategory && !categories.includes(finalCategory)) {
+        await supabase.from("lead_categories").insert({
+          user_id: userId,
+          name: finalCategory,
+        });
+        setCategories([...categories, finalCategory]);
+      }
+      
+      // Prepare inserts - try with all fields first, fallback to basic fields if schema issue
       const inserts = leads.map((l) => ({
         user_id: userId,
         company_name: l.company_name,
@@ -227,18 +258,101 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
         location: l.location,
         company_context: l.company_context,
         status: "New",
-        category: categoryName,
+        category: finalCategory || null,
         source: 'scraper',
-        tags: [niche, location].filter(Boolean),
+        tags: [niche, location].filter(Boolean).length > 0 ? [niche, location].filter(Boolean) : null,
       }));
       
-      const { error } = await supabase.from("leads").insert(inserts);
-      if (error) throw error;
+      // Try insert with full schema using RPC to bypass schema cache
+      let { data, error } = await supabase.rpc('insert_leads_with_category', {
+        leads_data: inserts
+      });
       
-      toast.success(`${leads.length} lead(s) added to CRM under category "${categoryName}"`);
+      // If RPC function doesn't exist, fall back to regular insert
+      if (error && error.message?.includes('function') && error.message?.includes('does not exist')) {
+        console.warn('RPC function not found, using direct insert');
+        const result = await supabase.from("leads").insert(inserts).select();
+        data = result.data;
+        error = result.error;
+      }
+      
+      // Check if it's a schema cache error for category/source/tags columns
+      if (error && (
+        error.message?.includes("category") || 
+        error.message?.includes("source") || 
+        error.message?.includes("tags") ||
+        error.message?.includes("schema cache")
+      )) {
+        console.warn('Schema cache issue detected, retrying with basic fields only');
+        
+        // Fallback: insert without category, source, and tags
+        const basicInserts = leads.map((l) => ({
+          user_id: userId,
+          company_name: l.company_name,
+          email: l.email,
+          niche: l.niche,
+          location: l.location,
+          company_context: l.company_context,
+          status: "New",
+        }));
+        
+        const fallbackResult = await supabase.from("leads").insert(basicInserts).select();
+        data = fallbackResult.data;
+        error = fallbackResult.error;
+        
+        if (!error) {
+          toast.warning(`${leads.length} lead(s) added (without category). Restart your dev server to enable categories.`);
+          onLeadsAdded?.();
+          return;
+        }
+      }
+      
+      // Check if error has any meaningful content
+      const hasRealError = error && (
+        (error.message && typeof error.message === 'string' && error.message.trim().length > 0) || 
+        (error.details && typeof error.details === 'string' && error.details.trim().length > 0) || 
+        (error.code && typeof error.code === 'string' && error.code.trim().length > 0) || 
+        (error.hint && typeof error.hint === 'string' && error.hint.trim().length > 0)
+      );
+      
+      if (hasRealError) {
+        console.error('Database error:', error);
+        
+        // Provide helpful error message for schema issues
+        if (error.message?.includes("column") || error.message?.includes("schema")) {
+          throw new Error(
+            `Database schema issue: ${error.message}. Please run QUICK_FIX_CRM_INSERT.sql in Supabase SQL Editor.`
+          );
+        }
+        
+        throw new Error(
+          error.message || 
+          error.details || 
+          error.hint ||
+          'Database insert failed'
+        );
+      }
+      
+      toast.success(`${leads.length} lead(s) added to CRM under category "${finalCategory}"`);
       onLeadsAdded?.();
     } catch (e: unknown) {
-      toast.error("Failed to add to CRM");
+      console.error('Add to CRM error:', e);
+      
+      let errorMessage = 'Failed to add to CRM';
+      
+      if (e instanceof Error) {
+        errorMessage = e.message;
+      } else if (typeof e === 'object' && e !== null) {
+        const err = e as any;
+        errorMessage = err.message || err.details || err.hint || 'Database error occurred';
+      }
+      
+      // If error is still generic, provide helpful hint
+      if (errorMessage === 'Failed to add to CRM' || errorMessage === 'Database insert failed') {
+        errorMessage = 'Failed to add to CRM. Check browser console for details, or run QUICK_FIX_CRM_INSERT.sql in Supabase';
+      }
+      
+      toast.error(errorMessage);
     } finally {
       setAddingToCrm(false);
     }
@@ -325,15 +439,49 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
             />
           </div>
 
+          {/* Category selector */}
+          <div className="relative flex-1">
+            <select
+              value={category}
+              onChange={(e) => {
+                if (e.target.value === "__new__") {
+                  setShowNewCategory(true);
+                  setCategory("");
+                } else {
+                  setCategory(e.target.value);
+                  setShowNewCategory(false);
+                }
+              }}
+              className="w-full bg-white pl-3 pr-3 py-2.5 rounded-lg text-sm outline-none transition-all border border-gray-300 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            >
+              <option value="">Auto-generate category</option>
+              {categories.map((cat) => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
+              <option value="__new__">+ New Category</option>
+            </select>
+          </div>
+
+          {showNewCategory && (
+            <div className="relative flex-1">
+              <input
+                type="text"
+                placeholder="Enter new category name"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full bg-white pl-3 pr-3 py-2.5 rounded-lg text-sm outline-none transition-all border border-gray-300 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+          )}
+
           {/* Scrape button */}
           <button
             onClick={handleScrape}
             disabled={isScaping}
-            className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 ${isScaping ? "pulse-active" : ""}`}
+            className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 ${isScaping ? "opacity-80" : "hover:bg-blue-700"}`}
             style={{
-              background: isScaping ? "rgba(0,212,255,0.15)" : "rgba(0,212,255,0.15)",
-              border: "1px solid rgba(0,212,255,0.4)",
-              color: "#00D4FF",
+              background: "#2563eb",
+              color: "#ffffff",
               fontFamily: "Syne, sans-serif",
               minWidth: "120px",
             }}
