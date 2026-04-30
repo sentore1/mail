@@ -1,0 +1,190 @@
+-- Create SMTP accounts table
+CREATE TABLE IF NOT EXISTS smtp_accounts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  email VARCHAR(255) NOT NULL,
+  host VARCHAR(255) NOT NULL,
+  port INTEGER NOT NULL DEFAULT 587,
+  user_name VARCHAR(255) NOT NULL,
+  password TEXT NOT NULL, -- Encrypted in production
+  provider VARCHAR(50) NOT NULL, -- gmail, outlook, sendgrid, mailgun, etc.
+  daily_limit INTEGER NOT NULL DEFAULT 100,
+  sent_today INTEGER NOT NULL DEFAULT 0,
+  last_reset TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  status VARCHAR(20) NOT NULL DEFAULT 'active', -- active, paused, error
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create email campaigns table
+CREATE TABLE IF NOT EXISTS email_campaigns (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  template_subject TEXT NOT NULL,
+  template_body TEXT NOT NULL,
+  tone VARCHAR(50) DEFAULT 'professional', -- professional, casual, friendly
+  purpose VARCHAR(50) DEFAULT 'introduction', -- introduction, partnership, sales, networking
+  status VARCHAR(20) NOT NULL DEFAULT 'draft', -- draft, active, paused, completed
+  total_recipients INTEGER DEFAULT 0,
+  sent_count INTEGER DEFAULT 0,
+  opened_count INTEGER DEFAULT 0,
+  clicked_count INTEGER DEFAULT 0,
+  replied_count INTEGER DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create email queue table
+CREATE TABLE IF NOT EXISTS email_queue (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  campaign_id UUID REFERENCES email_campaigns(id) ON DELETE CASCADE,
+  lead_id UUID, -- Will add foreign key constraint if leads table exists
+  smtp_account_id UUID REFERENCES smtp_accounts(id) ON DELETE SET NULL,
+  recipient_email VARCHAR(255) NOT NULL,
+  recipient_name VARCHAR(255),
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending', -- pending, sending, sent, failed, bounced
+  scheduled_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  sent_at TIMESTAMP WITH TIME ZONE,
+  opened_at TIMESTAMP WITH TIME ZONE,
+  clicked_at TIMESTAMP WITH TIME ZONE,
+  replied_at TIMESTAMP WITH TIME ZONE,
+  error_message TEXT,
+  retry_count INTEGER DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Add foreign key constraint to leads table if it exists
+DO $$
+BEGIN
+  IF EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'leads') THEN
+    ALTER TABLE email_queue ADD CONSTRAINT fk_email_queue_lead_id 
+      FOREIGN KEY (lead_id) REFERENCES public.leads(id) ON DELETE CASCADE;
+  END IF;
+END $$;
+
+-- Create email templates table
+CREATE TABLE IF NOT EXISTS email_templates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL,
+  variables JSONB DEFAULT '[]'::jsonb, -- Array of variable names like ["company_name", "niche"]
+  tone VARCHAR(50) DEFAULT 'professional',
+  purpose VARCHAR(50) DEFAULT 'introduction',
+  is_default BOOLEAN DEFAULT false,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create indexes for better performance
+CREATE INDEX idx_smtp_accounts_user_id ON smtp_accounts(user_id);
+CREATE INDEX idx_smtp_accounts_status ON smtp_accounts(status);
+CREATE INDEX idx_email_campaigns_user_id ON email_campaigns(user_id);
+CREATE INDEX idx_email_campaigns_status ON email_campaigns(status);
+CREATE INDEX idx_email_queue_user_id ON email_queue(user_id);
+CREATE INDEX idx_email_queue_status ON email_queue(status);
+CREATE INDEX idx_email_queue_campaign_id ON email_queue(campaign_id);
+CREATE INDEX idx_email_queue_scheduled_at ON email_queue(scheduled_at);
+CREATE INDEX idx_email_templates_user_id ON email_templates(user_id);
+
+-- Create function to update updated_at timestamp
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create triggers for updated_at
+CREATE TRIGGER update_smtp_accounts_updated_at BEFORE UPDATE ON smtp_accounts
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_email_campaigns_updated_at BEFORE UPDATE ON email_campaigns
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_email_queue_updated_at BEFORE UPDATE ON email_queue
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_email_templates_updated_at BEFORE UPDATE ON email_templates
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Add RLS policies
+ALTER TABLE smtp_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE email_campaigns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE email_queue ENABLE ROW LEVEL SECURITY;
+ALTER TABLE email_templates ENABLE ROW LEVEL SECURITY;
+
+-- SMTP accounts policies
+CREATE POLICY "Users can view their own SMTP accounts"
+  ON smtp_accounts FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own SMTP accounts"
+  ON smtp_accounts FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own SMTP accounts"
+  ON smtp_accounts FOR UPDATE
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own SMTP accounts"
+  ON smtp_accounts FOR DELETE
+  USING (auth.uid() = user_id);
+
+-- Email campaigns policies
+CREATE POLICY "Users can view their own campaigns"
+  ON email_campaigns FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own campaigns"
+  ON email_campaigns FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own campaigns"
+  ON email_campaigns FOR UPDATE
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own campaigns"
+  ON email_campaigns FOR DELETE
+  USING (auth.uid() = user_id);
+
+-- Email queue policies
+CREATE POLICY "Users can view their own email queue"
+  ON email_queue FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own email queue"
+  ON email_queue FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own email queue"
+  ON email_queue FOR UPDATE
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own email queue"
+  ON email_queue FOR DELETE
+  USING (auth.uid() = user_id);
+
+-- Email templates policies
+CREATE POLICY "Users can view their own templates"
+  ON email_templates FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own templates"
+  ON email_templates FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own templates"
+  ON email_templates FOR UPDATE
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own templates"
+  ON email_templates FOR DELETE
+  USING (auth.uid() = user_id);
