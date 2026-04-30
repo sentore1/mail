@@ -267,49 +267,122 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
       const selectedLeadsArray = leads.filter(l => selectedLeadIds.has(l.id));
       const emails = [];
 
+      // Import the AI email generation function
+      const { generatePersonalizedEmail } = await import('@/utils/smtp-manager');
+
       for (const lead of selectedLeadsArray) {
-        const template = SAMPLE_EMAILS[tone];
-        const company = lead.company_name;
-        const niche = lead.niche || "your industry";
-        const painPoint = customPainPoint || "scaling outreach efficiency";
+        try {
+          // Use real AI to generate personalized email
+          const { generateAIEmail } = await import('@/utils/ai-email-generator');
+          
+          const { subject, body } = await generateAIEmail({
+            lead: {
+              company_name: lead.company_name,
+              niche: lead.niche,
+              location: lead.location,
+              company_context: lead.company_context
+            },
+            yourCompany,
+            yourService,
+            tone,
+            customPainPoint: customPainPoint || undefined,
+            userId
+          });
 
-        const subject = template.subject
-          .replace("{company}", company)
-          .replace("{niche}", niche);
+          emails.push({
+            lead,
+            subject,
+            body,
+            model: "AI Generated"
+          });
+        } catch (error) {
+          console.error(`Failed to generate email for ${lead.company_name}:`, error);
+          
+          // Fallback to template if AI fails
+          const template = SAMPLE_EMAILS[tone];
+          const company = lead.company_name;
+          const niche = lead.niche || "your industry";
+          const painPoint = customPainPoint || "scaling outreach efficiency";
 
-        const body = template.body
-          .replace(/{company}/g, company)
-          .replace(/{niche}/g, niche)
-          .replace(/{pain_point}/g, painPoint)
-          .replace(/{name}/g, "there")
-          .replace(/{context_snippet}/g, lead.company_context?.slice(0, 60) + "..." || "growing fast")
-          .replace(/{value_prop}/g, `help with ${yourService}`)
-          .replace(/{value_prop_specific}/g, yourService)
-          .replace(/{specific_initiative}/g, niche + " operations")
-          .replace(/{specific_detail}/g, "approach your growth strategy")
-          .replace(/{specific_metric}/g, "40% improvement in 60 days")
-          .replace(/{similar_company}/g, "a top competitor")
-          .replace(/{specific_thing}/g, niche + " strategy")
-          .replace(/{X}/g, "$10K")
-          .replace(/\[Your Name\]/g, yourCompany);
+          const subject = template.subject
+            .replace("{company}", company)
+            .replace("{niche}", niche);
 
-        emails.push({
-          lead_id: lead.id,
-          lead_email: lead.email,
-          company_name: lead.company_name,
-          subject,
-          body,
-          model: template.model
-        });
+          const body = template.body
+            .replace(/{company}/g, company)
+            .replace(/{niche}/g, niche)
+            .replace(/{pain_point}/g, painPoint)
+            .replace(/{name}/g, "there")
+            .replace(/{context_snippet}/g, lead.company_context?.slice(0, 60) + "..." || "growing fast")
+            .replace(/{value_prop}/g, `help with ${yourService}`)
+            .replace(/{value_prop_specific}/g, yourService)
+            .replace(/{specific_initiative}/g, niche + " operations")
+            .replace(/{specific_detail}/g, "approach your growth strategy")
+            .replace(/{specific_metric}/g, "40% improvement in 60 days")
+            .replace(/{similar_company}/g, "a top competitor")
+            .replace(/{specific_thing}/g, niche + " strategy")
+            .replace(/{X}/g, "$10K")
+            .replace(/\[Your Name\]/g, yourCompany);
+
+          emails.push({
+            lead,
+            subject,
+            body,
+            model: "Template (AI failed)"
+          });
+        }
       }
 
       setBulkEmails(emails);
       setPreviewIndex(0);
-      toast.success(`Generated ${emails.length} personalized emails!`);
+      toast.success(`Generated ${emails.length} personalized emails using AI!`);
     } catch (error) {
       toast.error("Failed to generate emails");
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const sendTestEmail = async () => {
+    if (bulkEmails.length === 0) return;
+    
+    const testEmail = prompt("Enter your email address to receive a test:");
+    if (!testEmail || !testEmail.includes('@')) {
+      toast.error("Please enter a valid email address");
+      return;
+    }
+    
+    setIsSending(true);
+    try {
+      const { sendBulkEmailsChunkedAction } = await import("@/app/actions");
+      
+      // Send only the current preview email as a test
+      const currentEmail = bulkEmails[previewIndex];
+      const testEmailData = [{
+        lead: currentEmail.lead,
+        subject: `[TEST] ${currentEmail.subject}`,
+        body: currentEmail.body,
+        model: currentEmail.model,
+        lead_email: testEmail
+      }];
+      
+      const result = await sendBulkEmailsChunkedAction(userId, testEmailData, {
+        chunkSize: 1,
+        delayBetweenEmails: 0,
+        yourCompany,
+        yourService
+      });
+      
+      if (result.success) {
+        toast.success(`Test email sent to ${testEmail}!`);
+      } else {
+        toast.error(result.error || "Failed to send test email");
+      }
+    } catch (error) {
+      console.error('Test email error:', error);
+      toast.error("Failed to send test email");
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -622,23 +695,33 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
                 >
                   Cancel
                 </button>
-                <button
-                  onClick={sendBulkEmails}
-                  disabled={isSending}
-                  className="px-6 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-2"
-                >
-                  {isSending ? (
-                    <>
-                      <Loader2 size={14} className="animate-spin" />
-                      Sending...
-                    </>
-                  ) : (
-                    <>
-                      <Send size={14} />
-                      Send All {bulkEmails.length} Emails
-                    </>
-                  )}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={sendTestEmail}
+                    disabled={isSending}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                  >
+                    <Mail size={14} />
+                    Send Test
+                  </button>
+                  <button
+                    onClick={sendBulkEmails}
+                    disabled={isSending}
+                    className="px-6 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {isSending ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        Sending...
+                      </>
+                    ) : (
+                      <>
+                        <Send size={14} />
+                        Send All {bulkEmails.length} Emails
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           )}
