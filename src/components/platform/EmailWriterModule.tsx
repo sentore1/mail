@@ -453,32 +453,29 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
     }
 
     setIsSendingBulk(true);
-    const sendToastId = toast.loading(`Sending ${validEmails.length} emails in batches of 10…`);
+    const sendToastId = toast.loading(`Sending ${validEmails.length} emails…`);
     try {
-      const emailsToSend = validEmails.map(email => ({
-        lead_id: email.lead?.id || "",
-        lead_email: email.lead_email,
-        company_name: email.company_name,
-        subject: email.editSubject || email.subject,
-        body: email.editBody || email.body,
-      }));
-      
-      const { sendBulkEmailsChunkedAction } = await import("@/app/actions");
-      const result = await sendBulkEmailsChunkedAction(userId, emailsToSend, {
-        chunkSize: 10,            // 10 emails per batch
-        delayBetweenEmails: 45_000,  // 45 seconds between each email
-        delayBetweenChunks: 600_000, // 10 minutes between batches
-        verifyEmails: false,
+      const res = await fetch("/api/send-bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          emails: validEmails.map(email => ({
+            leadId: email.lead?.id || "",
+            to: email.lead_email,
+            companyName: email.company_name,
+            subject: email.editSubject || email.subject,
+            body: email.editBody || email.body,
+          })),
+          delayMs: 2000,       // 2 seconds between emails — safe, fast
+          verifyEmails: false,
+        }),
       });
-      
+
+      const data = await res.json();
       toast.dismiss(sendToastId);
-      
-      if (result.success) {
-        const r = (result as any).results;
-        const sent = r?.sent ?? 0;
-        const failed = r?.failed ?? 0;
-        const total = r?.total ?? emailsToSend.length;
-        
+
+      if (data.success) {
+        const { sent, failed, total } = data.results;
         if (failed === 0) {
           toast.success(`All ${sent} emails sent successfully!`);
         } else if (sent === 0) {
@@ -486,19 +483,21 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
         } else {
           toast.warning(`${sent} sent, ${failed} failed out of ${total} total.`);
         }
-        
         setBulkEmails([]);
         setMode("single");
         setSelectedLeadIds(new Set());
         fetchLeads();
-      } else { 
-        toast.error(result.error || "Failed to send emails");
+      } else if (res.status === 429) {
+        toast.error("Daily SMTP limit reached. Try again tomorrow.");
+      } else {
+        toast.error(data.error || "Failed to send emails");
       }
-    } catch (err: any) { 
+    } catch (err: any) {
       toast.dismiss(sendToastId);
-      toast.error(err?.message || "Error sending emails");
+      toast.error(err?.message || "Network error sending emails");
+    } finally {
+      setIsSendingBulk(false);
     }
-    finally { setIsSendingBulk(false); }
   };
 
   const sendTestEmail = async () => {
@@ -507,10 +506,24 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
     setIsSendingBulk(true);
     try {
       const cur = bulkEmails[previewIndex >= 0 ? previewIndex : 0];
-      const { sendBulkEmailsChunkedAction } = await import("@/app/actions");
-      const result = await sendBulkEmailsChunkedAction(userId, [{ lead_id: cur.lead?.id || "test", lead_email: testAddr, company_name: cur.company_name, subject: "[TEST] " + (cur.editSubject || cur.subject), body: cur.editBody || cur.body }], { chunkSize: 1, delayBetweenEmails: 0, verifyEmails: false });
-      if (result.success) toast.success("Test sent to " + testAddr);
-      else toast.error(result.error || "Failed");
+      const res = await fetch("/api/send-bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          emails: [{
+            leadId: cur.lead?.id || "test",
+            to: testAddr,
+            companyName: cur.company_name,
+            subject: "[TEST] " + (cur.editSubject || cur.subject),
+            body: cur.editBody || cur.body,
+          }],
+          delayMs: 0,
+          verifyEmails: false,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) toast.success("Test sent to " + testAddr);
+      else toast.error(data.error || "Failed");
     } catch (e: any) { toast.error(e.message || "Error"); }
     finally { setIsSendingBulk(false); }
   };

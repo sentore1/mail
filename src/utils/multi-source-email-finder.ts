@@ -40,24 +40,27 @@ function extractEmails(text: string): string[] {
 }
 
 /**
- * Score email quality
+ * Score email quality — prefer named/role-specific over generic catch-alls
  */
 function scoreEmail(email: string): number {
   const local = email.split('@')[0].toLowerCase();
-  
-  // Best emails
-  if (['info', 'contact', 'hello', 'hi'].includes(local)) return 10;
-  if (['sales', 'business', 'inquiries'].includes(local)) return 9;
-  
-  // Good emails
-  if (['support', 'help', 'service'].includes(local)) return 7;
-  if (local.includes('.')) return 6; // firstname.lastname@
-  
-  // Avoid
-  if (local.includes('noreply') || local.includes('no-reply')) return -10;
-  if (local.includes('donotreply')) return -10;
-  
-  return 5;
+
+  // Hard reject
+  if (local.includes('noreply') || local.includes('no-reply')) return -100;
+  if (local.includes('donotreply') || local.includes('unsubscribe')) return -100;
+
+  // Named person (firstname.lastname@) — most likely to reach a real human
+  if (local.includes('.') && !['info', 'contact', 'hello'].some(g => local === g)) return 10;
+
+  // Role-specific — reaches a decision maker
+  if (['sales', 'director', 'manager', 'owner', 'ceo', 'founder', 'admin'].includes(local)) return 9;
+  if (['business', 'enquiries', 'enquiry', 'admissions', 'bookings', 'appointments'].includes(local)) return 8;
+
+  // Generic catch-alls — exist but rarely reach a person
+  if (['support', 'help', 'office', 'team'].includes(local)) return 5;
+  if (['info', 'contact', 'hello', 'hi'].includes(local)) return 3;
+
+  return 4;
 }
 
 /**

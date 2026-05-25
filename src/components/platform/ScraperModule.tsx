@@ -18,15 +18,595 @@ interface ScraperModuleProps {
 }
 
 const NICHES = [
-  "School", "Hospital", "Restaurant", "Hotel", "Bank", "NGO", "Church",
-  "Gym", "Salon", "Transport", "Farm", "Shop", "SaaS", "E-Commerce",
-  "Digital Marketing", "Fintech", "Health Tech", "Real Estate", "Education",
-  "Legal", "Consulting", "Agency", "Manufacturing", "Retail",
+  // Business & Professional Services
+  "Accounting",
+  "Advertising Agency",
+  "Agency",
+  "Architecture",
+  "Audit Firm",
+  "Business Consulting",
+  "Call Center",
+  "Cleaning Services",
+  "Consulting",
+  "Courier & Delivery",
+  "Event Planning",
+  "HR & Recruitment",
+  "Insurance",
+  "IT Services",
+  "Legal",
+  "Logistics",
+  "Management Consulting",
+  "Marketing Agency",
+  "Media & PR",
+  "Notary",
+  "Printing & Publishing",
+  "Security Services",
+  "Tax Consulting",
+  "Translation Services",
+  "Travel Agency",
+  // Technology
+  "App Development",
+  "Cybersecurity",
+  "Data Analytics",
+  "Digital Marketing",
+  "E-Commerce",
+  "Fintech",
+  "Game Development",
+  "Health Tech",
+  "IT Support",
+  "SaaS",
+  "Software Development",
+  "Tech Startup",
+  "Telecommunications",
+  "Web Design",
+  // Finance & Banking
+  "Bank",
+  "Credit Union",
+  "Forex & Trading",
+  "Investment Firm",
+  "Microfinance",
+  "Money Transfer",
+  "Mortgage",
+  "Savings & Loans",
+  "Stock Brokerage",
+  // Healthcare
+  "Clinic",
+  "Dental Clinic",
+  "Dermatology",
+  "Eye Clinic",
+  "Hospital",
+  "Laboratory",
+  "Mental Health",
+  "Nursing Home",
+  "Optician",
+  "Pediatrics",
+  "Pharmacy",
+  "Physiotherapy",
+  "Radiology",
+  "Rehabilitation Center",
+  "Veterinary",
+  // Education
+  "Coaching Center",
+  "College",
+  "Driving School",
+  "Education",
+  "Language School",
+  "Nursery",
+  "Online Learning",
+  "Primary School",
+  "School",
+  "Secondary School",
+  "Training Center",
+  "University",
+  "Vocational School",
+  // Food & Hospitality
+  "Bakery",
+  "Bar & Nightclub",
+  "Catering",
+  "Coffee Shop",
+  "Fast Food",
+  "Food Delivery",
+  "Hotel",
+  "Lodge",
+  "Restaurant",
+  "Supermarket",
+  // Retail & Commerce
+  "Auto Parts",
+  "Bookstore",
+  "Clothing Store",
+  "Electronics Store",
+  "Furniture Store",
+  "Hardware Store",
+  "Jewelry Store",
+  "Pharmacy",
+  "Retail",
+  "Shop",
+  "Shoe Store",
+  "Sporting Goods",
+  // Real Estate & Construction
+  "Architecture",
+  "Construction",
+  "Engineering",
+  "Interior Design",
+  "Property Management",
+  "Real Estate",
+  "Surveying",
+  // Manufacturing & Industry
+  "Agriculture",
+  "Automotive",
+  "Chemical",
+  "Energy",
+  "Farm",
+  "Food Processing",
+  "Manufacturing",
+  "Mining",
+  "Oil & Gas",
+  "Packaging",
+  "Textile",
+  // Non-Profit & Community
+  "Church",
+  "Foundation",
+  "Mosque",
+  "NGO",
+  "Religious Organization",
+  "Social Enterprise",
+  "Temple",
+  // Lifestyle & Wellness
+  "Beauty Salon",
+  "Fitness Studio",
+  "Gym",
+  "Hair Salon",
+  "Massage & Spa",
+  "Nail Salon",
+  "Salon",
+  "Yoga Studio",
+  // Transport & Logistics
+  "Airline",
+  "Car Rental",
+  "Freight & Shipping",
+  "Moving Company",
+  "Taxi & Ride-Hailing",
+  "Transport",
+  "Trucking",
+  "Warehouse",
+  // Media & Entertainment
+  "Film Production",
+  "Music Studio",
+  "Photography",
+  "Podcast",
+  "Radio Station",
+  "TV Station",
+  "Video Production",
 ];
+
+// ── Locations: every country + major cities, grouped by region ───────────────
+const LOCATION_GROUPS: { region: string; cities: string[] }[] = [
+  {
+    region: "🌍 Africa — East",
+    cities: [
+      "Nairobi, Kenya",
+      "Mombasa, Kenya",
+      "Kampala, Uganda",
+      "Kigali, Rwanda",
+      "Dar es Salaam, Tanzania",
+      "Dodoma, Tanzania",
+      "Addis Ababa, Ethiopia",
+      "Dire Dawa, Ethiopia",
+      "Mogadishu, Somalia",
+      "Djibouti City, Djibouti",
+      "Asmara, Eritrea",
+      "Juba, South Sudan",
+      "Khartoum, Sudan",
+      "Antananarivo, Madagascar",
+      "Port Louis, Mauritius",
+      "Victoria, Seychelles",
+      "Moroni, Comoros",
+      "Bujumbura, Burundi",
+      "Gitega, Burundi",
+    ],
+  },
+  {
+    region: "🌍 Africa — West",
+    cities: [
+      "Lagos, Nigeria",
+      "Abuja, Nigeria",
+      "Kano, Nigeria",
+      "Accra, Ghana",
+      "Kumasi, Ghana",
+      "Dakar, Senegal",
+      "Abidjan, Ivory Coast",
+      "Yamoussoukro, Ivory Coast",
+      "Conakry, Guinea",
+      "Freetown, Sierra Leone",
+      "Monrovia, Liberia",
+      "Bamako, Mali",
+      "Ouagadougou, Burkina Faso",
+      "Niamey, Niger",
+      "Lomé, Togo",
+      "Cotonou, Benin",
+      "Porto-Novo, Benin",
+      "Banjul, Gambia",
+      "Bissau, Guinea-Bissau",
+      "Praia, Cape Verde",
+      "São Tomé, São Tomé and Príncipe",
+      "Nouakchott, Mauritania",
+    ],
+  },
+  {
+    region: "🌍 Africa — Central",
+    cities: [
+      "Kinshasa, DR Congo",
+      "Lubumbashi, DR Congo",
+      "Brazzaville, Republic of Congo",
+      "Douala, Cameroon",
+      "Yaoundé, Cameroon",
+      "Libreville, Gabon",
+      "Malabo, Equatorial Guinea",
+      "Bangui, Central African Republic",
+      "N'Djamena, Chad",
+      "Luanda, Angola",
+      "Huambo, Angola",
+    ],
+  },
+  {
+    region: "🌍 Africa — Southern",
+    cities: [
+      "Johannesburg, South Africa",
+      "Cape Town, South Africa",
+      "Durban, South Africa",
+      "Pretoria, South Africa",
+      "Lusaka, Zambia",
+      "Ndola, Zambia",
+      "Harare, Zimbabwe",
+      "Bulawayo, Zimbabwe",
+      "Maputo, Mozambique",
+      "Beira, Mozambique",
+      "Gaborone, Botswana",
+      "Windhoek, Namibia",
+      "Maseru, Lesotho",
+      "Mbabane, Eswatini",
+      "Lilongwe, Malawi",
+      "Blantyre, Malawi",
+    ],
+  },
+  {
+    region: "🌍 Africa — North",
+    cities: [
+      "Cairo, Egypt",
+      "Alexandria, Egypt",
+      "Casablanca, Morocco",
+      "Rabat, Morocco",
+      "Marrakech, Morocco",
+      "Tunis, Tunisia",
+      "Sfax, Tunisia",
+      "Algiers, Algeria",
+      "Oran, Algeria",
+      "Tripoli, Libya",
+      "Benghazi, Libya",
+    ],
+  },
+  {
+    region: "🌏 Middle East",
+    cities: [
+      "Dubai, UAE",
+      "Abu Dhabi, UAE",
+      "Riyadh, Saudi Arabia",
+      "Jeddah, Saudi Arabia",
+      "Mecca, Saudi Arabia",
+      "Doha, Qatar",
+      "Kuwait City, Kuwait",
+      "Manama, Bahrain",
+      "Muscat, Oman",
+      "Salalah, Oman",
+      "Amman, Jordan",
+      "Beirut, Lebanon",
+      "Damascus, Syria",
+      "Baghdad, Iraq",
+      "Basra, Iraq",
+      "Erbil, Iraq",
+      "Tehran, Iran",
+      "Mashhad, Iran",
+      "Isfahan, Iran",
+      "Sanaa, Yemen",
+      "Aden, Yemen",
+      "Jerusalem, Israel",
+      "Tel Aviv, Israel",
+      "Ramallah, Palestine",
+    ],
+  },
+  {
+    region: "🌏 Asia — South",
+    cities: [
+      "Mumbai, India",
+      "Delhi, India",
+      "Bangalore, India",
+      "Hyderabad, India",
+      "Chennai, India",
+      "Kolkata, India",
+      "Pune, India",
+      "Ahmedabad, India",
+      "Karachi, Pakistan",
+      "Lahore, Pakistan",
+      "Islamabad, Pakistan",
+      "Dhaka, Bangladesh",
+      "Chittagong, Bangladesh",
+      "Colombo, Sri Lanka",
+      "Kathmandu, Nepal",
+      "Thimphu, Bhutan",
+      "Malé, Maldives",
+      "Kabul, Afghanistan",
+    ],
+  },
+  {
+    region: "🌏 Asia — Southeast",
+    cities: [
+      "Singapore",
+      "Kuala Lumpur, Malaysia",
+      "Penang, Malaysia",
+      "Jakarta, Indonesia",
+      "Surabaya, Indonesia",
+      "Bali, Indonesia",
+      "Manila, Philippines",
+      "Cebu, Philippines",
+      "Bangkok, Thailand",
+      "Chiang Mai, Thailand",
+      "Ho Chi Minh City, Vietnam",
+      "Hanoi, Vietnam",
+      "Phnom Penh, Cambodia",
+      "Vientiane, Laos",
+      "Yangon, Myanmar",
+      "Naypyidaw, Myanmar",
+      "Bandar Seri Begawan, Brunei",
+      "Dili, Timor-Leste",
+    ],
+  },
+  {
+    region: "🌏 Asia — East",
+    cities: [
+      "Beijing, China",
+      "Shanghai, China",
+      "Shenzhen, China",
+      "Guangzhou, China",
+      "Chengdu, China",
+      "Hong Kong",
+      "Macau",
+      "Taipei, Taiwan",
+      "Tokyo, Japan",
+      "Osaka, Japan",
+      "Seoul, South Korea",
+      "Busan, South Korea",
+      "Pyongyang, North Korea",
+      "Ulaanbaatar, Mongolia",
+    ],
+  },
+  {
+    region: "🌏 Asia — Central",
+    cities: [
+      "Tashkent, Uzbekistan",
+      "Samarkand, Uzbekistan",
+      "Almaty, Kazakhstan",
+      "Nur-Sultan, Kazakhstan",
+      "Bishkek, Kyrgyzstan",
+      "Dushanbe, Tajikistan",
+      "Ashgabat, Turkmenistan",
+      "Baku, Azerbaijan",
+      "Yerevan, Armenia",
+      "Tbilisi, Georgia",
+    ],
+  },
+  {
+    region: "🌍 Europe — Western",
+    cities: [
+      "London, UK",
+      "Manchester, UK",
+      "Birmingham, UK",
+      "Edinburgh, UK",
+      "Dublin, Ireland",
+      "Paris, France",
+      "Lyon, France",
+      "Marseille, France",
+      "Berlin, Germany",
+      "Munich, Germany",
+      "Hamburg, Germany",
+      "Frankfurt, Germany",
+      "Amsterdam, Netherlands",
+      "Rotterdam, Netherlands",
+      "Brussels, Belgium",
+      "Antwerp, Belgium",
+      "Zurich, Switzerland",
+      "Geneva, Switzerland",
+      "Vienna, Austria",
+      "Luxembourg City, Luxembourg",
+      "Lisbon, Portugal",
+      "Porto, Portugal",
+      "Madrid, Spain",
+      "Barcelona, Spain",
+      "Valencia, Spain",
+      "Rome, Italy",
+      "Milan, Italy",
+      "Naples, Italy",
+      "Monaco",
+      "Andorra la Vella, Andorra",
+    ],
+  },
+  {
+    region: "🌍 Europe — Northern",
+    cities: [
+      "Stockholm, Sweden",
+      "Gothenburg, Sweden",
+      "Oslo, Norway",
+      "Bergen, Norway",
+      "Copenhagen, Denmark",
+      "Helsinki, Finland",
+      "Reykjavik, Iceland",
+      "Tallinn, Estonia",
+      "Riga, Latvia",
+      "Vilnius, Lithuania",
+    ],
+  },
+  {
+    region: "🌍 Europe — Eastern",
+    cities: [
+      "Moscow, Russia",
+      "Saint Petersburg, Russia",
+      "Kyiv, Ukraine",
+      "Kharkiv, Ukraine",
+      "Warsaw, Poland",
+      "Krakow, Poland",
+      "Prague, Czech Republic",
+      "Brno, Czech Republic",
+      "Bratislava, Slovakia",
+      "Budapest, Hungary",
+      "Bucharest, Romania",
+      "Cluj-Napoca, Romania",
+      "Sofia, Bulgaria",
+      "Belgrade, Serbia",
+      "Zagreb, Croatia",
+      "Ljubljana, Slovenia",
+      "Sarajevo, Bosnia and Herzegovina",
+      "Podgorica, Montenegro",
+      "Tirana, Albania",
+      "Skopje, North Macedonia",
+      "Pristina, Kosovo",
+      "Chisinau, Moldova",
+      "Minsk, Belarus",
+    ],
+  },
+  {
+    region: "🌍 Europe — Southern",
+    cities: [
+      "Athens, Greece",
+      "Thessaloniki, Greece",
+      "Nicosia, Cyprus",
+      "Valletta, Malta",
+      "Istanbul, Turkey",
+      "Ankara, Turkey",
+      "Izmir, Turkey",
+      "San Marino",
+      "Vatican City",
+    ],
+  },
+  {
+    region: "🌎 Americas — North",
+    cities: [
+      "New York, USA",
+      "Los Angeles, USA",
+      "Chicago, USA",
+      "Houston, USA",
+      "Phoenix, USA",
+      "Philadelphia, USA",
+      "San Antonio, USA",
+      "San Diego, USA",
+      "Dallas, USA",
+      "San Francisco, USA",
+      "Seattle, USA",
+      "Miami, USA",
+      "Atlanta, USA",
+      "Boston, USA",
+      "Denver, USA",
+      "Washington DC, USA",
+      "Toronto, Canada",
+      "Vancouver, Canada",
+      "Montreal, Canada",
+      "Calgary, Canada",
+      "Ottawa, Canada",
+      "Mexico City, Mexico",
+      "Guadalajara, Mexico",
+      "Monterrey, Mexico",
+      "Tijuana, Mexico",
+    ],
+  },
+  {
+    region: "🌎 Americas — Central & Caribbean",
+    cities: [
+      "Guatemala City, Guatemala",
+      "San Salvador, El Salvador",
+      "Tegucigalpa, Honduras",
+      "Managua, Nicaragua",
+      "San José, Costa Rica",
+      "Panama City, Panama",
+      "Belmopan, Belize",
+      "Havana, Cuba",
+      "Santo Domingo, Dominican Republic",
+      "Port-au-Prince, Haiti",
+      "Kingston, Jamaica",
+      "Nassau, Bahamas",
+      "Bridgetown, Barbados",
+      "Port of Spain, Trinidad and Tobago",
+      "Castries, Saint Lucia",
+      "Kingstown, Saint Vincent",
+      "Roseau, Dominica",
+      "Saint George's, Grenada",
+      "Basseterre, Saint Kitts and Nevis",
+      "St. John's, Antigua and Barbuda",
+    ],
+  },
+  {
+    region: "🌎 Americas — South",
+    cities: [
+      "São Paulo, Brazil",
+      "Rio de Janeiro, Brazil",
+      "Brasília, Brazil",
+      "Belo Horizonte, Brazil",
+      "Buenos Aires, Argentina",
+      "Córdoba, Argentina",
+      "Rosario, Argentina",
+      "Santiago, Chile",
+      "Valparaíso, Chile",
+      "Lima, Peru",
+      "Arequipa, Peru",
+      "Bogotá, Colombia",
+      "Medellín, Colombia",
+      "Cali, Colombia",
+      "Caracas, Venezuela",
+      "Maracaibo, Venezuela",
+      "Quito, Ecuador",
+      "Guayaquil, Ecuador",
+      "La Paz, Bolivia",
+      "Santa Cruz, Bolivia",
+      "Asunción, Paraguay",
+      "Montevideo, Uruguay",
+      "Georgetown, Guyana",
+      "Paramaribo, Suriname",
+      "Cayenne, French Guiana",
+    ],
+  },
+  {
+    region: "🌏 Oceania",
+    cities: [
+      "Sydney, Australia",
+      "Melbourne, Australia",
+      "Brisbane, Australia",
+      "Perth, Australia",
+      "Adelaide, Australia",
+      "Auckland, New Zealand",
+      "Wellington, New Zealand",
+      "Christchurch, New Zealand",
+      "Port Moresby, Papua New Guinea",
+      "Suva, Fiji",
+      "Honiara, Solomon Islands",
+      "Port Vila, Vanuatu",
+      "Nuku'alofa, Tonga",
+      "Apia, Samoa",
+      "Funafuti, Tuvalu",
+      "Tarawa, Kiribati",
+      "Majuro, Marshall Islands",
+      "Palikir, Micronesia",
+      "Ngerulmud, Palau",
+      "Yaren, Nauru",
+    ],
+  },
+];
+
+// Flat list for deduplication check
+const LOCATIONS = LOCATION_GROUPS.flatMap((g) => g.cities);
 
 export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }: ScraperModuleProps) {
   const [niche, setNiche] = useState("");
+  const [nicheQuery, setNicheQuery] = useState("");
+  const [showNicheDrop, setShowNicheDrop] = useState(false);
   const [location, setLocation] = useState("");
+  const [customLocation, setCustomLocation] = useState("");
   const [maxResults, setMaxResults] = useState(100);
   const [isScraping, setIsScraping] = useState(false);
   const [isScrapeAndGenerate, setIsScrapeAndGenerate] = useState(false);
@@ -34,8 +614,10 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
   const [generatedEmails, setGeneratedEmails] = useState<any[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [drawerLead, setDrawerLead] = useState<ScrapedLead | null>(null);
-  const [nicheSuggestions, setNicheSuggestions] = useState<string[]>([]);
   const [addingToCRM, setAddingToCRM] = useState(false);
+
+  // Resolved location: custom input overrides dropdown when "other" is selected
+  const resolvedLocation = location === "__other__" ? customLocation : location;
 
   // ── Combined pipeline state ───────────────────────────────────────────────
   const [pipelinePhase, setPipelinePhase] = useState<"idle" | "scraping" | "generating" | "done">("idle");
@@ -75,18 +657,9 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
 
   const supabase = createClient();
 
-  const handleNicheInput = (val: string) => {
-    setNiche(val);
-    setNicheSuggestions(
-      val.length > 0
-        ? NICHES.filter((n) => n.toLowerCase().includes(val.toLowerCase())).slice(0, 5)
-        : []
-    );
-  };
-
   const handleScrape = async () => {
-    if (!niche.trim()) { toast.error("Enter a niche (e.g. school, restaurant)"); return; }
-    if (!location.trim()) { toast.error("Enter a location (e.g. Kigali Rwanda)"); return; }
+    if (!niche.trim()) { toast.error("Select a niche first"); return; }
+    if (!resolvedLocation.trim()) { toast.error("Select or enter a location"); return; }
 
     setIsScraping(true);
     setResults([]);
@@ -98,7 +671,7 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
       const res = await fetch("/api/scrape-stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ niche: niche.trim(), location: location.trim(), maxResults }),
+        body: JSON.stringify({ niche: niche.trim(), location: resolvedLocation.trim(), maxResults }),
       });
 
       if (!res.ok || !res.body) {
@@ -150,7 +723,7 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
             if (payload.total === 0) {
               toast.info("No leads with real emails found. Try a broader niche or different location.");
             } else {
-              toast.success(`Found ${payload.total} leads with verified emails for "${niche}" in "${location}"`);
+              toast.success(`Found ${payload.total} leads with verified emails for "${niche}" in "${resolvedLocation}"`);
             }
           } else if (event === "error") {
             toast.error(payload.message || "Scraping failed.");
@@ -166,8 +739,8 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
 
   // ── Scrape + Generate pipeline ────────────────────────────────────────────
   const handleScrapeAndGenerate = async () => {
-    if (!niche.trim()) { toast.error("Enter a niche (e.g. school, restaurant)"); return; }
-    if (!location.trim()) { toast.error("Enter a location (e.g. Kigali Rwanda)"); return; }
+    if (!niche.trim()) { toast.error("Select a niche first"); return; }
+    if (!resolvedLocation.trim()) { toast.error("Select or enter a location"); return; }
 
     setIsScrapeAndGenerate(true);
     setResults([]);
@@ -184,7 +757,7 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           niche: niche.trim(),
-          location: location.trim(),
+          location: resolvedLocation.trim(),
           maxResults,
           yourCompany: "Pryro",
           yourService: "ERP platform for business automation",
@@ -282,7 +855,7 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
 
     setAddingToCRM(true);
     try {
-      const category = niche && location ? `${niche} - ${location}` : niche || location || "Uncategorized";
+      const category = niche && resolvedLocation ? `${niche} - ${resolvedLocation}` : niche || resolvedLocation || "Uncategorized";
 
       await supabase
         .from("lead_categories")
@@ -365,7 +938,7 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `leads-${niche}-${location}.csv`.replace(/\s+/g, "-").toLowerCase();
+    a.download = `leads-${niche}-${resolvedLocation}.csv`.replace(/\s+/g, "-").toLowerCase();
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -572,41 +1145,83 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3">
-          {/* Niche */}
+          {/* Niche combobox — select from list OR type your own */}
           <div className="relative flex-1">
-            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none z-10" />
             <input
               type="text"
-              placeholder="Niche (e.g. school, restaurant)"
-              value={niche}
-              onChange={(e) => handleNicheInput(e.target.value)}
+              placeholder="Niche (select or type your own…)"
+              value={nicheQuery}
+              onChange={(e) => {
+                setNicheQuery(e.target.value);
+                setNiche(e.target.value);   // free-text counts as the niche
+                setShowNicheDrop(true);
+              }}
+              onFocus={() => setShowNicheDrop(true)}
+              onBlur={() => setTimeout(() => setShowNicheDrop(false), 150)}
               className="w-full pl-9 pr-3 py-2.5 rounded-lg text-sm border border-gray-300 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"
             />
-            {nicheSuggestions.length > 0 && (
-              <div className="absolute top-full mt-1 left-0 right-0 bg-white rounded-lg z-10 shadow-lg border border-gray-200 overflow-hidden">
-                {nicheSuggestions.map((s) => (
+            {showNicheDrop && (
+              <div className="absolute top-full mt-1 left-0 right-0 bg-white rounded-lg z-20 shadow-xl border border-gray-200 overflow-y-auto max-h-60">
+                {(nicheQuery.trim().length === 0
+                  ? NICHES
+                  : NICHES.filter((n) => n.toLowerCase().includes(nicheQuery.toLowerCase()))
+                ).map((n) => (
                   <button
-                    key={s}
-                    className="w-full text-left px-3 py-2 text-xs hover:bg-blue-50 text-gray-700"
-                    onClick={() => { setNiche(s); setNicheSuggestions([]); }}
+                    key={n}
+                    type="button"
+                    onMouseDown={() => {
+                      setNiche(n);
+                      setNicheQuery(n);
+                      setShowNicheDrop(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 text-xs hover:bg-blue-50 text-gray-700 ${
+                      niche === n ? "bg-blue-50 font-semibold text-blue-700" : ""
+                    }`}
                   >
-                    {s}
+                    {n}
                   </button>
                 ))}
+                {nicheQuery.trim().length > 0 &&
+                  !NICHES.some((n) => n.toLowerCase() === nicheQuery.toLowerCase()) && (
+                  <div className="px-3 py-2 text-xs text-gray-400 border-t border-gray-100">
+                    Press Scrape to use <strong className="text-gray-700">"{nicheQuery}"</strong> as custom niche
+                  </div>
+                )}
               </div>
             )}
           </div>
 
-          {/* Location */}
-          <div className="relative flex-1">
-            <MapPin size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Location (e.g. Kigali Rwanda)"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              className="w-full pl-9 pr-3 py-2.5 rounded-lg text-sm border border-gray-300 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"
-            />
+          {/* Location dropdown */}
+          <div className="relative flex-1 flex flex-col gap-1.5">
+            <div className="relative">
+              <MapPin size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <select
+                value={location}
+                onChange={(e) => { setLocation(e.target.value); if (e.target.value !== "__other__") setCustomLocation(""); }}
+                className="w-full pl-9 pr-3 py-2.5 rounded-lg text-sm border border-gray-300 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none bg-white appearance-none"
+              >
+                <option value="">Select a location…</option>
+                {LOCATION_GROUPS.map((group) => (
+                  <optgroup key={group.region} label={group.region}>
+                    {group.cities.map((city) => (
+                      <option key={`${group.region}::${city}`} value={city}>{city}</option>
+                    ))}
+                  </optgroup>
+                ))}
+                <option value="__other__">✏️ Other (type below)…</option>
+              </select>
+            </div>
+            {location === "__other__" && (
+              <input
+                type="text"
+                placeholder="e.g. Bujumbura, Burundi"
+                value={customLocation}
+                onChange={(e) => setCustomLocation(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg text-sm border border-blue-300 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"
+                autoFocus
+              />
+            )}
           </div>
 
           {/* Max results */}
@@ -662,7 +1277,7 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
         )}
         {!isScraping && !isScrapeAndGenerate && results.length === 0 && (
           <p className="text-xs text-gray-400 mt-3">
-            💡 e.g. <strong>school</strong> + <strong>Kigali Rwanda</strong> — scraper visits each website to find real contact emails.
+            💡 Select a <strong>niche</strong> and <strong>location</strong> above — the scraper visits each business website to find real contact emails.
             Use <strong>Scrape + AI Emails</strong> to also generate personalised outreach in one click.
           </p>
         )}

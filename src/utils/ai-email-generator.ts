@@ -58,18 +58,21 @@ THE SUBJECT MUST FOLLOW THIS EXACT STYLE:
 
 REQUIRED: Pick ONE formula and fill it in for this specific recipient:
 
-Formula A — Personal thought: "Had a thought about [Company Name]"
-Formula B — Humble offer: "Something that might help [Company Name]"
-Formula C — Soft curiosity: "Quick idea for your [niche] team"
-Formula D — Human ask: "Worth a 10-minute chat, [Company Name]?"
-Formula E — Peer insight: "What other [niche] owners are doing differently"
-Formula F — Specific pain: "Cutting manual work for [niche] businesses"
-Formula G — Direct value: "Helping [Company Name] save time on admin"
+Formula A — Specific observation: "[niche] teams are switching away from [common pain]"
+Formula B — Peer proof: "How [similar company type] cut their admin by 40%"
+Formula C — Direct question: "How are you handling [specific niche challenge]?"
+Formula D — Insider insight: "What's working for [niche] practices right now"
+Formula E — Soft challenge: "Still running [niche] ops on disconnected tools?"
+Formula F — Curiosity gap: "The [niche] admin problem nobody talks about"
+Formula G — Peer comparison: "What top [niche] practices do differently"
+Formula H — Specific result: "[niche] teams saving 8+ hours a week — here's how"
 
 RULES:
-- 6 to 8 words — count every word before finalizing
-- Use the actual company name OR the niche — not both in the same subject
-- NEVER use: "ERP", "partnership", "collaboration", "opportunity", "solution", "platform", "streamline", "leverage", "synergy"
+- 6 to 9 words — count every word before finalizing
+- Use the actual niche OR company name — not both in the same subject
+- Replace [niche] with the actual niche (e.g. "dental", "retail", "logistics")
+- Replace ALL placeholders with real words — never leave brackets in the output
+- NEVER use: "Quick idea", "Had a thought", "Something that might help", "Worth a chat", "ERP", "partnership", "collaboration", "opportunity", "solution", "platform", "streamline", "leverage", "synergy"
 - No exclamation marks, no ALL CAPS, no emojis
 - Vary the formula — do not use the same formula twice in a row
 
@@ -124,6 +127,54 @@ const TONE_ADDITIONS: Record<string, string> = {
   Aggressive: `Tone: Confident and opportunity-focused. Open with a specific industry challenge or missed opportunity. Make the value proposition impossible to ignore. CTA: ask for a 10-minute call this week. Max 140 words.`,
   Surgical: `Tone: Hyper-personalized and consultative. Reference their specific industry and business context. Sound like a trusted advisor identifying a gap, not a vendor pitching a product. Max 150 words.`,
 };
+
+// ── Clinic / Hospital niche detection ────────────────────────────────────────
+const CLINIC_KEYWORDS = [
+  "clinic", "dental", "dentist", "hospital", "medical", "healthcare",
+  "health care", "orthodontic", "orthodontist", "physician", "doctor",
+  "surgery", "surgical", "pharmacy", "pharmacist", "optometry", "optometrist",
+  "chiropractic", "chiropractor", "physiotherapy", "physiotherapist",
+  "veterinary", "vet clinic", "urgent care", "primary care",
+];
+
+function isClinicNiche(niche: string | null): boolean {
+  if (!niche) return false;
+  const lower = niche.toLowerCase();
+  return CLINIC_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
+/**
+ * Returns the fixed clinic/hospital email template with variables substituted.
+ * Variables: {{FirstName}}, {{ClinicName}}, {{YourName}}, {{YourLinkedIn}}
+ */
+function buildClinicEmail(
+  companyName: string,
+  senderName: string,
+  senderTitle: string
+): { subject: string; body: string } {
+  const subject = `{{FirstName}}, still managing schedules across 3+ tools?`;
+
+  const body =
+`Hi {{FirstName}},
+
+I noticed ${companyName} and wanted to reach out.
+
+Most dental practices we talk to are juggling patient scheduling, billing, and team communication across multiple disconnected systems. It creates bottlenecks, data errors, and eats up 8-12 admin hours per week.
+
+We built Pryro to fix this — one unified platform that 127 dental clinics now use to:
+• Cut admin time by 35-40%
+• Eliminate double-booking and scheduling conflicts
+• Get real-time visibility into practice performance
+
+Worth a quick 10-minute conversation to see if we can do the same for ${companyName}?
+
+Best,
+${senderName}
+Executive Sales, Pryro
+{{YourLinkedIn}}`;
+
+  return { subject, body };
+}
 
 // ── Strip markdown from AI output ────────────────────────────────────────────
 function stripMarkdown(text: string): string {
@@ -182,6 +233,11 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{ 
   }
 
   if (!senderName) senderName = 'Sales Team';
+
+  // ── Clinic / Hospital: use fixed template, skip AI ────────────────────────
+  if (isClinicNiche(lead.niche)) {
+    return buildClinicEmail(lead.company_name, senderName, senderTitle);
+  }
 
   const SYSTEM_MESSAGE = buildSystemMessage(senderName, senderTitle);
 
