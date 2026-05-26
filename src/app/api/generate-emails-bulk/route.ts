@@ -163,42 +163,44 @@ THE PHILOSOPHY:
 - Specific: Reference what THIS company actually does. Generic emails get deleted.
 - Human: Sound like a real person who did 5 minutes of research, not a marketing bot.
 
-SUBJECT LINE — EXACTLY 8 WORDS:
-- Must be exactly 8 words. Count them.
+SUBJECT LINE — MINIMUM 8 WORDS, MAXIMUM 10 WORDS:
+- Must be 8 to 10 words. Count every word. Never fewer than 8.
 - Honest curiosity — make them wonder "what is this about?"
-- Reference their specific business or industry, not a generic category
+- Reference their specific business or industry
 - No hype words: no "amazing", "incredible", "game-changer", "opportunity", "exciting"
 - No questions that sound like ads: "Want to grow your business?"
 - No ALL CAPS, no exclamation marks, no emojis
-- Examples of good 8-word subjects:
-  "How Lagos restaurants are cutting food waste by half"
-  "Most accounting firms still track clients in spreadsheets"
-  "What changed for dental clinics that dropped manual scheduling"
-  "Three things slowing down mid-size logistics companies right now"
+- Good examples (count the words — each is 8-10):
+  "How Lagos restaurants are cutting food waste by half" (9 words)
+  "Most accounting firms still track clients in spreadsheets today" (9 words)
+  "What changed for dental clinics that dropped manual scheduling" (9 words)
+  "Three things slowing down mid-size logistics companies right now" (9 words)
+  "Independent pharmacies spend 12 hours weekly on disconnected systems" (9 words)
+  "How retail stores in Nairobi are reducing stock errors" (9 words)
 
 EMAIL BODY RULES:
-- 3 short paragraphs. Max 90 words total. Count them.
+- EXACTLY 3 short paragraphs separated by blank lines. No exceptions.
+- Max 90 words total across all 3 paragraphs.
 - Paragraph 1 (1-2 sentences): One specific, true observation about their business or industry. Show you know their world. No compliments. No "I noticed your website". Just state the reality.
 - Paragraph 2 (1-2 sentences): What you do, in plain language. One concrete result or number if you have it. No feature lists. No "we help companies like yours".
-- Paragraph 3 (1 sentence): Soft ask. "Worth a 15-minute call?" or "Open to a quick chat?" — short, no pressure, no "I'd love to".
-- Signature: Best regards, [name] on separate lines.
+- Paragraph 3 (1 sentence): Soft ask. "Worth a 15-minute call?" or "Open to a quick chat?" — short, no pressure.
+- Then signature on its own paragraph.
+
+SIGNATURE FORMAT (always exactly like this):
+Best regards,
+${senderName}
+${senderName.split(" ")[0]} | Pryro
 
 BANNED WORDS — never use any of these:
 "reach out", "I noticed", "I came across", "I hope this email finds you well",
 "I wanted to", "touching base", "synergy", "leverage", "game-changer", "excited to",
 "thrilled to", "I am writing to", "streamline", "I'd love to", "would love to",
 "unlock", "revolutionize", "cutting-edge", "innovative", "solution", "platform",
-"empower", "transform", "scale", "optimize", "seamlessly", "robust", "holistic",
-"best-in-class", "world-class", "industry-leading", "state-of-the-art"
-
-SIGNATURE FORMAT (always exactly like this, on separate lines):
-Best regards,
-${senderName}
-${senderName.split(" ")[0]} | Pryro
+"empower", "transform", "scale", "optimize", "seamlessly", "robust", "holistic"
 
 OUTPUT FORMAT — respond ONLY in this exact format, nothing else:
-SUBJECT: [exactly 8 words]
-BODY: [email body, plain text, no markdown]`;
+SUBJECT: [8 to 10 words — count them before writing]
+BODY: [3 paragraphs separated by blank lines, then blank line, then signature]`;
 }
 
 // ─── Prompt builder ───────────────────────────────────────────────────────────
@@ -594,6 +596,13 @@ export async function POST(request: NextRequest) {
           subject = subject
             .replace(/List of [^,\n]+/gi, cleanedName)
             .replace(/\[Company Name\]/gi, cleanedName);
+
+          // Enforce subject word count — pad if AI returned fewer than 8 words
+          const wordCount = subject.trim().split(/\s+/).length;
+          if (wordCount < 8) {
+            const niche = (cleanedLead.niche ?? 'business').toLowerCase();
+            subject = `How ${niche} businesses like ${cleanedName} are saving time`;
+          }
 
           const email = {
             lead_id: lead.id,

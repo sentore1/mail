@@ -41,9 +41,25 @@ const UA_LIST = [
 const randomUA = () => UA_LIST[Math.floor(Math.random() * UA_LIST.length)];
 
 const BLOCKED_DOMAINS = [
+  // Search engines
   'example.com','example.org','sentry.io','wixpress.com','squarespace.com',
-  'wordpress.com','localhost','w3.org','schema.org','google.com','bing.com',
-  'yahoo.com','duckduckgo.com',
+  'wordpress.com','localhost','w3.org','schema.org',
+  'google.com','google.co','bing.com','yahoo.com','duckduckgo.com',
+  'ask.com','aol.com','baidu.com','yandex.com','ecosia.org',
+  // Social / aggregators
+  'facebook.com','instagram.com','twitter.com','x.com','linkedin.com',
+  'youtube.com','tiktok.com','pinterest.com','reddit.com','tumblr.com',
+  'snapchat.com','whatsapp.com','telegram.org','discord.com',
+  // Directories / review sites (we scrape these but don't generate emails for them)
+  'yelp.com','yellowpages.com','bbb.org','tripadvisor.com','trustpilot.com',
+  'glassdoor.com','indeed.com','crunchbase.com','bloomberg.com','reuters.com',
+  // Tech / hosting
+  'github.com','stackoverflow.com','medium.com','substack.com',
+  'shopify.com','wix.com','weebly.com','godaddy.com','namecheap.com',
+  'cloudflare.com','amazonaws.com','vercel.app','netlify.app',
+  // News / reference
+  'wikipedia.org','wikimedia.org','nytimes.com','bbc.com','cnn.com',
+  'forbes.com','techcrunch.com','theguardian.com',
 ];
 const BLOCKED_PREFIXES = ['noreply','no-reply','donotreply','privacy','test','webmaster'];
 const BLOCKED_SUBSTRINGS = ['.png','.jpg','.jpeg','.gif','@2x','placeholder'];
@@ -89,6 +105,16 @@ function scoreEmail(email: string): number {
 function bestEmail(emails: string[]): string | null {
   if (!emails.length) return null;
   return [...emails].sort((a, b) => scoreEmail(b) - scoreEmail(a))[0];
+}
+
+/** Returns true if the URL belongs to a search engine, social, or aggregator domain */
+function isBlockedUrl(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.replace('www.', '');
+    return BLOCKED_DOMAINS.some(d => hostname === d || hostname.endsWith('.' + d));
+  } catch {
+    return false;
+  }
 }
 
 function delay(ms: number) { return new Promise(r => setTimeout(r, ms)); }
@@ -393,16 +419,9 @@ async function scrapeBing(
             if (email) bingEmailIsReal = true;
           }
 
-          // Fallback: guess info@domain from the URL
-          if (!email && url) {
-            try {
-              const domain = new URL(url).hostname.replace('www.', '');
-              email = `info@${domain}`;
-              bingEmailIsReal = false;
-            } catch {}
-          }
-
-          if (!email) return; // no URL at all — truly skip
+          // No real email found — skip this lead entirely
+          // Never generate info@domain for search results
+          if (!email) return;
 
           seen.add(cleanName.toLowerCase());
           const lead: ScrapedLead = {
@@ -497,16 +516,8 @@ async function scrapeDDG(
           if (email) ddgEmailIsReal = true;
         }
 
-        // Fallback: guess info@domain
-        if (!email && url) {
-          try {
-            const domain = new URL(url).hostname.replace('www.', '');
-            email = `info@${domain}`;
-            ddgEmailIsReal = false;
-          } catch {}
-        }
-
-        if (!email) continue; // no URL — skip
+        // No real email — skip entirely, never guess info@domain
+        if (!email) continue;
 
         seen.add(cleanName.toLowerCase());
         const lead: ScrapedLead = {
@@ -653,7 +664,7 @@ async function scrapeGoogleMaps(
         let emailIsGuessed = false;
         if (!email) {
           // Try pattern guesser if we have a website
-          if (website) {
+          if (website && !isBlockedUrl(website)) {
             try {
               const guesses = await guessAndVerifyEmails(website, {
                 companyName: biz.name, location, maxGuesses: 1, smtpVerify: false,
@@ -665,18 +676,20 @@ async function scrapeGoogleMaps(
             } catch {}
           }
 
-          // Last resort: construct info@domain from website or company name
-          if (!email) {
-            let domain = '';
-            if (website) {
-              try { domain = new URL(website).hostname.replace('www.', ''); } catch {}
-            }
-            if (!domain) {
-              domain = biz.name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20) + '.com';
-            }
-            email = `info@${domain}`;
-            emailIsGuessed = true;
+          // Last resort: construct info@domain — only for real business domains
+          if (!email && website && !isBlockedUrl(website)) {
+            try {
+              const domain = new URL(website).hostname.replace('www.', '');
+              email = `info@${domain}`;
+              emailIsGuessed = true;
+            } catch {}
           }
+        }
+
+        // Still no email — skip this business entirely
+        if (!email) {
+          console.log(`  ⏭  ${biz.name} — no email found`);
+          return;
         }
 
         seen.add(biz.name.toLowerCase());
@@ -876,25 +889,20 @@ async function scrapeGoogleSearch(
           const snippet = snippets[i] ?? '';
           const url = urls[i] ?? '';
 
+          // Skip results from search engines, social, or aggregator domains
+          if (url && isBlockedUrl(url)) continue;
+
           // Email from snippet first
           let email = bestEmail(extractEmails(snippet));
           let gEmailIsReal = !!email;
 
           // Then try fetching the site
-          if (!email && url && !skipDomains.some(s => url.includes(s))) {
+          if (!email && url && !isBlockedUrl(url)) {
             email = await fetchEmailFromSite(url, cleanName, niche, location, aiProvider, browser);
             if (email) gEmailIsReal = true;
           }
 
-          // Fallback: guess info@domain
-          if (!email && url) {
-            try {
-              const domain = new URL(url).hostname.replace('www.', '');
-              email = `info@${domain}`;
-              gEmailIsReal = false;
-            } catch {}
-          }
-
+          // No real email — skip, never guess info@domain for search results
           if (!email) continue;
 
           seen.add(cleanName.toLowerCase());
@@ -921,6 +929,166 @@ async function scrapeGoogleSearch(
     console.error('[Google Search] Browser error:', err);
   } finally {
     await browser?.close();
+  }
+
+  return leads;
+}
+
+// ─── Source 6: Google Custom Search API ──────────────────────────────────────
+// Uses the official API — no bot detection, reliable results, 100 free queries/day.
+// Get keys at: https://console.cloud.google.com + https://programmablesearchengine.google.com
+
+async function scrapeGoogleCustomSearch(
+  niche: string, location: string, needed: number,
+  seen: Set<string>, onLead: (l: ScrapedLead) => void,
+  aiProvider: AIProviderConfig | null,
+  apiKey: string, cx: string
+): Promise<ScrapedLead[]> {
+  const leads: ScrapedLead[] = [];
+
+  const queries = [
+    `${niche} ${location} email contact`,
+    `${niche} ${location} "contact@" OR "info@" OR "hello@"`,
+    `${niche} ${location} "@gmail.com" OR "@yahoo.com" contact`,
+    `${niche} ${location} "sales@" OR "admin@" OR "office@"`,
+    `${niche} ${location} site:yellowpages.com OR site:yelp.com`,
+    `${niche} ${location} contact us email address`,
+  ];
+
+  for (const query of queries) {
+    if (leads.length >= needed) break;
+    try {
+      console.log(`  🔑 Google API: ${query}`);
+      const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(query)}&num=10`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+      if (!res.ok) {
+        console.warn(`  ⚠️  Google API error: ${res.status}`);
+        break; // quota exceeded or bad key — stop trying
+      }
+      const data = await res.json();
+
+      for (const item of (data.items ?? [])) {
+        if (leads.length >= needed) break;
+
+        const name = (item.title ?? '').replace(/\s*[-|–].*$/, '').trim();
+        if (!name || name.length < 3) continue;
+        if (seen.has(name.toLowerCase())) continue;
+
+        const snippet = item.snippet ?? '';
+        const itemUrl = item.link ?? '';
+
+        if (isBlockedUrl(itemUrl)) continue;
+
+        // Email from snippet first
+        let email = bestEmail(extractEmails(snippet));
+        let isReal = !!email;
+
+        // Fetch the actual page
+        if (!email && itemUrl) {
+          email = await fetchEmailFromSite(itemUrl, name, niche, location, aiProvider);
+          if (email) isReal = true;
+        }
+
+        if (!email) continue; // skip — no real email
+
+        seen.add(name.toLowerCase());
+        const lead: ScrapedLead = {
+          company_name: name,
+          email,
+          emailIsReal: isReal,
+          niche, location,
+          company_context: snippet || `${name} is a ${niche} in ${location}.`,
+          source_url: itemUrl,
+          website: itemUrl || undefined,
+        };
+        leads.push(lead);
+        onLead(lead);
+        console.log(`    ✅ ${name} → ${email}`);
+      }
+
+      await delay(300);
+    } catch (err: any) {
+      console.log(`  ⚠️  Google API query failed: ${err?.message?.slice(0, 60)}`);
+    }
+  }
+
+  return leads;
+}
+
+// ─── Source 7: Google Places API ─────────────────────────────────────────────
+// Finds real businesses with websites, then scrapes their contact pages for emails.
+
+async function scrapeGooglePlacesAPI(
+  niche: string, location: string, needed: number,
+  seen: Set<string>, onLead: (l: ScrapedLead) => void,
+  aiProvider: AIProviderConfig | null,
+  apiKey: string
+): Promise<ScrapedLead[]> {
+  const leads: ScrapedLead[] = [];
+
+  try {
+    console.log(`  🗺  Google Places API: ${niche} in ${location}`);
+    const searchUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(`${niche} in ${location}`)}&key=${apiKey}`;
+    const searchRes = await fetch(searchUrl, { signal: AbortSignal.timeout(10_000) });
+    const searchData = await searchRes.json();
+
+    for (const place of (searchData.results ?? []).slice(0, 20)) {
+      if (leads.length >= needed) break;
+      try {
+        const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${place.place_id}&fields=name,formatted_address,website,formatted_phone_number,business_status,rating,user_ratings_total&key=${apiKey}`;
+        const detailsRes = await fetch(detailsUrl, { signal: AbortSignal.timeout(8_000) });
+        const detailsData = await detailsRes.json();
+        const result = detailsData.result;
+
+        if (!result || result.business_status !== 'OPERATIONAL') continue;
+        if (seen.has(result.name.toLowerCase())) continue;
+
+        let email: string | null = null;
+        let isReal = false;
+
+        if (result.website && !isBlockedUrl(result.website)) {
+          email = await fetchEmailFromSite(result.website, result.name, niche, location, aiProvider);
+          if (email) isReal = true;
+        }
+
+        // AI prediction as fallback when we have a domain
+        if (!email && result.website && aiProvider) {
+          try {
+            const domain = new URL(result.website).hostname.replace('www.', '');
+            const { predictEmailPattern } = await import('./ai-scraper-helper');
+            email = await predictEmailPattern(result.name, domain, niche, location, aiProvider);
+            if (email) isReal = false; // AI prediction, not scraped
+          } catch {}
+        }
+
+        if (!email) {
+          console.log(`  ⏭  ${result.name} — no email found`);
+          continue;
+        }
+
+        seen.add(result.name.toLowerCase());
+        const lead: ScrapedLead = {
+          company_name: result.name,
+          email,
+          emailIsReal: isReal,
+          niche,
+          location: result.formatted_address ?? location,
+          company_context: `${result.name} is a ${niche} at ${result.formatted_address ?? location}.${result.rating ? ` Rating: ${result.rating}/5` : ''}`,
+          source_url: result.website ?? undefined,
+          phone: result.formatted_phone_number ?? undefined,
+          website: result.website ?? undefined,
+        };
+        leads.push(lead);
+        onLead(lead);
+        console.log(`  ✅ ${result.name} → ${email}${isReal ? '' : ' (AI predicted)'}`);
+
+        await delay(200);
+      } catch (err: any) {
+        console.log(`  ⚠️  Places detail failed: ${err?.message?.slice(0, 60)}`);
+      }
+    }
+  } catch (err: any) {
+    console.log(`  ⚠️  Google Places API failed: ${err?.message?.slice(0, 60)}`);
   }
 
   return leads;
@@ -959,33 +1127,53 @@ export async function scrapeWithoutAPI(
     onLead?.(lead);
   };
 
-  // Give each source a generous target — they share the seen set so
-  // duplicates are skipped, but each source independently tries to fill its quota.
+  // Google API keys from environment (optional but greatly improve results)
+  const googleApiKey = process.env.GOOGLE_API_KEY;
+  const googleCx = process.env.GOOGLE_CX;
+  const googlePlacesKey = process.env.GOOGLE_PLACES_API_KEY;
+
+  // Give each source a generous target
   const mapsTarget   = Math.ceil(maxLeads * 0.60);
   const bingTarget   = Math.ceil(maxLeads * 0.60);
   const ddgTarget    = Math.ceil(maxLeads * 0.50);
   const dirTarget    = Math.ceil(maxLeads * 0.40);
-  const googleTarget = Math.ceil(maxLeads * 0.40);
+  const googleTarget = Math.ceil(maxLeads * 0.50);
+  const apiTarget    = Math.ceil(maxLeads * 0.50);
 
-  // Run all 5 sources in parallel
-  const [mapsRes, bingRes, ddgRes, dirRes, googleRes] = await Promise.allSettled([
+  // Build source list — add Google API sources when keys are available
+  const sources: Promise<ScrapedLead[]>[] = [
     scrapeGoogleMaps(niche, location, mapsTarget, seen, emit, aiProvider),
     scrapeBing(niche, location, bingTarget, seen, emit, aiProvider),
     scrapeDDG(niche, location, ddgTarget, seen, emit, aiProvider),
     scrapeDirectories(niche, location, dirTarget, seen, emit, aiProvider),
     scrapeGoogleSearch(niche, location, googleTarget, seen, emit, aiProvider),
-  ]);
+  ];
+
+  // Google Custom Search API — best source when key is available (100 free queries/day)
+  if (googleApiKey && googleCx) {
+    console.log('🔑 Google Custom Search API key found — using API for higher quality results');
+    sources.push(scrapeGoogleCustomSearch(niche, location, apiTarget, seen, emit, aiProvider, googleApiKey, googleCx));
+  }
+
+  // Google Places API — finds businesses with websites, then scrapes emails
+  if (googlePlacesKey) {
+    console.log('🔑 Google Places API key found — using Places for business discovery');
+    sources.push(scrapeGooglePlacesAPI(niche, location, apiTarget, seen, emit, aiProvider, googlePlacesKey));
+  }
+
+  const results = await Promise.allSettled(sources);
 
   const counts = {
-    maps:   mapsRes.status   === 'fulfilled' ? mapsRes.value.length   : 0,
-    bing:   bingRes.status   === 'fulfilled' ? bingRes.value.length   : 0,
-    ddg:    ddgRes.status    === 'fulfilled' ? ddgRes.value.length    : 0,
-    dir:    dirRes.status    === 'fulfilled' ? dirRes.value.length    : 0,
-    google: googleRes.status === 'fulfilled' ? googleRes.value.length : 0,
+    maps:   results[0]?.status === 'fulfilled' ? (results[0] as any).value.length : 0,
+    bing:   results[1]?.status === 'fulfilled' ? (results[1] as any).value.length : 0,
+    ddg:    results[2]?.status === 'fulfilled' ? (results[2] as any).value.length : 0,
+    dir:    results[3]?.status === 'fulfilled' ? (results[3] as any).value.length : 0,
+    google: results[4]?.status === 'fulfilled' ? (results[4] as any).value.length : 0,
+    api:    results[5]?.status === 'fulfilled' ? (results[5] as any).value.length : 0,
   };
 
   console.log(`\n${'='.repeat(60)}`);
-  console.log(`📊 Results: ${all.length} leads | Maps:${counts.maps} Bing:${counts.bing} DDG:${counts.ddg} Dir:${counts.dir} Google:${counts.google}`);
+  console.log(`📊 Results: ${all.length} leads | Maps:${counts.maps} Bing:${counts.bing} DDG:${counts.ddg} Dir:${counts.dir} Google:${counts.google} API:${counts.api}`);
   console.log(`${'='.repeat(60)}\n`);
 
   // Deduplicate by email, then slice to target
