@@ -72,6 +72,21 @@ export default function SMTPManager({ userId }: SMTPManagerProps) {
     setCapacity({ total: totalCapacity, used: totalUsed, remaining: totalCapacity - totalUsed });
   };
 
+  const updateDailyLimit = async (accountId: string, newLimit: number) => {
+    if (isNaN(newLimit) || newLimit < 1 || newLimit > 500) {
+      toast.error("Limit must be between 1 and 500");
+      return;
+    }
+    const { error } = await supabase
+      .from("smtp_accounts")
+      .update({ daily_limit: newLimit })
+      .eq("id", accountId)
+      .eq("user_id", userId);
+    if (error) { toast.error("Failed to update limit"); return; }
+    toast.success(`Daily limit updated to ${newLimit}`);
+    await loadAccounts();
+  };
+
   const toggleShared = async (accountId: string, currentlyShared: boolean) => {
     const { error } = await supabase
       .from('smtp_accounts')
@@ -369,7 +384,7 @@ export default function SMTPManager({ userId }: SMTPManagerProps) {
                   required
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Gmail allows up to 500 emails per day
+                  Gmail allows up to 500 emails per day. Default: 500.
                 </p>
               </div>
 
@@ -465,7 +480,27 @@ export default function SMTPManager({ userId }: SMTPManagerProps) {
                     <span className="text-sm text-gray-600">{account.sent_today}</span>
                   </div>
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-600">{account.daily_limit}</td>
+                <td className="px-4 py-3 text-sm text-gray-600">
+                  {account.user_id === userId ? (
+                    <input
+                      type="number"
+                      defaultValue={account.daily_limit}
+                      min={1}
+                      max={500}
+                      className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+                      onBlur={(e) => {
+                        const val = parseInt(e.target.value);
+                        if (val !== account.daily_limit) updateDailyLimit(account.id, val);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      }}
+                      title="Click to edit daily limit"
+                    />
+                  ) : (
+                    account.daily_limit
+                  )}
+                </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2">
                     {/* Only allow deleting own accounts */}

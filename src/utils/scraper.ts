@@ -151,13 +151,10 @@ export async function scrapeWithGooglePlaces(
           console.error('[Places] Email lookup failed:', e);
         }
 
-        // ── Fallback only when nothing real was found ─────────────────────
+        // ── Skip if no real email was found ──────────────────────────────
         if (!email) {
-          const domain = result.website
-            ? new URL(result.website).hostname.replace('www.', '')
-            : `${result.name.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`;
-          email = `info@${domain}`;
-          console.log(`  Fallback email: ${email}`);
+          console.log(`  ⏭  ${result.name} — no real email found, skipping`);
+          continue;
         }
 
         leads.push({
@@ -249,9 +246,10 @@ export function enrichLead(lead: ScrapedLead): ScrapedLead {
     .replace(/\s*\|.*$/, '')
     .trim();
 
+  // Validate email format — if invalid, clear it rather than fabricate one
   const emailRegex = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
   if (!emailRegex.test(lead.email)) {
-    lead.email = `info@${lead.company_name.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`;
+    lead.email = '';
   }
 
   return lead;

@@ -43,13 +43,20 @@ function extractEmails(html: string): string[] {
   // Combine, deduplicate, prioritise mailto
   const all = [...new Set([...mailtoEmails, ...textEmails])];
 
-  // Score: prefer info/contact/hello over noreply/support
+  // Score: prefer named person or role-specific over generic catch-alls
   const score = (email: string) => {
-    const local = email.split("@")[0];
+    const local = email.split("@")[0].toLowerCase();
+    if (local.includes('noreply') || local.includes('no-reply')) return -100;
+    if (local.includes('donotreply') || local.includes('unsubscribe')) return -100;
+    // Named person (firstname.lastname) — most likely to reach a real human
+    if (local.includes('.') && !['info', 'contact', 'hello'].includes(local)) return 10;
+    // Role-specific
+    if (['sales', 'director', 'manager', 'owner', 'ceo', 'founder', 'admin'].includes(local)) return 9;
+    if (['business', 'enquiries', 'enquiry', 'admissions', 'bookings', 'appointments'].includes(local)) return 8;
+    // Generic catch-alls — exist but rarely reach a decision maker
+    if (['support', 'help', 'office', 'team'].includes(local)) return 5;
     if (["info", "contact", "hello", "hi", "sales", "team"].includes(local)) return 3;
-    if (["support", "help", "admin", "office"].includes(local)) return 2;
-    if (local.includes("noreply") || local.includes("no-reply")) return -1;
-    return 1;
+    return 4;
   };
 
   return all.sort((a, b) => score(b) - score(a)).slice(0, 5);
@@ -189,13 +196,9 @@ export async function POST(request: NextRequest) {
         urlsToTry.push(`${base}/about`);
         urlsToTry.push(`${base}/contact-us`);
       } catch {}
-    } else {
-      // Guess domain from company name
-      const slug = guessDomain(companyName);
-      urlsToTry.push(`https://www.${slug}.com`);
-      urlsToTry.push(`https://${slug}.com`);
-      urlsToTry.push(`https://www.${slug}.com/contact`);
     }
+    // If no website provided, we can't reliably find an email — don't guess domains
+    // from company names as they almost always produce wrong results
 
     // ── Fetch pages ──────────────────────────────────────────────────────────
     let foundEmails: string[] = [];

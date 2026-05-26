@@ -36,6 +36,42 @@ export interface SendBulkResponse {
   error?: string;
 }
 
+/**
+ * Convert plain text email body to clean HTML.
+ * - Double newlines → paragraph breaks (<p> tags)
+ * - Single newlines → line breaks (<br>)
+ * - Preserves the signature formatting
+ * - Adds minimal inline styles for good rendering across email clients
+ */
+function plainToHtml(text: string): string {
+  // If already HTML, return as-is
+  if (/<html[\s>]/i.test(text) || /<p[\s>]/i.test(text)) return text;
+
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  // Split on double newlines to get paragraphs
+  const paragraphs = escaped
+    .trim()
+    .split(/\n\n+/)
+    .map(para => {
+      // Within each paragraph, single newlines become <br>
+      const lines = para.trim().split('\n').map(l => l.trim()).join('<br>');
+      return `<p style="margin:0 0 16px 0;line-height:1.65;color:#222222;">${lines}</p>`;
+    })
+    .join('\n');
+
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222222;max-width:580px;margin:0 auto;padding:24px 20px;background:#ffffff;">
+${paragraphs}
+</body>
+</html>`;
+}
+
 /** Lightweight DNS-based email validation using Google's public DNS API */
 async function verifyEmailDNS(email: string): Promise<boolean> {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -166,6 +202,26 @@ export async function POST(request: NextRequest) {
               status: "failed",
               error_message: "Failed DNS/MX verification",
             });
+
+            // Log to sent_emails so CRM shows the failure
+            await serviceSupabase.from("sent_emails").insert({
+              user_id: user.id,
+              lead_id: email.leadId,
+              campaign_id: campaignId,
+              to_email: email.to,
+              subject: email.subject,
+              body: email.body,
+              sent_at: new Date().toISOString(),
+              status: "failed",
+              bounce_reason: "Invalid email — failed DNS/MX verification",
+            });
+
+            if (email.leadId) {
+              await serviceSupabase
+                .from("leads")
+                .update({ status: "failed", updated_at: new Date().toISOString() })
+                .eq("id", email.leadId);
+            }
             continue;
           }
         }
@@ -193,7 +249,7 @@ export async function POST(request: NextRequest) {
         const sendResult = await smtpManager.sendEmail(
           email.to,
           email.subject,
-          email.body
+          plainToHtml(email.body)
         );
 
         if (sendResult.success) {
@@ -259,6 +315,27 @@ export async function POST(request: NextRequest) {
             error_message: sendResult.error,
             retry_count: 0,
           });
+
+          // Also log to sent_emails so CRM and Follow-Up can show the failure
+          await serviceSupabase.from("sent_emails").insert({
+            user_id: user.id,
+            lead_id: email.leadId,
+            campaign_id: campaignId,
+            to_email: email.to,
+            subject: email.subject,
+            body: email.body,
+            sent_at: new Date().toISOString(),
+            status: "failed",
+            bounce_reason: sendResult.error ?? "Send failed",
+          });
+
+          // Mark lead as failed
+          if (email.leadId) {
+            await serviceSupabase
+              .from("leads")
+              .update({ status: "failed", updated_at: new Date().toISOString() })
+              .eq("id", email.leadId);
+          }
         }
 
         // Throttle between sends
