@@ -11,6 +11,7 @@ import AISettingsModule from "./AISettingsModule";
 import SMTPManager from "./SMTPManager";
 import FollowUpModule from "./FollowUpModule";
 import CampaignsModule from "./CampaignsModule";
+import EmailVerificationModule from "./EmailVerificationModule";
 import { createClient } from "../../../supabase/client";
 import { useRouter } from "next/navigation";
 

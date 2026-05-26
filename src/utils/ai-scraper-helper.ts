@@ -180,16 +180,16 @@ export async function extractEmailFromContent(
   domain: string,
   provider: AIProviderConfig
 ): Promise<string | null> {
-  const system = `You are an email extraction specialist. Your job is to find real contact email addresses from website content.
+  const system = `You are an email extraction specialist. Find real contact email addresses in website content.
 Rules:
+- ONLY return an email that is EXPLICITLY present in the content provided
+- Do NOT invent, guess, or construct any email address
 - Look for mailto: links, "contact us" sections, footer emails, team pages
-- If you find a real email address, return ONLY that email address, nothing else
-- If multiple emails exist, return the most likely business contact (info@, contact@, hello@, sales@)
-- If no real email is visible but the domain is clear, you may suggest info@${domain} or contact@${domain}
+- If multiple emails exist, return the most likely business contact
 - NEVER return noreply@, donotreply@, or system emails
-- If you truly cannot find or infer any email, return exactly: NONE`;
+- If no real email is visible in the content, return exactly: NONE
+- Return ONLY the email address or NONE — nothing else`;
 
-  // Truncate to avoid token limits
   const truncated = websiteText.slice(0, 2000);
 
   const user = `Company: ${companyName}
@@ -197,21 +197,18 @@ Domain: ${domain}
 Website content:
 ${truncated}
 
-What is the contact email address for this business?`;
+Find the contact email address that is explicitly written in the content above. If none is present, return NONE.`;
 
   try {
     const response = await callAI(provider, system, user, 50);
     const cleaned = response.trim().toLowerCase();
 
-    // Validate it looks like an email
     if (cleaned === 'none' || !cleaned.includes('@')) return null;
 
     const emailMatch = cleaned.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
     if (!emailMatch) return null;
 
     const email = emailMatch[0];
-
-    // Reject blocked patterns
     const blockedPrefixes = ['noreply', 'no-reply', 'donotreply', 'privacy', 'test'];
     const local = email.split('@')[0];
     if (blockedPrefixes.some(p => local.startsWith(p))) return null;

@@ -1,7 +1,7 @@
 "use client";
 
 import { ActiveModule } from "@/types/platform";
-import { Radio, Mail, Settings, Layout, Server, Send, Megaphone } from "lucide-react";
+import { Radio, Mail, Settings, Layout, Server, Send, Megaphone, ShieldCheck } from "lucide-react";
 
 interface SidebarProps {
   activeModule: ActiveModule;
@@ -22,6 +22,7 @@ const navGroups = [
     label: "Management",
     items: [
       { id: "crm" as ActiveModule,           label: "CRM",          icon: Layout,       badge: null },
+      { id: "verification" as ActiveModule,  label: "Verify Emails",icon: ShieldCheck,  badge: null },
     ],
   },
   {
