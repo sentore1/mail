@@ -363,6 +363,8 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
             location: l.location,
             company_context: l.company_context,
             email: l.email,
+            website: (l as any).website ?? null,
+            source_url: (l as any).source_url ?? null,
           })),
           yourCompany,
           yourService,

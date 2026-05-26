@@ -5,7 +5,7 @@ import { Lead, EmailReply, AIReply, SentEmail } from "@/types/platform";
 import {
   Mail, Send, Loader2, X,
   MessageSquare, Sparkles, RefreshCw, ThumbsUp, ThumbsDown,
-  Inbox, Bot,
+  Inbox, Bot, Trash2,
 } from "lucide-react";
 import { createClient } from "../../../supabase/client";
 import { toast } from "sonner";
@@ -32,6 +32,7 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
   const [showAIModal, setShowAIModal] = useState(false);
   const [aiDraft, setAIDraft] = useState<AIDraft | null>(null);
   const [checkingReplies, setCheckingReplies] = useState(false);
+  const [deletingAllSent, setDeletingAllSent] = useState(false);
 
   const supabase = createClient();
 
@@ -132,6 +133,24 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
       toast.error("Could not reach inbox check endpoint");
     } finally {
       setCheckingReplies(false);
+    }
+  };
+
+  const deleteAllSent = async () => {
+    if (!confirm(`Delete all ${sentEmails.length} sent email records? This only removes the log — it does not unsend any emails.`)) return;
+    setDeletingAllSent(true);
+    try {
+      const { error } = await supabase
+        .from("sent_emails")
+        .delete()
+        .eq("user_id", userId);
+      if (error) throw error;
+      setSentEmails([]);
+      toast.success("All sent email records deleted");
+    } catch {
+      toast.error("Failed to delete sent emails");
+    } finally {
+      setDeletingAllSent(false);
     }
   };
 
@@ -344,6 +363,19 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
         {/* Sent Emails */}
         {activeTab === "sent" && (
           <div className="space-y-2 max-w-5xl">
+            {sentEmails.length > 0 && (
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs text-gray-500">{sentEmails.length} record{sentEmails.length !== 1 ? "s" : ""}</p>
+                <button
+                  onClick={deleteAllSent}
+                  disabled={deletingAllSent}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-50 transition-colors"
+                >
+                  {deletingAllSent ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                  {deletingAllSent ? "Deleting…" : "Delete All"}
+                </button>
+              </div>
+            )}
             {sentEmails.length === 0 ? (
               <div className="text-center py-16">
                 <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">

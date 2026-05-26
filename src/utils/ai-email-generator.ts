@@ -192,8 +192,8 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{ 
   const { lead, yourCompany, yourService, tone, customPainPoint, userId,
           senderName: paramSenderName, senderEmail: paramSenderEmail, senderTitle: paramSenderTitle } = params;
 
-  // Fetch active AI provider
-  const providerRes = await fetch(`/api/ai-provider?userId=${userId}`);
+  // Fetch ALL configured providers — we'll try them in order if one is rate-limited
+  const providerRes = await fetch(`/api/ai-provider?userId=${userId}&all=true`);
   if (!providerRes.ok) {
     let msg = "No active AI provider configured. Please set up AI in Settings.";
     try {
@@ -202,7 +202,22 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{ 
     } catch {}
     throw new Error(msg);
   }
-  const aiProvider = await providerRes.json();
+  const providerData = await providerRes.json();
+
+  // Support both old single-provider response and new all-providers array
+  const allProviders: any[] = Array.isArray(providerData)
+    ? providerData
+    : [providerData];
+
+  // Sort: active provider first, then the rest
+  const activeFirst = [
+    ...allProviders.filter((p) => p.is_active),
+    ...allProviders.filter((p) => !p.is_active && p.api_key),
+  ];
+
+  if (activeFirst.length === 0) {
+    throw new Error("No AI provider configured. Please set up AI in Settings.");
+  }
 
   // Fetch sender name from SMTP account if not provided
   let senderName = paramSenderName || '';
@@ -221,7 +236,6 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{ 
 
       if (smtpAccounts && smtpAccounts.length > 0) {
         const account = smtpAccounts[0];
-        // Use sender_name if set, otherwise derive from email
         senderName = account.sender_name ||
           account.email.split('@')[0]
             .replace(/[._\-]/g, ' ')
@@ -241,30 +255,64 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{ 
 
   const SYSTEM_MESSAGE = buildSystemMessage(senderName, senderTitle);
 
-  // Build compact user prompt
   const companyContext = lead.company_context ? lead.company_context.slice(0, 300) : "";
-
   const userPrompt = `Write a Pryro outreach email.
 Recipient: ${lead.company_name} | ${lead.niche || "Business"} | ${lead.location || ""}${companyContext ? `\nContext: ${companyContext}` : ""}${customPainPoint ? `\nPain point: ${customPainPoint}` : ""}
 ${TONE_ADDITIONS[tone]}`;
 
-  // ── Call the active AI provider ───────────────────────────────────────────
-  let aiResponse = "";
+  // ── Try each provider in order until one succeeds ─────────────────────────
+  const lastErrors: string[] = [];
 
+  for (const aiProvider of activeFirst) {
+    try {
+      const aiResponse = await callSingleProvider(aiProvider, SYSTEM_MESSAGE, userPrompt);
+      const result = parseAIResponse(aiResponse, senderName, senderTitle);
+      return result;
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      const isRateLimit = /429|rate.?limit|quota|exceeded|too many/i.test(msg);
+      const isAuth = /401|invalid.*key|authentication/i.test(msg);
+
+      console.warn(`[AI Fallback] ${aiProvider.provider} failed: ${msg}`);
+      lastErrors.push(`${aiProvider.provider}: ${msg}`);
+
+      // Only fall through to next provider on rate limit / quota errors
+      // Auth errors and other failures should also try next provider
+      if (activeFirst.indexOf(aiProvider) < activeFirst.length - 1) {
+        console.log(`[AI Fallback] Trying next provider…`);
+        continue;
+      }
+    }
+  }
+
+  throw new Error(
+    `All AI providers failed. Last errors: ${lastErrors.slice(-3).join(" | ")}`
+  );
+}
+
+// ── Call a single provider and return raw text ────────────────────────────────
+async function callSingleProvider(
+  aiProvider: any,
+  systemMessage: string,
+  userPrompt: string
+): Promise<string> {
   if (aiProvider.provider === "openai") {
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${aiProvider.api_key}` },
       body: JSON.stringify({
         model: aiProvider.active_model || "gpt-4o-mini",
-        messages: [{ role: "system", content: SYSTEM_MESSAGE }, { role: "user", content: userPrompt }],
+        messages: [{ role: "system", content: systemMessage }, { role: "user", content: userPrompt }],
         temperature: 0.4,
         max_tokens: 400,
       }),
     });
-    if (!res.ok) throw new Error(`OpenAI API error: ${res.statusText}`);
+    if (!res.ok) {
+      const errText = await res.text().catch(() => res.statusText);
+      throw new Error(`OpenAI ${res.status}: ${errText.slice(0, 200)}`);
+    }
     const data = await res.json();
-    aiResponse = data.choices[0].message.content;
+    return data.choices[0].message.content;
 
   } else if (aiProvider.provider === "anthropic") {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -273,13 +321,16 @@ ${TONE_ADDITIONS[tone]}`;
       body: JSON.stringify({
         model: aiProvider.active_model || "claude-3-5-haiku-20241022",
         max_tokens: 400,
-        system: SYSTEM_MESSAGE,
+        system: systemMessage,
         messages: [{ role: "user", content: userPrompt }],
       }),
     });
-    if (!res.ok) throw new Error(`Anthropic API error: ${res.statusText}`);
+    if (!res.ok) {
+      const errText = await res.text().catch(() => res.statusText);
+      throw new Error(`Anthropic ${res.status}: ${errText.slice(0, 200)}`);
+    }
     const data = await res.json();
-    aiResponse = data.content[0].text;
+    return data.content[0].text;
 
   } else if (aiProvider.provider === "groq") {
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -287,7 +338,7 @@ ${TONE_ADDITIONS[tone]}`;
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${aiProvider.api_key}` },
       body: JSON.stringify({
         model: aiProvider.active_model || "llama-3.1-8b-instant",
-        messages: [{ role: "system", content: SYSTEM_MESSAGE }, { role: "user", content: userPrompt }],
+        messages: [{ role: "system", content: systemMessage }, { role: "user", content: userPrompt }],
         temperature: 0.4,
         max_tokens: 400,
       }),
@@ -296,13 +347,10 @@ ${TONE_ADDITIONS[tone]}`;
       let errText = ""; try { errText = await res.text(); } catch {}
       let errJson: any = null; try { errJson = JSON.parse(errText); } catch {}
       const msg = errJson?.error?.message || errText.slice(0, 200) || res.statusText;
-      if (res.status === 401) throw new Error("Groq API key is invalid. Check Settings.");
-      if (res.status === 429) throw new Error("Groq rate limit hit. Wait a moment and try again.");
-      if (res.status === 404) throw new Error(`Groq model "${aiProvider.active_model}" not found. Check Settings.`);
-      throw new Error(`Groq API error (${res.status}): ${msg}`);
+      throw new Error(`Groq ${res.status}: ${msg}`);
     }
     const data = await res.json();
-    aiResponse = data.choices[0].message.content;
+    return data.choices[0].message.content;
 
   } else if (aiProvider.provider === "gemini") {
     const res = await fetch(
@@ -311,14 +359,17 @@ ${TONE_ADDITIONS[tone]}`;
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: SYSTEM_MESSAGE + "\n\n" + userPrompt }] }],
+          contents: [{ parts: [{ text: systemMessage + "\n\n" + userPrompt }] }],
           generationConfig: { temperature: 0.4, maxOutputTokens: 400 },
         }),
       }
     );
-    if (!res.ok) throw new Error(`Gemini API error: ${res.statusText}`);
+    if (!res.ok) {
+      const errText = await res.text().catch(() => res.statusText);
+      throw new Error(`Gemini ${res.status}: ${errText.slice(0, 200)}`);
+    }
     const data = await res.json();
-    aiResponse = data.candidates[0].content.parts[0].text;
+    return data.candidates[0].content.parts[0].text;
 
   } else if (aiProvider.provider === "mistral") {
     const res = await fetch("https://api.mistral.ai/v1/chat/completions", {
@@ -326,20 +377,29 @@ ${TONE_ADDITIONS[tone]}`;
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${aiProvider.api_key}` },
       body: JSON.stringify({
         model: aiProvider.active_model || "mistral-small",
-        messages: [{ role: "system", content: SYSTEM_MESSAGE }, { role: "user", content: userPrompt }],
+        messages: [{ role: "system", content: systemMessage }, { role: "user", content: userPrompt }],
         temperature: 0.4,
         max_tokens: 400,
       }),
     });
-    if (!res.ok) throw new Error(`Mistral API error: ${res.statusText}`);
+    if (!res.ok) {
+      const errText = await res.text().catch(() => res.statusText);
+      throw new Error(`Mistral ${res.status}: ${errText.slice(0, 200)}`);
+    }
     const data = await res.json();
-    aiResponse = data.choices[0].message.content;
+    return data.choices[0].message.content;
 
   } else {
     throw new Error(`Unsupported AI provider: ${aiProvider.provider}`);
   }
+}
 
-  // ── Parse SUBJECT / BODY from response ────────────────────────────────────
+// ── Parse and clean AI response ───────────────────────────────────────────────
+function parseAIResponse(
+  aiResponse: string,
+  senderName: string,
+  senderTitle: string
+): { subject: string; body: string } {
   let subject = "";
   let body = "";
 
@@ -350,7 +410,6 @@ ${TONE_ADDITIONS[tone]}`;
     subject = subjectMatch[1].trim();
     body = bodyMatch[1].trim();
   } else {
-    // Fallback: first line = subject, rest = body
     const lines = aiResponse.trim().split("\n");
     if (lines.length >= 2) {
       subject = lines[0].replace(/^(SUBJECT:|Subject:)/i, "").trim();
@@ -363,7 +422,6 @@ ${TONE_ADDITIONS[tone]}`;
   subject = stripMarkdown(subject.replace(/^["']|["']$/g, "").trim());
   body = stripMarkdown(body.replace(/^["']|["']$/g, "").trim());
 
-  // Replace any leftover placeholder brackets the AI might output
   body = body
     .replace(/\[Sender Name\]/gi, senderName)
     .replace(/\[Your Name\]/gi, senderName)

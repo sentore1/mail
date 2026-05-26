@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Lead, LeadStatus, LEAD_STATUSES } from "@/types/platform";
 import {
   Mail, X, Loader2, Users, Send, MessageSquare,
-  TrendingUp, Save, Clock, Upload, Trash2, Filter,
+  TrendingUp, Save, Clock, Upload, Trash2, Filter, Eraser,
 } from "lucide-react";
 import { createClient } from "../../../supabase/client";
 import { toast } from "sonner";
@@ -45,6 +45,8 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
   const [dragOver, setDragOver] = useState<LeadStatus | null>(null);
   const [draggingLead, setDraggingLead] = useState<string | null>(null);
   const [showCSVImport, setShowCSVImport] = useState(false);
+  const [showCleanModal, setShowCleanModal] = useState(false);
+  const [deletingNiche, setDeletingNiche] = useState<string | null>(null);
 
   const supabase = createClient();
 
@@ -116,6 +118,41 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
       toast.success("Lead deleted");
     } else {
       toast.error("Failed to delete lead");
+    }
+  };
+
+  const deleteAll = async () => {
+    try {
+      const { error } = await supabase
+        .from("leads")
+        .delete()
+        .eq("user_id", userId);
+      if (error) throw error;
+      setLeads([]);
+      setCategories([]);
+      if (drawerLead) setDrawerLead(null);
+      toast.success("All leads deleted from CRM");
+    } catch {
+      toast.error("Failed to delete all leads");
+    }
+  };
+
+  const deleteByNiche = async (niche: string) => {
+    setDeletingNiche(niche);
+    try {
+      const { error } = await supabase
+        .from("leads")
+        .delete()
+        .eq("user_id", userId)
+        .eq("niche", niche);
+      if (error) throw error;
+      setLeads((prev) => prev.filter((l) => (l as any).niche !== niche));
+      if (drawerLead && (drawerLead as any).niche === niche) setDrawerLead(null);
+      toast.success(`Deleted all "${niche}" leads`);
+    } catch {
+      toast.error("Failed to delete leads");
+    } finally {
+      setDeletingNiche(null);
     }
   };
 
@@ -199,6 +236,32 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
           <Upload size={12} />
           Import CSV
         </button>
+
+        {/* Clean CRM by niche */}
+        {categories.length > 0 && (
+          <button
+            onClick={() => setShowCleanModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors flex-shrink-0"
+          >
+            <Eraser size={12} />
+            Clean CRM
+          </button>
+        )}
+
+        {/* Delete ALL leads */}
+        {leads.length > 0 && (
+          <button
+            onClick={() => {
+              if (confirm(`Delete ALL ${leads.length} leads? This cannot be undone.`)) {
+                deleteAll();
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-red-400 bg-red-600 text-white hover:bg-red-700 transition-colors flex-shrink-0"
+          >
+            <Trash2 size={12} />
+            Delete All
+          </button>
+        )}
       </div>
 
       {/* ── Filter bar ───────────────────────────────────────────────── */}
@@ -497,6 +560,71 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
           onClose={() => setShowCSVImport(false)}
           onImported={() => { setShowCSVImport(false); fetchLeads(); }}
         />
+      )}
+
+      {/* Clean CRM by Niche Modal */}
+      {showCleanModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setShowCleanModal(false)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div
+            className="relative bg-white rounded-xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+              <div>
+                <h2 className="text-sm font-bold text-gray-900">Clean CRM by Niche</h2>
+                <p className="text-xs text-gray-500 mt-0.5">Delete all leads from a specific niche at once</p>
+              </div>
+              <button onClick={() => setShowCleanModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100">
+                <X size={15} className="text-gray-500" />
+              </button>
+            </div>
+
+            {/* Niche list */}
+            <div className="p-4 flex flex-col gap-2 max-h-80 overflow-y-auto">
+              {categories.map((niche) => {
+                const count = leads.filter((l) => (l as any).niche === niche).length;
+                const isDeleting = deletingNiche === niche;
+                return (
+                  <div
+                    key={niche}
+                    className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-gray-200 bg-gray-50"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-800 truncate">{niche}</p>
+                      <p className="text-[11px] text-gray-400">{count} lead{count !== 1 ? "s" : ""}</p>
+                    </div>
+                    <button
+                      disabled={isDeleting}
+                      onClick={() => {
+                        if (confirm(`Delete all ${count} "${niche}" leads? This cannot be undone.`)) {
+                          deleteByNiche(niche);
+                        }
+                      }}
+                      className="flex items-center gap-1.5 ml-3 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 disabled:opacity-50 transition-colors flex-shrink-0"
+                    >
+                      {isDeleting ? (
+                        <Loader2 size={11} className="animate-spin" />
+                      ) : (
+                        <Trash2 size={11} />
+                      )}
+                      {isDeleting ? "Deleting…" : `Delete all`}
+                    </button>
+                  </div>
+                );
+              })}
+              {categories.length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-6">No niches found</p>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 py-3 border-t border-gray-100 bg-gray-50">
+              <p className="text-[11px] text-gray-400 text-center">⚠ Deletion is permanent and cannot be undone</p>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

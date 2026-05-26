@@ -385,19 +385,30 @@ async function scrapeBing(
 
           // Check snippet + block for email first (fastest)
           let email = bestEmail(extractEmails(snippet + ' ' + block));
+          let bingEmailIsReal = !!email;
 
           // Fetch website if no email in snippet
           if (!email && url && !skipDomains.some(s => url.includes(s))) {
             email = await fetchEmailFromSite(url, cleanName, niche, location, aiProvider);
+            if (email) bingEmailIsReal = true;
           }
 
-          if (!email) return; // skip — no real email found
+          // Fallback: guess info@domain from the URL
+          if (!email && url) {
+            try {
+              const domain = new URL(url).hostname.replace('www.', '');
+              email = `info@${domain}`;
+              bingEmailIsReal = false;
+            } catch {}
+          }
+
+          if (!email) return; // no URL at all — truly skip
 
           seen.add(cleanName.toLowerCase());
           const lead: ScrapedLead = {
             company_name: cleanName,
             email,
-            emailIsReal: true,
+            emailIsReal: bingEmailIsReal,
             niche, location,
             company_context: snippet || `${cleanName} is a ${niche} in ${location}.`,
             source_url: url,
@@ -405,7 +416,7 @@ async function scrapeBing(
           };
           leads.push(lead);
           onLead(lead);
-          console.log(`    ✅ ${cleanName} → ${email}`);
+          console.log(`    ✅ ${cleanName} → ${email}${bingEmailIsReal ? '' : ' (guessed)'}`);
         }));
       }
 
@@ -479,18 +490,29 @@ async function scrapeDDG(
 
         // Check snippet + block for email first
         let email = bestEmail(extractEmails(snippet + ' ' + block));
+        let ddgEmailIsReal = !!email;
 
         if (!email && url && !skipDomains.some(s => url.includes(s))) {
           email = await fetchEmailFromSite(url, cleanName, niche, location, aiProvider);
+          if (email) ddgEmailIsReal = true;
         }
 
-        if (!email) continue;
+        // Fallback: guess info@domain
+        if (!email && url) {
+          try {
+            const domain = new URL(url).hostname.replace('www.', '');
+            email = `info@${domain}`;
+            ddgEmailIsReal = false;
+          } catch {}
+        }
+
+        if (!email) continue; // no URL — skip
 
         seen.add(cleanName.toLowerCase());
         const lead: ScrapedLead = {
           company_name: cleanName,
           email,
-          emailIsReal: true,
+          emailIsReal: ddgEmailIsReal,
           niche, location,
           company_context: snippet || `${cleanName} is a ${niche} in ${location}.`,
           source_url: url,
@@ -498,7 +520,7 @@ async function scrapeDDG(
         };
         leads.push(lead);
         onLead(lead);
-        console.log(`    ✅ ${cleanName} → ${email}`);
+        console.log(`    ✅ ${cleanName} → ${email}${ddgEmailIsReal ? '' : ' (guessed)'}`);
       }
 
       await delay(400);
@@ -620,33 +642,48 @@ async function scrapeGoogleMaps(
           } finally { await p.close().catch(() => {}); }
         } catch {}
 
-        // Step 2: Fetch email from website IN PARALLEL with the above
-        // (website fetch starts as soon as we have the URL, no extra waiting)
+        // Step 2: Fetch email from website
         let email: string | null = null;
         if (website) {
           email = await fetchEmailFromSite(website, biz.name, niche, location, aiProvider, browser);
         }
 
-        // Step 3: If still no email, try SMTP-based email guesser
-        if (!email && website) {
-          try {
-            const guesses = await guessAndVerifyEmails(website, {
-              companyName: biz.name, location, maxGuesses: 3, smtpVerify: false,
-            });
-            if (guesses[0]) email = guesses[0].email;
-          } catch {}
-        }
-
+        // Step 3: Always fall back to a guessed pattern — never drop a business
+        // that has a website. emailIsReal=false tells the UI it's a guess.
+        let emailIsGuessed = false;
         if (!email) {
-          console.log(`  ⏭  ${biz.name} — no email found`);
-          return;
+          // Try pattern guesser if we have a website
+          if (website) {
+            try {
+              const guesses = await guessAndVerifyEmails(website, {
+                companyName: biz.name, location, maxGuesses: 1, smtpVerify: false,
+              });
+              if (guesses[0]) {
+                email = guesses[0].email;
+                emailIsGuessed = true;
+              }
+            } catch {}
+          }
+
+          // Last resort: construct info@domain from website or company name
+          if (!email) {
+            let domain = '';
+            if (website) {
+              try { domain = new URL(website).hostname.replace('www.', ''); } catch {}
+            }
+            if (!domain) {
+              domain = biz.name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20) + '.com';
+            }
+            email = `info@${domain}`;
+            emailIsGuessed = true;
+          }
         }
 
         seen.add(biz.name.toLowerCase());
         const lead: ScrapedLead = {
           company_name: biz.name,
           email,
-          emailIsReal: true,
+          emailIsReal: !emailIsGuessed,
           niche,
           location: biz.address || location,
           company_context: `${biz.name} is a ${niche} in ${location}. ${biz.rating}`.trim(),
@@ -841,10 +878,21 @@ async function scrapeGoogleSearch(
 
           // Email from snippet first
           let email = bestEmail(extractEmails(snippet));
+          let gEmailIsReal = !!email;
 
           // Then try fetching the site
           if (!email && url && !skipDomains.some(s => url.includes(s))) {
             email = await fetchEmailFromSite(url, cleanName, niche, location, aiProvider, browser);
+            if (email) gEmailIsReal = true;
+          }
+
+          // Fallback: guess info@domain
+          if (!email && url) {
+            try {
+              const domain = new URL(url).hostname.replace('www.', '');
+              email = `info@${domain}`;
+              gEmailIsReal = false;
+            } catch {}
           }
 
           if (!email) continue;
@@ -853,7 +901,7 @@ async function scrapeGoogleSearch(
           const lead: ScrapedLead = {
             company_name: cleanName,
             email,
-            emailIsReal: true,
+            emailIsReal: gEmailIsReal,
             niche, location,
             company_context: snippet || `${cleanName} is a ${niche} in ${location}.`,
             source_url: url,
@@ -861,7 +909,7 @@ async function scrapeGoogleSearch(
           };
           leads.push(lead);
           onLead(lead);
-          console.log(`    ✅ ${cleanName} → ${email}`);
+          console.log(`    ✅ ${cleanName} → ${email}${gEmailIsReal ? '' : ' (guessed)'}`);
         }
 
         await delay(1500 + Math.random() * 1000); // polite delay between Google queries
@@ -883,9 +931,13 @@ async function scrapeGoogleSearch(
 /**
  * Scrape leads for a niche + location using all sources in parallel.
  *
+ * Strategy: TWO-PASS
+ *  Pass 1 — collect as many businesses as possible (name + website + phone)
+ *  Pass 2 — find email for each: website scrape → pattern guess
+ *  Every business with a website gets at least a guessed email (info@domain).
+ *  emailIsReal=true means found on website, false means guessed pattern.
+ *
  * @param aiProvider  Optional AI provider config (from user's AI Settings).
- *                    When provided, AI helps generate search queries and
- *                    extract emails from website content.
  */
 export async function scrapeWithoutAPI(
   niche: string,
@@ -900,22 +952,22 @@ export async function scrapeWithoutAPI(
   console.log(`${'='.repeat(60)}\n`);
 
   const all: ScrapedLead[] = [];
-  const seen = new Set<string>();
+  const seen = new Set<string>(); // dedup by company name
 
   const emit = (lead: ScrapedLead) => {
     all.push(lead);
     onLead?.(lead);
   };
 
-  // For large targets (200+), give each source a bigger slice.
-  // Maps can scroll deep; Bing/DDG run multiple query pages.
-  const mapsTarget   = Math.ceil(maxLeads * 0.40);   // ~40% from Maps
-  const bingTarget   = Math.ceil(maxLeads * 0.30);   // ~30% from Bing
-  const ddgTarget    = Math.ceil(maxLeads * 0.20);   // ~20% from DDG
-  const dirTarget    = Math.ceil(maxLeads * 0.15);   // ~15% from directories
-  const googleTarget = Math.ceil(maxLeads * 0.25);   // ~25% from Google Search
+  // Give each source a generous target — they share the seen set so
+  // duplicates are skipped, but each source independently tries to fill its quota.
+  const mapsTarget   = Math.ceil(maxLeads * 0.60);
+  const bingTarget   = Math.ceil(maxLeads * 0.60);
+  const ddgTarget    = Math.ceil(maxLeads * 0.50);
+  const dirTarget    = Math.ceil(maxLeads * 0.40);
+  const googleTarget = Math.ceil(maxLeads * 0.40);
 
-  // All 5 sources run in parallel
+  // Run all 5 sources in parallel
   const [mapsRes, bingRes, ddgRes, dirRes, googleRes] = await Promise.allSettled([
     scrapeGoogleMaps(niche, location, mapsTarget, seen, emit, aiProvider),
     scrapeBing(niche, location, bingTarget, seen, emit, aiProvider),
@@ -936,7 +988,7 @@ export async function scrapeWithoutAPI(
   console.log(`📊 Results: ${all.length} leads | Maps:${counts.maps} Bing:${counts.bing} DDG:${counts.ddg} Dir:${counts.dir} Google:${counts.google}`);
   console.log(`${'='.repeat(60)}\n`);
 
-  // Deduplicate by email
+  // Deduplicate by email, then slice to target
   const deduped = Array.from(
     new Map(all.map(l => [l.email.toLowerCase(), l])).values()
   );
