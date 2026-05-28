@@ -3,7 +3,9 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 export async function proxy(req: NextRequest) {
-  const res = NextResponse.next()
+  let res = NextResponse.next({
+    request: { headers: req.headers },
+  })
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -11,14 +13,12 @@ export async function proxy(req: NextRequest) {
     {
       cookies: {
         getAll() {
-          return req.cookies.getAll().map(({ name, value }) => ({
-            name,
-            value,
-          }))
+          return req.cookies.getAll().map(({ name, value }) => ({ name, value }))
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) => {
             req.cookies.set(name, value)
+            res = NextResponse.next({ request: { headers: req.headers } })
             res.cookies.set(name, value, options)
           })
         },
@@ -26,26 +26,32 @@ export async function proxy(req: NextRequest) {
     }
   )
 
-  // Refresh session if expired - required for Server Components
-  const { data: { session }, error } = await supabase.auth.getSession()
+  // Refresh session — required for Server Components to read auth state
+  const { data: { user }, error } = await supabase.auth.getUser()
 
-  if (error) {
-    console.error('Auth session error:', error)
+  // Protect /dashboard — redirect to sign-in if not authenticated
+  if (req.nextUrl.pathname.startsWith('/dashboard') && error) {
+    return NextResponse.redirect(new URL('/sign-in', req.url))
+  }
+
+  // Redirect logged-in users from landing page to dashboard
+  if (req.nextUrl.pathname === '/' && !error && user) {
+    return NextResponse.redirect(new URL('/dashboard', req.url))
   }
 
   return res
 }
 
-// Ensure the middleware is only called for relevant paths
 export const config = {
   matcher: [
     /*
-     * Match all request paths except for the ones starting with:
+     * Match all request paths except:
      * - _next/static (static files)
      * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public (public files)
+     * - favicon.ico
+     * - api/track (email open tracking pixel — must be public)
+     * - static image files
      */
-    '/((?!_next/static|_next/image|favicon.ico|public|api).*)',
+    '/((?!_next/static|_next/image|favicon.ico|api/track|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }

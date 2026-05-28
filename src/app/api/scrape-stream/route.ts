@@ -43,23 +43,25 @@ export async function POST(request: NextRequest) {
 
   const totalChunks = Math.ceil(maxResults / CHUNK_SIZE);
 
-  // Create a scrape_job record for progress tracking
-  const { data: job } = await supabase
-    .from("scrape_jobs")
-    .insert({
-      user_id: user.id,
-      niche: niche.trim(),
-      location: location.trim(),
-      max_results: maxResults,
-      chunk_size: CHUNK_SIZE,
-      total_chunks: totalChunks,
-      status: "running",
-      source: "scraper",
-    })
-    .select()
-    .single();
-
-  const jobId = job?.id ?? null;
+  // Create a scrape_job record for progress tracking (table may not exist — ignore errors)
+  let jobId: string | null = null;
+  try {
+    const { data: job } = await supabase
+      .from("scrape_jobs")
+      .insert({
+        user_id: user.id,
+        niche: niche.trim(),
+        location: location.trim(),
+        max_results: maxResults,
+        chunk_size: CHUNK_SIZE,
+        total_chunks: totalChunks,
+        status: "running",
+        source: "scraper",
+      })
+      .select()
+      .single();
+    jobId = job?.id ?? null;
+  } catch { /* scrape_jobs table may not exist — scraping still works */ }
 
   // Load user's active AI provider for AI-assisted scraping
   let aiProvider = null;

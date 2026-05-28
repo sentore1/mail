@@ -71,11 +71,23 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
 
   useEffect(() => {
     fetchLeads();
+
+    // Debounce realtime updates — batch rapid inserts (e.g. during scraping)
+    // into a single re-fetch after 2 seconds of quiet
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const debouncedFetch = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => fetchLeads(), 2000);
+    };
+
     const channel = supabase
       .channel("leads_changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "leads", filter: `user_id=eq.${userId}` }, () => fetchLeads())
+      .on("postgres_changes", { event: "*", schema: "public", table: "leads", filter: `user_id=eq.${userId}` }, debouncedFetch)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      supabase.removeChannel(channel);
+    };
   }, [fetchLeads]);
 
   const updateLeadStatus = async (leadId: string, newStatus: LeadStatus, oldStatus: LeadStatus) => {

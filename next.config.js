@@ -9,8 +9,6 @@ const nextConfig = {
       },
     ],
   },
-  // Allow cross-origin requests from local network IPs during development
-  // (e.g. accessing via WSL2 or a local network device)
   allowedDevOrigins: [
     'http://172.17.144.1:3000',
     'http://localhost:3000',
