@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "../../../../supabase/server";
 import { createServiceClient } from "../../../../supabase/service";
 import { SMTPManager } from "@/utils/smtp-server";
+import { verifyEmail } from "@/utils/email-verifier";
 
 // nodemailer requires the Node.js runtime (not Edge)
 export const runtime = "nodejs";
@@ -72,23 +73,11 @@ ${paragraphs}
 </html>`;
 }
 
-/** Lightweight DNS-based email validation using Google's public DNS API */
+/** Lightweight DNS-based email validation — replaced by email-verifier utility */
 async function verifyEmailDNS(email: string): Promise<boolean> {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(email)) return false;
-
-  const domain = email.split("@")[1];
-  try {
-    const res = await fetch(
-      `https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=MX`,
-      { signal: AbortSignal.timeout(4000) }
-    );
-    const data = await res.json();
-    return Array.isArray(data?.Answer) && data.Answer.length > 0;
-  } catch {
-    // If DNS check fails, assume valid so we don't drop real emails
-    return true;
-  }
+  const { verifyEmail: verify } = await import("@/utils/email-verifier");
+  const result = await verify(email);
+  return result.valid;
 }
 
 export async function POST(request: NextRequest) {
@@ -184,45 +173,46 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // Optional DNS verification
+        // Email verification — check format + MX + mailbox existence
         if (verifyEmails) {
-          const valid = await verifyEmailDNS(email.to);
-          if (!valid) {
+          const verification = await verifyEmail(email.to);
+          if (!verification.valid) {
             results.failed++;
-            results.errors.push(`${email.to}: failed DNS verification`);
+            results.errors.push(`${email.to}: ${verification.detail ?? verification.reason}`);
 
-            await serviceSupabase.from("email_queue").insert({
-              user_id: user.id,
-              campaign_id: campaignId,
-              lead_id: email.leadId,
-              recipient_email: email.to,
-              recipient_name: email.companyName,
-              subject: email.subject,
-              body: email.body,
-              status: "failed",
-              error_message: "Failed DNS/MX verification",
-            });
-
-            // Log to sent_emails so CRM shows the failure
+            // Log to sent_emails so CRM drawer shows it was skipped
             await serviceSupabase.from("sent_emails").insert({
               user_id: user.id,
-              lead_id: email.leadId,
+              lead_id: email.leadId || null,
               campaign_id: campaignId,
               to_email: email.to,
               subject: email.subject,
               body: email.body,
               sent_at: new Date().toISOString(),
               status: "failed",
-              bounce_reason: "Invalid email — failed DNS/MX verification",
+              bounce_reason: `Email not sent — ${verification.detail ?? verification.reason}`,
             });
 
+            // Mark lead as invalid_email (separate from send failures)
             if (email.leadId) {
               await serviceSupabase
                 .from("leads")
-                .update({ status: "failed", updated_at: new Date().toISOString() })
+                .update({
+                  status: "invalid_email",
+                  email_verified: false,
+                  updated_at: new Date().toISOString(),
+                })
                 .eq("id", email.leadId);
             }
             continue;
+          }
+
+          // Email passed verification — mark it as verified
+          if (email.leadId) {
+            await serviceSupabase
+              .from("leads")
+              .update({ email_verified: true, updated_at: new Date().toISOString() })
+              .eq("id", email.leadId);
           }
         }
 

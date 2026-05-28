@@ -82,16 +82,36 @@ SUBJECT: [subject line]
 BODY: [email body]`;
 }
 
+// ── Niche to readable sector label ───────────────────────────────────────────
+function getSectorLabel(niche: string | null): string {
+  if (!niche) return 'business';
+  const n = niche.toLowerCase();
+  if (/pharmacy|chemist|drug store|dispensary/.test(n)) return 'healthcare';
+  if (/clinic|dental|dentist|hospital|medical|doctor|physician|surgery|optom|chiro|physio|vet|nursing|rehab|radiol|pediatr|dermat/.test(n)) return 'healthcare';
+  if (/restaurant|hotel|lodge|hospitality|catering|bakery|coffee|bar |nightclub|fast food/.test(n)) return 'hospitality';
+  if (/retail|shop|store|supermarket|e-commerce|ecommerce|clothing|electronics|furniture|hardware|jewelry|shoe|sporting/.test(n)) return 'retail';
+  if (/construction|engineering|contractor|architecture|surveying|interior design/.test(n)) return 'construction';
+  if (/logistics|transport|trucking|freight|shipping|courier|fleet|warehouse|moving/.test(n)) return 'logistics';
+  if (/school|college|university|education|training|coaching|driving school|language|nursery|vocational/.test(n)) return 'education';
+  if (/ngo|non-profit|nonprofit|foundation|charity|church|mosque|temple|religious/.test(n)) return 'non-profit';
+  if (/manufacturing|factory|production|textile|packaging|chemical|food processing/.test(n)) return 'manufacturing';
+  if (/agency|consulting|marketing|advertising|pr |media|digital|seo|web design|app dev|software|it service|tech/.test(n)) return 'professional services';
+  if (/bank|finance|insurance|investment|microfinance|forex|mortgage|credit|savings|stock/.test(n)) return 'financial services';
+  if (/farm|agriculture|agri/.test(n)) return 'agriculture';
+  if (/real estate|property|estate agent/.test(n)) return 'real estate';
+  return niche.replace(/\b(services?|solutions?|management|systems?|group|company|ltd|inc)\b/gi, '').replace(/\s+/g, ' ').trim().toLowerCase() || 'business';
+}
+
 // ── Subject patterns (rotated per lead so bulk emails vary) ──────────────────
 const SUBJECT_PATTERNS_BULK = [
-  (company: string, _s: string) => `${company} — quick question about your operations`,
-  (_c: string, sector: string) => `A better way to run ${sector} operations in 2025`,
-  (company: string, _s: string) => `${company} — could this save your team 10 hours a week?`,
-  (_c: string, sector: string) => `How ${sector} businesses are simplifying their back-office`,
-  (company: string, _s: string) => `${company} — worth a 10-minute conversation`,
-  (_c: string, sector: string) => `Cutting admin time for ${sector} teams — is this relevant?`,
-  (company: string, _s: string) => `${company} — one system instead of many tools`,
-  (_c: string, sector: string) => `${sector} businesses and the fragmented tools problem`,
+  (company: string, _s: string) => `${company}, is this relevant to you?`,
+  (_c: string, sector: string) => `For ${sector} businesses — worth reading`,
+  (company: string, _s: string) => `${company}, could we have 10 minutes?`,
+  (_c: string, sector: string) => `Something that may help ${sector} teams`,
+  (company: string, _s: string) => `${company}, honest question`,
+  (_c: string, sector: string) => `${sector} businesses and a tool worth knowing`,
+  (company: string, _s: string) => `${company}, would this be useful to you?`,
+  (_c: string, sector: string) => `For ${sector} teams dealing with too many tools`,
 ];
 
 // ── Direct email builder — no AI, exact template every time ──────────────────
@@ -101,20 +121,18 @@ function buildDirectEmail(
   senderName: string,
   idx: number
 ): { subject: string; body: string } {
-  const sector = (niche || 'business').toLowerCase().trim();
+  const sector = getSectorLabel(niche);
   const patternFn = SUBJECT_PATTERNS_BULK[idx % SUBJECT_PATTERNS_BULK.length]!;
   const subject = patternFn(companyName, sector);
 
   const body =
 `Dear Sir/Madam,
 
-${companyName} — like many businesses in the ${sector} industry — often deals with manual workflows and fragmented tools that slow teams down.
+${companyName} and many ${sector} businesses often deal with manual workflows and fragmented tools that slow teams down.
 
-Pryro is an ERP that replaces those inefficiencies with one unified system — covering finance, inventory, HR, payroll, project management, and CRM.
+Pryro is an ERP that replaces those inefficiencies with one unified system and we offer a 20-30% commission for every successfully referred client.
 
-We also offer a 20–30% commission for every successfully referred client.
-
-Would you be open to a 10-minute call to see if it's relevant?
+Would you be open to a 10-minute call to see if it is relevant?
 
 Best regards,
 ${senderName}
@@ -367,7 +385,7 @@ export async function POST(request: NextRequest) {
       send("done", {
         scraped: scrapedLeads.length,
         emails: emailCount,
-        fallbacks: failCount,
+        fallbacks: 0,
         message: `Done! ${scrapedLeads.length} leads scraped, ${emailCount} emails generated.`,
       });
 

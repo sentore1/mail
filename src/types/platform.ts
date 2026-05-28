@@ -14,6 +14,7 @@ export type LeadStatus =
   | 'interested'
   | 'bounced'
   | 'failed'
+  | 'invalid_email'
   // Legacy statuses (kept for backward compat)
   | 'New'
   | 'Email Sent'

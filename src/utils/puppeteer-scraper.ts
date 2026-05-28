@@ -223,13 +223,12 @@ async function deepScrapeWebsite(
     } catch { return null; }
   };
 
-  // Try all pages in parallel
+  // Try pages sequentially — stop as soon as email found.
+  // Sequential is critical: parallel calls hammer the AI rate limit.
   const urls = pagePaths.map(p => `${origin}${p}`);
-  const results = await Promise.allSettled(urls.map(fetchPage));
-  for (const r of results) {
-    if (r.status === 'fulfilled' && r.value) {
-      return { email: r.value, isReal: true };
-    }
+  for (const url of urls) {
+    const email = await fetchPage(url);
+    if (email) return { email, isReal: true };
   }
 
   // Puppeteer fallback for JS-heavy sites
@@ -267,13 +266,21 @@ async function deepScrapeWebsite(
   }
 
   // AI prediction — last resort when no email found anywhere on the site.
-  // Uses the same AI provider configured for email generation.
   // Marked isReal: false so the UI shows it as AI-predicted, not scraped.
   if (aiProvider) {
     const predicted = await aiPredict(companyName, domain, niche, location, aiProvider);
     if (predicted) {
-      console.log(`    🤖 AI predicted: ${predicted}`);
-      return { email: predicted, isReal: false };
+      // Reject if the predicted email is on a blocked/social domain
+      const predictedDomain = predicted.split('@')[1]?.toLowerCase() ?? '';
+      const isBlockedPrediction = Array.from(BLOCKED_DOMAINS).some(d =>
+        predictedDomain === d || predictedDomain.endsWith('.' + d)
+      );
+      if (!isBlockedPrediction) {
+        console.log(`    🤖 AI predicted: ${predicted}`);
+        return { email: predicted, isReal: false };
+      } else {
+        console.log(`    ⏭  AI predicted blocked domain: ${predicted} — skipped`);
+      }
     }
   }
 
@@ -458,8 +465,6 @@ export async function scrapeGoogleMaps(
 }
 
 // ─── Source 2: Bing Search (fetch-based, no Puppeteer) ───────────────────────
-// Bing returns real HTML without aggressive bot detection.
-// We parse result URLs then deep-scrape each site for emails.
 
 async function scrapeBingSearch(
   niche: string, location: string, needed: number,
@@ -469,63 +474,64 @@ async function scrapeBingSearch(
   const leads: ScrapedLead[] = [];
 
   const queries = [
-    `"${niche}" "${location}" email contact`,
-    `${niche} ${location} "contact@" OR "info@" OR "hello@"`,
-    `${niche} ${location} "@gmail.com" OR "@yahoo.com" contact`,
-    `${niche} ${location} "sales@" OR "admin@" OR "office@"`,
-    `${niche} ${location} contact us email site`,
-    `${niche} near ${location} official website email`,
+    `${niche} ${location} contact email`,
+    `${niche} ${location} "info@" OR "contact@"`,
+    `${niche} ${location} "@gmail.com" contact`,
+    `${niche} ${location} official website`,
   ];
 
   const headers = {
-    'User-Agent': randomUA(),
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
+    'Referer': 'https://www.bing.com/',
   };
 
   for (const query of queries) {
     if (leads.length >= needed) break;
     try {
       console.log(`  🔍 Bing: ${query}`);
-      const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=20&setlang=en`;
+      const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=20`;
       const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
       if (!res.ok) { console.log(`  ⚠️  Bing ${res.status}`); continue; }
       const html = await res.text();
 
-      // Extract result URLs and titles from Bing HTML
+      // Extract all href links from Bing results — multiple selector patterns
       const items: { name: string; snippet: string; url: string }[] = [];
-      // Bing result pattern: <h2><a href="URL">Title</a></h2>
-      const linkRe = /<h2[^>]*><a[^>]+href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+
+      // Pattern 1: standard result links
+      const linkRe = /href="(https?:\/\/(?!www\.bing\.com)[^"&]+)"[^>]*>([^<]{3,80})</gi;
       let m: RegExpExecArray | null;
+      const seen_urls = new Set<string>();
       while ((m = linkRe.exec(html)) !== null) {
         const rawUrl = m[1] ?? '';
-        const rawName = (m[2] ?? '').replace(/<[^>]+>/g, '').trim();
+        const rawName = (m[2] ?? '').trim();
         if (!rawUrl || !rawName || isBlockedDomain(rawUrl)) continue;
-        // Get snippet — text after the link block
-        const snippetRe = /<p[^>]*class="[^"]*b_lineclamp[^"]*"[^>]*>([\s\S]*?)<\/p>/i;
-        const snippetMatch = html.slice(m.index, m.index + 800).match(snippetRe);
-        const snippet = snippetMatch?.[1]?.replace(/<[^>]+>/g, '').trim() ?? '';
-        items.push({ name: rawName, snippet, url: rawUrl });
+        if (seen_urls.has(rawUrl)) continue;
+        seen_urls.add(rawUrl);
+        items.push({ name: rawName, snippet: '', url: rawUrl });
       }
 
-      console.log(`    Found ${items.length} Bing results`);
+      // Check for emails directly in the page
+      const pageText = html.replace(/<[^>]+>/g, ' ');
+      const pageEmails = extractEmails(pageText);
+      if (pageEmails.length > 0) console.log(`    📧 ${pageEmails.length} emails found in Bing page`);
 
-      // Also check if any emails appear directly in the Bing page
-      const pageEmails = extractEmails(html.replace(/<[^>]+>/g, ' '));
-      if (pageEmails.length > 0) console.log(`    📧 ${pageEmails.length} emails in Bing page`);
+      console.log(`    Found ${items.length} Bing result URLs`);
 
       for (const item of items) {
         if (leads.length >= needed) break;
         const cleanName = item.name.replace(/\s*[-|–·|]\s*.+$/, '').trim();
-        if (!cleanName || cleanName.length < 3) continue;
+        if (!cleanName || cleanName.length < 3 || cleanName.length > 80) continue;
         if (seen.has(cleanName.toLowerCase())) continue;
 
-        // Check snippet for email first
-        let email = bestEmail(extractEmails(item.snippet));
+        // Check page emails first
+        let email = bestEmail(pageEmails.filter(e => {
+          const d = e.split('@')[1] ?? '';
+          return item.url.includes(d.split('.')[0] ?? '');
+        }));
         let emailIsReal = !!email;
 
-        // Deep-scrape the site if no email in snippet
         if (!email) {
           const result = await deepScrapeWebsite(item.url, cleanName, niche, location, aiProvider);
           if (result) { email = result.email; emailIsReal = result.isReal; }
@@ -538,7 +544,7 @@ async function scrapeBingSearch(
         seen.add(cleanName.toLowerCase());
         const lead: ScrapedLead = {
           company_name: cleanName, email, emailIsReal, niche, location,
-          company_context: item.snippet || `${cleanName} is a ${niche} in ${location}.`,
+          company_context: `${cleanName} is a ${niche} in ${location}.`,
           source_url: item.url, website: item.url,
         };
         leads.push(lead);
@@ -546,7 +552,7 @@ async function scrapeBingSearch(
         console.log(`    ✅ ${cleanName} → ${email}${emailIsReal ? '' : ' (AI predicted)'}`);
       }
 
-      await delay(1000 + Math.random() * 500);
+      await delay(1500 + Math.random() * 500);
     } catch (err: any) {
       console.log(`  ⚠️  Bing query failed: ${err?.message?.slice(0, 60)}`);
     }
@@ -610,6 +616,8 @@ async function scrapeDDGSearch(
             cleanUrl = decodeURIComponent(rawUrl.split('uddg=')[1]?.split('&')[0] ?? rawUrl);
           }
         } catch { /* keep original */ }
+        // Check blocked domain AFTER decoding
+        if (isBlockedDomain(cleanUrl)) { idx++; continue; }
         items.push({ name: rawName, snippet: snippets[idx] ?? '', url: cleanUrl });
         idx++;
       }
@@ -623,8 +631,28 @@ async function scrapeDDGSearch(
         let email = bestEmail(extractEmails(item.snippet));
         let emailIsReal = !!email;
         if (!email) {
-          const result = await deepScrapeWebsite(item.url, cleanName, niche, location, aiProvider);
-          if (result) { email = result.email; emailIsReal = result.isReal; }
+          // If the URL is a directory/social site, try to find the real website first
+          let websiteToScrape = item.url;
+          if (isBlockedDomain(item.url)) {
+            // Try to find the company's real website via a direct fetch search
+            try {
+              const searchRes = await fetch(
+                `https://html.duckduckgo.com/html/?q=${encodeURIComponent(cleanName + ' official website')}`,
+                { headers, signal: AbortSignal.timeout(8_000) }
+              );
+              if (searchRes.ok) {
+                const searchHtml = await searchRes.text();
+                const urlMatch = searchHtml.match(/href="(https?:\/\/(?!.*duckduckgo)[^"]+)"/i);
+                if (urlMatch?.[1] && !isBlockedDomain(urlMatch[1])) {
+                  websiteToScrape = urlMatch[1];
+                }
+              }
+            } catch { /* keep original */ }
+          }
+          if (!isBlockedDomain(websiteToScrape)) {
+            const result = await deepScrapeWebsite(websiteToScrape, cleanName, niche, location, aiProvider);
+            if (result) { email = result.email; emailIsReal = result.isReal; }
+          }
         }
         if (!email) continue;
         const mxOk = await domainHasMX(email);
@@ -795,6 +823,145 @@ async function scrapeDirectories(
   return leads;
 }
 
+// ─── Source: Serper.dev (Google Search JSON API — free 2,500/month) ──────────
+
+// ─── Source: Serper.dev — Google Search + Website Visit + AI Email Extraction ─
+// Strategy: Run many diverse queries → collect all unique company websites →
+// visit each website's contact/about page → extract real email with AI.
+// This gives the highest quality leads with verified real emails.
+
+async function scrapeSerperSearch(
+  niche: string, location: string, needed: number,
+  seen: Set<string>, onLead: (l: ScrapedLead) => void,
+  aiProvider: AIProviderConfig | null,
+  apiKey: string
+): Promise<ScrapedLead[]> {
+  const leads: ScrapedLead[] = [];
+
+  // Diverse query set — each targets a different type of result
+  // to maximize unique companies found
+  const queries = [
+    `${niche} ${location} contact email`,
+    `${niche} ${location} official website`,
+    `${niche} ${location} contact us`,
+    `${niche} ${location} about us`,
+    `best ${niche} in ${location}`,
+    `top ${niche} ${location}`,
+    `${niche} company ${location}`,
+    `${niche} business ${location} email`,
+    `${niche} ${location} phone email address`,
+    `${niche} near ${location}`,
+    `${niche} ${location} services`,
+    `${niche} ${location} team`,
+  ];
+
+  // Collect all unique website URLs from all queries first
+  const websiteMap = new Map<string, { name: string; snippet: string; url: string }>();
+
+  for (const query of queries) {
+    if (websiteMap.size >= needed * 3) break; // collect 3x more than needed
+    try {
+      console.log(`  🔍 Serper: ${query}`);
+      const res = await fetch('https://google.serper.dev/search', {
+        method: 'POST',
+        headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: query, num: 10, gl: 'us', hl: 'en' }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) { console.log(`  ⚠️  Serper ${res.status} on: ${query}`); continue; }
+      const data = await res.json();
+
+      // Collect from organic results
+      for (const item of (data.organic ?? [])) {
+        const rawUrl = item.link ?? '';
+        if (!rawUrl || isBlockedDomain(rawUrl)) continue;
+        const rawName = (item.title ?? '').replace(/\s*[-|–|·|—]\s*.+$/, '').trim();
+        if (!rawName || rawName.length < 3) continue;
+        // Use URL as dedup key so we don't visit same site twice
+        const urlKey = new URL(rawUrl).hostname.replace(/^www\./, '');
+        if (!websiteMap.has(urlKey)) {
+          websiteMap.set(urlKey, {
+            name: rawName,
+            snippet: item.snippet ?? '',
+            url: rawUrl,
+          });
+        }
+      }
+
+      // Also check knowledge graph (often has direct email)
+      if (data.knowledgeGraph) {
+        const kg = data.knowledgeGraph;
+        const kgUrl = kg.website ?? '';
+        if (kgUrl && !isBlockedDomain(kgUrl)) {
+          const urlKey = new URL(kgUrl).hostname.replace(/^www\./, '');
+          if (!websiteMap.has(urlKey)) {
+            websiteMap.set(urlKey, {
+              name: kg.title ?? niche,
+              snippet: kg.description ?? '',
+              url: kgUrl,
+            });
+          }
+        }
+      }
+
+      await delay(300); // small delay between Serper calls
+    } catch (err: any) {
+      console.log(`  ⚠️  Serper query failed: ${err?.message?.slice(0, 60)}`);
+    }
+  }
+
+  console.log(`  📋 Serper collected ${websiteMap.size} unique websites to scrape`);
+
+  // Now visit each website and extract real email
+  for (const [, item] of Array.from(websiteMap)) {
+    if (leads.length >= needed) break;
+
+    const cleanName = item.name.replace(/\s*[-|–|·|—]\s*.+$/, '').trim();
+    if (!cleanName || cleanName.length < 3) continue;
+    if (seen.has(cleanName.toLowerCase())) continue;
+
+    // Step 1: Check if email is already in the snippet (fastest)
+    let email = bestEmail(extractEmails(item.snippet));
+    let emailIsReal = !!email;
+
+    // Step 2: Visit the website and scrape for real email
+    if (!email) {
+      console.log(`  🌐 Visiting: ${item.url}`);
+      const result = await deepScrapeWebsite(item.url, cleanName, niche, location, aiProvider);
+      if (result) { email = result.email; emailIsReal = result.isReal; }
+    }
+
+    if (!email) {
+      console.log(`  ⏭  ${cleanName} — no email found on website`);
+      continue;
+    }
+
+    // Step 3: MX check — confirm domain can receive mail
+    const mxOk = await domainHasMX(email);
+    if (!mxOk) {
+      console.log(`  ⏭  ${cleanName} — email domain has no MX: ${email}`);
+      continue;
+    }
+
+    seen.add(cleanName.toLowerCase());
+    const lead: ScrapedLead = {
+      company_name: cleanName,
+      email,
+      emailIsReal,
+      niche,
+      location,
+      company_context: item.snippet || `${cleanName} is a ${niche} in ${location}.`,
+      source_url: item.url,
+      website: item.url,
+    };
+    leads.push(lead);
+    onLead(lead);
+    console.log(`  ✅ ${cleanName} → ${email}${emailIsReal ? '' : ' (AI predicted)'}`);
+  }
+
+  return leads;
+}
+
 // ─── Source 4: Google Custom Search API (optional, free 100/day) ─────────────
 
 async function scrapeGoogleCustomSearch(
@@ -878,27 +1045,41 @@ export async function scrapeWithoutAPI(
 
   const googleApiKey = process.env.GOOGLE_API_KEY;
   const googleCx = process.env.GOOGLE_CX;
+  const serperApiKey = process.env.SERPER_API_KEY;
 
-  // Targets — generous so each source fills up independently
+  // Targets
   const mapsTarget   = Math.ceil(maxLeads * 0.70);
   const googleTarget = Math.ceil(maxLeads * 0.60);
   const dirTarget    = Math.ceil(maxLeads * 0.30);
   const apiTarget    = Math.ceil(maxLeads * 0.50);
 
-  // Run sources SEQUENTIALLY — no parallel Puppeteer to avoid hot-reload kills.
-  // Bing + DDG are fetch-based (fast, no bot detection). Maps is Puppeteer (last resort).
   const counts: { source: string; count: number }[] = [];
 
-  // 1. Directories (fetch-based, no Puppeteer)
-  try {
-    const dirLeads = await scrapeDirectories(niche, location, dirTarget, seen, emit, aiProvider);
-    counts.push({ source: 'Dirs', count: dirLeads.length });
-  } catch (e) {
-    console.error('[Dirs] Error:', e);
-    counts.push({ source: 'Dirs', count: 0 });
+  // 1. Serper (Google Search API) — primary source, most leads
+  if (serperApiKey) {
+    console.log('🔑 Serper API key found — using Google Search + website scraping');
+    try {
+      // Give Serper the full target — it runs 12 queries and visits each website
+      const serperLeads = await scrapeSerperSearch(niche, location, maxLeads, seen, emit, aiProvider, serperApiKey);
+      counts.push({ source: 'Serper', count: serperLeads.length });
+    } catch (e) {
+      console.error('[Serper] Error:', e);
+      counts.push({ source: 'Serper', count: 0 });
+    }
   }
 
-  // 2. Bing search (fetch-based — no bot detection, works reliably)
+  // 2. Directories (fetch-based, no Puppeteer)
+  if (all.length < maxLeads) {
+    try {
+      const dirLeads = await scrapeDirectories(niche, location, dirTarget, seen, emit, aiProvider);
+      counts.push({ source: 'Dirs', count: dirLeads.length });
+    } catch (e) {
+      console.error('[Dirs] Error:', e);
+      counts.push({ source: 'Dirs', count: 0 });
+    }
+  }
+
+  // 3. Bing search (fetch-based)
   if (all.length < maxLeads) {
     try {
       const bingLeads = await scrapeBingSearch(niche, location, googleTarget, seen, emit, aiProvider);
@@ -909,7 +1090,7 @@ export async function scrapeWithoutAPI(
     }
   }
 
-  // 3. DuckDuckGo (fetch-based — no bot detection)
+  // 4. DuckDuckGo (fetch-based)
   if (all.length < maxLeads) {
     try {
       const ddgLeads = await scrapeDDGSearch(niche, location, Math.ceil(maxLeads * 0.40), seen, emit, aiProvider);
@@ -920,8 +1101,7 @@ export async function scrapeWithoutAPI(
     }
   }
 
-  // 4. Google Maps (Puppeteer) — only if still need more leads
-  // Wrapped in a timeout — if Puppeteer can't launch on this machine, skip it
+  // 5. Google Maps (Puppeteer) — only if still need more leads
   if (all.length < maxLeads) {
     try {
       const mapsPromise = scrapeGoogleMaps(niche, location, mapsTarget, seen, emit, aiProvider);
@@ -936,7 +1116,7 @@ export async function scrapeWithoutAPI(
     }
   }
 
-  // 5. Google Custom Search API (optional, if key configured)
+  // 6. Google Custom Search API (optional)
   if (all.length < maxLeads && googleApiKey && googleCx) {
     console.log('🔑 Google Custom Search API key found');
     try {

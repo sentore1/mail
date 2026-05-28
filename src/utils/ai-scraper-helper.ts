@@ -38,14 +38,28 @@ export async function getActiveAIProvider(userId: string): Promise<AIProviderCon
   }
 }
 
-// ─── Core AI call (works with all providers) ─────────────────────────────────
+// ─── Rate limiter for AI calls ────────────────────────────────────────────────
+// Groq free tier: ~30 requests/minute. We throttle to 1 call per 2 seconds
+// and retry on 429 with exponential backoff.
+
+let lastAICallTime = 0;
+const AI_MIN_INTERVAL_MS = 2_000; // 2 seconds between calls = max 30/min
 
 async function callAI(
   provider: AIProviderConfig,
   systemPrompt: string,
   userPrompt: string,
-  maxTokens = 200
+  maxTokens = 200,
+  attempt = 0
 ): Promise<string> {
+  // Throttle — wait if last call was too recent
+  const now = Date.now();
+  const elapsed = now - lastAICallTime;
+  if (elapsed < AI_MIN_INTERVAL_MS) {
+    await new Promise(r => setTimeout(r, AI_MIN_INTERVAL_MS - elapsed));
+  }
+  lastAICallTime = Date.now();
+
   const { provider: name, api_key, active_model } = provider;
 
   if (name === 'openai' || name === 'groq') {
@@ -67,6 +81,18 @@ async function callAI(
       }),
       signal: AbortSignal.timeout(15_000),
     });
+
+    // Retry on 429 with exponential backoff (max 3 attempts)
+    if (res.status === 429) {
+      if (attempt >= 3) throw new Error(`${name} API error: 429 (rate limit exhausted after retries)`);
+      const retryAfter = res.headers.get('retry-after');
+      const waitMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : Math.min(5_000 * Math.pow(2, attempt), 30_000);
+      console.warn(`[AI Scraper] ${name} rate limited — waiting ${waitMs}ms before retry ${attempt + 1}`);
+      await new Promise(r => setTimeout(r, waitMs));
+      lastAICallTime = 0; // reset throttle after waiting
+      return callAI(provider, systemPrompt, userPrompt, maxTokens, attempt + 1);
+    }
+
     if (!res.ok) throw new Error(`${name} API error: ${res.status}`);
     const data = await res.json();
     return data.choices[0].message.content.trim();
