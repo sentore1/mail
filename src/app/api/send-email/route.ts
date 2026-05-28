@@ -4,6 +4,7 @@ import { createServiceClient } from "../../../../supabase/service";
 import { SMTPManager } from "@/utils/smtp-server";
 import { randomUUID } from "crypto";
 import { classifyBounce } from "@/types/platform";
+import { verifyEmail } from "@/utils/email-verifier";
 
 export const runtime = "nodejs";
 
@@ -128,6 +129,35 @@ export async function POST(request: NextRequest) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
       return NextResponse.json(
         { success: false, error: "Invalid recipient email address" },
+        { status: 400 }
+      );
+    }
+
+    // Verify the email address before attempting to send
+    const verification = await verifyEmail(to);
+    if (!verification.valid) {
+      const service = createServiceClient();
+      // Log the skip to sent_emails so CRM shows it
+      await service.from("sent_emails").insert({
+        user_id: user.id,
+        lead_id: leadId ?? null,
+        to_email: to,
+        subject,
+        body: emailBody,
+        sent_at: new Date().toISOString(),
+        status: "failed",
+        bounce_reason: `Email not sent — ${verification.detail ?? verification.reason}`,
+      }).catch(() => {});
+      // Mark lead as invalid_email
+      if (leadId) {
+        await service.from("leads").update({
+          status: "invalid_email",
+          email_verified: false,
+          updated_at: new Date().toISOString(),
+        }).eq("id", leadId).catch(() => {});
+      }
+      return NextResponse.json(
+        { success: false, error: `Email address is not valid: ${verification.detail ?? verification.reason}` },
         { status: 400 }
       );
     }

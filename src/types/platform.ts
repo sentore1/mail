@@ -14,6 +14,7 @@ export type LeadStatus =
   | 'interested'
   | 'bounced'
   | 'failed'
+  | 'invalid_email'
   // Legacy statuses (kept for backward compat)
   | 'New'
   | 'Email Sent'
@@ -355,7 +356,8 @@ export type ActiveModule =
   | 'ai-settings'
   | 'smtp-manager'
   | 'follow-up'
-  | 'campaigns';
+  | 'campaigns'
+  | 'verification';
 
 // ─── Tone Types ───────────────────────────────────────────────────────────────
 

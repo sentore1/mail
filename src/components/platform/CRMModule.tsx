@@ -17,11 +17,12 @@ interface CRMModuleProps {
 
 // Simplified kanban columns — only the ones that matter
 const KANBAN_COLUMNS: { value: LeadStatus; label: string }[] = [
-  { value: "new",        label: "New" },
-  { value: "contacted",  label: "Contacted" },
-  { value: "replied",    label: "Replied" },
-  { value: "interested", label: "Interested" },
-  { value: "failed",     label: "Failed" },
+  { value: "new",           label: "New" },
+  { value: "contacted",     label: "Contacted" },
+  { value: "replied",       label: "Replied" },
+  { value: "interested",    label: "Interested" },
+  { value: "invalid_email", label: "Invalid Email" },
+  { value: "failed",        label: "Failed" },
 ];
 
 interface LeadWithEmails extends Lead {
@@ -71,11 +72,23 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
 
   useEffect(() => {
     fetchLeads();
+
+    // Debounce realtime updates — batch rapid inserts (e.g. during scraping)
+    // into a single re-fetch after 2 seconds of quiet
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const debouncedFetch = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => fetchLeads(), 2000);
+    };
+
     const channel = supabase
       .channel("leads_changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "leads", filter: `user_id=eq.${userId}` }, () => fetchLeads())
+      .on("postgres_changes", { event: "*", schema: "public", table: "leads", filter: `user_id=eq.${userId}` }, debouncedFetch)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      supabase.removeChannel(channel);
+    };
   }, [fetchLeads]);
 
   const updateLeadStatus = async (leadId: string, newStatus: LeadStatus, oldStatus: LeadStatus) => {
@@ -181,6 +194,7 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
     if (status === "Replied") return "replied";
     if (status === "Interested") return "interested";
     if (status === "New") return "new";
+    if (status === "bounced") return "invalid_email";
     return status;
   };
 
@@ -195,6 +209,7 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
     contacted: leads.filter((l) => normalizeStatus(l.status) === "contacted").length,
     replied: leads.filter((l) => normalizeStatus(l.status) === "replied").length,
     interested: leads.filter((l) => normalizeStatus(l.status) === "interested").length,
+    invalid: leads.filter((l) => normalizeStatus(l.status) === "invalid_email").length,
   };
 
   if (loading) {
@@ -217,9 +232,10 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
             { label: "Contacted", value: stats.contacted, icon: Send },
             { label: "Replied", value: stats.replied, icon: MessageSquare },
             { label: "Interested", value: stats.interested, icon: TrendingUp },
-          ].map(({ label, value, icon: Icon }) => (
+            { label: "Invalid Email", value: stats.invalid, icon: Mail, color: "text-orange-500" },
+          ].map(({ label, value, icon: Icon, color }) => (
             <div key={label} className="flex items-center gap-2">
-              <Icon size={13} className="text-gray-400 flex-shrink-0" />
+              <Icon size={13} className={color ?? "text-gray-400"} />
               <div>
                 <p className="text-[10px] text-gray-400 leading-none">{label}</p>
                 <p className="text-sm font-bold text-gray-900 leading-tight">{value}</p>
@@ -431,9 +447,22 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
 
               {/* Meta */}
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] px-2 py-0.5 rounded border border-gray-300 text-gray-700 font-medium">
-                  {drawerLead.status}
+                <span className={`text-[10px] px-2 py-0.5 rounded border font-medium ${
+                  drawerLead.status === 'invalid_email'
+                    ? 'bg-orange-50 text-orange-700 border-orange-200'
+                    : drawerLead.status === 'failed' || drawerLead.status === 'bounced'
+                    ? 'bg-red-50 text-red-700 border-red-200'
+                    : drawerLead.status === 'contacted'
+                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                    : 'bg-gray-50 text-gray-700 border-gray-300'
+                }`}>
+                  {drawerLead.status === 'invalid_email' ? '✗ Invalid Email' : drawerLead.status}
                 </span>
+                {(drawerLead as any).email_verified === true && (
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-green-50 text-green-700 border border-green-200 font-medium">
+                    ✓ Email Verified
+                  </span>
+                )}
                 {drawerLead.niche && (
                   <span className="text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
                     {drawerLead.niche}
@@ -447,6 +476,19 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
                   {new Date(drawerLead.created_at).toLocaleDateString()}
                 </span>
               </div>
+
+              {/* Invalid email warning */}
+              {drawerLead.status === 'invalid_email' && (
+                <div className="flex items-start gap-2 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                  <span className="text-orange-500 text-sm flex-shrink-0">✗</span>
+                  <div>
+                    <p className="text-xs font-semibold text-orange-800">Email Not Sent — Invalid Address</p>
+                    <p className="text-[11px] text-orange-700 mt-0.5">
+                      This email address failed verification. The email was not sent. Check the sent history below for the reason.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* Status update */}
               <div>
@@ -648,7 +690,9 @@ function LeadCard({
   onDragEnd: () => void;
 }) {
   const isFailed = lead.status === "failed" || lead.status === "bounced";
+  const isInvalidEmail = lead.status === "invalid_email";
   const isSent = lead.status === "contacted" || lead.status === "Email Sent";
+  const isVerified = (lead as any).email_verified === true;
 
   return (
     <div
@@ -663,16 +707,23 @@ function LeadCard({
         <p className="text-xs font-semibold text-gray-900 truncate flex-1 leading-tight">
           {lead.company_name}
         </p>
-        {isFailed && (
+        {isInvalidEmail && (
+          <span className="text-[9px] px-1.5 py-0.5 rounded bg-orange-50 text-orange-600 border border-orange-200 font-semibold flex-shrink-0">INVALID</span>
+        )}
+        {isFailed && !isInvalidEmail && (
           <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-50 text-red-600 border border-red-200 font-semibold flex-shrink-0">FAIL</span>
         )}
-        {isSent && !isFailed && (
+        {isSent && !isFailed && !isInvalidEmail && (
           <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-200 font-semibold flex-shrink-0">SENT</span>
         )}
       </div>
 
       {lead.email && (
-        <p className="text-[10px] text-gray-400 truncate mb-1.5">{lead.email}</p>
+        <p className="text-[10px] text-gray-400 truncate mb-1.5 flex items-center gap-1">
+          {lead.email}
+          {isVerified && <span className="text-green-500 flex-shrink-0" title="Email verified">✓</span>}
+          {isInvalidEmail && <span className="text-orange-500 flex-shrink-0" title="Email invalid">✗</span>}
+        </p>
       )}
 
       <div className="flex items-center gap-1.5 flex-wrap">

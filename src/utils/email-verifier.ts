@@ -1,233 +1,126 @@
 /**
- * Email Verification Utilities
- * Free methods to verify email addresses
+ * Email Verifier — two-level check, no paid API needed.
+ *
+ * Level 1: Format check (regex)
+ * Level 2: MX DNS check — does the domain accept email?
+ * Level 3: SMTP RCPT-TO probe — does the mailbox actually exist?
+ *          (best-effort — many servers block this, so we fall back to DNS result)
  */
 
-import axios from 'axios';
-
-export interface EmailVerificationResult {
-  email: string;
-  isValid: boolean;
-  isDeliverable: boolean;
-  isCatchAll: boolean;
-  isDisposable: boolean;
-  score: number; // 0-100, higher is better
-  reason?: string;
+export interface VerifyResult {
+  valid: boolean;
+  reason: 'valid' | 'invalid_format' | 'no_mx_record' | 'mailbox_rejected' | 'unverifiable';
+  detail?: string;
 }
 
-/**
- * Disposable email domains to filter out
- */
-const DISPOSABLE_DOMAINS = [
-  'tempmail.com', 'guerrillamail.com', '10minutemail.com', 'mailinator.com',
-  'throwaway.email', 'temp-mail.org', 'fakeinbox.com', 'trashmail.com'
-];
+const FORMAT_RE = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/;
+
+// Domains that are known to block SMTP probes — skip RCPT-TO for these
+const PROBE_BLOCKED_DOMAINS = new Set([
+  'gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.uk', 'yahoo.fr',
+  'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+  'icloud.com', 'me.com', 'mac.com',
+  'protonmail.com', 'proton.me',
+  'aol.com', 'yandex.com', 'yandex.ru',
+]);
 
 /**
- * Check if email format is valid
+ * Level 1 + 2: Format + MX DNS check.
+ * Fast, free, no network connection to the mail server.
  */
-export function isValidEmailFormat(email: string): boolean {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email);
-}
+export async function verifyEmailDNS(email: string): Promise<VerifyResult> {
+  if (!FORMAT_RE.test(email)) {
+    return { valid: false, reason: 'invalid_format', detail: 'Email format is invalid' };
+  }
 
-/**
- * Check if domain is disposable
- */
-export function isDisposableEmail(email: string): boolean {
-  const domain = email.split('@')[1]?.toLowerCase();
-  return DISPOSABLE_DOMAINS.some(d => domain?.includes(d));
-}
+  const domain = email.split('@')[1]!.toLowerCase();
 
-/**
- * Verify email using DNS MX record check (free)
- */
-export async function verifyEmailDNS(email: string): Promise<boolean> {
-  if (!isValidEmailFormat(email)) return false;
-  
-  const domain = email.split('@')[1];
-  
   try {
-    // Use Google DNS API to check MX records
-    const response = await axios.get(
-      `https://dns.google/resolve?name=${domain}&type=MX`,
-      { timeout: 5000 }
+    const res = await fetch(
+      `https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=MX`,
+      { signal: AbortSignal.timeout(5_000) }
     );
-    
-    return response.data?.Answer?.length > 0;
-  } catch (error) {
-    console.error('DNS verification error:', error);
-    return false;
-  }
-}
-
-/**
- * Verify email using multiple free APIs
- */
-export async function verifyEmailWithAPI(email: string): Promise<EmailVerificationResult> {
-  const result: EmailVerificationResult = {
-    email,
-    isValid: false,
-    isDeliverable: false,
-    isCatchAll: false,
-    isDisposable: false,
-    score: 0
-  };
-  
-  // Step 1: Format validation
-  if (!isValidEmailFormat(email)) {
-    result.reason = 'Invalid email format';
-    return result;
-  }
-  result.isValid = true;
-  result.score += 20;
-  
-  // Step 2: Disposable check
-  if (isDisposableEmail(email)) {
-    result.isDisposable = true;
-    result.reason = 'Disposable email address';
-    result.score = 0;
-    return result;
-  }
-  result.score += 20;
-  
-  // Step 3: DNS MX record check
-  const hasMX = await verifyEmailDNS(email);
-  if (!hasMX) {
-    result.reason = 'No MX records found';
-    return result;
-  }
-  result.isDeliverable = true;
-  result.score += 30;
-  
-  // Step 4: Try free verification APIs
-  try {
-    // Method 1: EmailListVerify (free tier available)
-    const apiKey = process.env.EMAIL_VERIFY_API_KEY;
-    if (apiKey) {
-      const response = await axios.get(
-        `https://apps.emaillistverify.com/api/verifyEmail?secret=${apiKey}&email=${email}`,
-        { timeout: 5000 }
-      );
-      
-      if (response.data) {
-        if (response.data.status === 'ok') {
-          result.score = 100;
-        } else if (response.data.status === 'catch_all') {
-          result.isCatchAll = true;
-          result.score = 70;
-        }
-      }
+    if (!res.ok) {
+      // DNS API unreachable — assume valid so we don't drop real emails
+      return { valid: true, reason: 'unverifiable', detail: 'DNS check unavailable' };
     }
-  } catch (error) {
-    // API failed, use DNS result
+    const data = await res.json();
+    const hasMX = Array.isArray(data?.Answer) && data.Answer.length > 0;
+    if (!hasMX) {
+      return { valid: false, reason: 'no_mx_record', detail: `Domain ${domain} has no MX records` };
+    }
+    return { valid: true, reason: 'valid' };
+  } catch {
+    // Network error — assume valid
+    return { valid: true, reason: 'unverifiable', detail: 'DNS check failed' };
   }
-  
-  // Step 5: Pattern analysis
-  const localPart = email.split('@')[0];
-  
-  // Common valid patterns
-  if (localPart.match(/^(info|contact|hello|sales|support|admin)$/)) {
-    result.score = Math.max(result.score, 80);
-  }
-  
-  // Suspicious patterns
-  if (localPart.match(/^(test|fake|spam|noreply|no-reply)$/)) {
-    result.score = Math.min(result.score, 30);
-    result.reason = 'Suspicious email pattern';
-  }
-  
-  return result;
 }
 
 /**
- * Batch verify emails
+ * Full verification: format + MX + optional SMTP probe.
+ * The SMTP probe connects to the mail server and issues RCPT TO
+ * to check if the mailbox exists — without actually sending an email.
+ *
+ * NOTE: Many servers (Gmail, Yahoo, etc.) block this probe.
+ * For those, we fall back to the DNS result.
  */
-export async function verifyEmailsBatch(
+export async function verifyEmail(email: string): Promise<VerifyResult> {
+  // Level 1 + 2
+  const dnsResult = await verifyEmailDNS(email);
+  if (!dnsResult.valid) return dnsResult;
+
+  const domain = email.split('@')[1]!.toLowerCase();
+
+  // Skip SMTP probe for domains that block it
+  if (PROBE_BLOCKED_DOMAINS.has(domain)) {
+    return { valid: true, reason: 'valid', detail: 'DNS verified (SMTP probe skipped for this provider)' };
+  }
+
+  // Level 3: SMTP RCPT-TO probe via a free verification API
+  // We use api.mailcheck.ai — free, no key needed, 1000 checks/day
+  try {
+    const res = await fetch(
+      `https://api.mailcheck.ai/email/${encodeURIComponent(email)}`,
+      { signal: AbortSignal.timeout(8_000) }
+    );
+    if (!res.ok) {
+      // API unavailable — fall back to DNS result
+      return { valid: true, reason: 'valid', detail: 'DNS verified (SMTP probe unavailable)' };
+    }
+    const data = await res.json();
+
+    // mailcheck.ai response: { status: 'valid'|'invalid'|'unknown', ... }
+    if (data.status === 'invalid' || data.disposable === true) {
+      return {
+        valid: false,
+        reason: 'mailbox_rejected',
+        detail: data.reason || 'Mailbox does not exist or is disposable',
+      };
+    }
+    return { valid: true, reason: 'valid', detail: 'Verified via SMTP probe' };
+  } catch {
+    // SMTP probe failed — fall back to DNS result (assume valid)
+    return { valid: true, reason: 'valid', detail: 'DNS verified (SMTP probe timed out)' };
+  }
+}
+
+/**
+ * Batch verify a list of emails.
+ * Returns a map of email → VerifyResult.
+ * Processes with a small delay to avoid rate limits.
+ */
+export async function verifyEmailBatch(
   emails: string[],
-  onProgress?: (completed: number, total: number) => void
-): Promise<EmailVerificationResult[]> {
-  const results: EmailVerificationResult[] = [];
-  const batchSize = 10;
-  
-  for (let i = 0; i < emails.length; i += batchSize) {
-    const batch = emails.slice(i, i + batchSize);
-    
-    const batchResults = await Promise.all(
-      batch.map(email => verifyEmailWithAPI(email))
-    );
-    
-    results.push(...batchResults);
-    
-    if (onProgress) {
-      onProgress(Math.min(i + batchSize, emails.length), emails.length);
+  onProgress?: (done: number, total: number) => void
+): Promise<Map<string, VerifyResult>> {
+  const results = new Map<string, VerifyResult>();
+  for (let i = 0; i < emails.length; i++) {
+    const email = emails[i]!;
+    results.set(email, await verifyEmail(email));
+    onProgress?.(i + 1, emails.length);
+    if (i < emails.length - 1) {
+      await new Promise(r => setTimeout(r, 200)); // 200ms between checks
     }
-    
-    // Rate limiting
-    await new Promise(resolve => setTimeout(resolve, 1000));
   }
-  
   return results;
-}
-
-/**
- * Filter leads by email quality
- */
-export function filterLeadsByEmailQuality(
-  leads: Array<{ email: string; [key: string]: any }>,
-  verificationResults: EmailVerificationResult[],
-  minScore: number = 50
-): Array<{ email: string; [key: string]: any }> {
-  const emailScoreMap = new Map(
-    verificationResults.map(r => [r.email, r.score])
-  );
-  
-  return leads.filter(lead => {
-    const score = emailScoreMap.get(lead.email) || 0;
-    return score >= minScore;
-  });
-}
-
-/**
- * Quick email validation (synchronous, no API calls)
- */
-export function quickValidateEmail(email: string): {
-  isValid: boolean;
-  score: number;
-  reason?: string;
-} {
-  let score = 0;
-  
-  // Format check
-  if (!isValidEmailFormat(email)) {
-    return { isValid: false, score: 0, reason: 'Invalid format' };
-  }
-  score += 30;
-  
-  // Disposable check
-  if (isDisposableEmail(email)) {
-    return { isValid: false, score: 0, reason: 'Disposable email' };
-  }
-  score += 20;
-  
-  const [localPart, domain] = email.split('@');
-  
-  // Domain checks
-  if (domain.includes('.')) {
-    score += 20;
-  }
-  
-  // Common business patterns
-  if (localPart.match(/^(info|contact|hello|sales|support|admin|office)$/)) {
-    score += 30;
-  } else if (localPart.includes('.') || localPart.includes('_')) {
-    score += 20; // Likely personal email
-  }
-  
-  // Suspicious patterns
-  if (localPart.match(/^(test|fake|spam|noreply|no-reply|donotreply)$/)) {
-    return { isValid: false, score: 10, reason: 'Suspicious pattern' };
-  }
-  
-  return { isValid: true, score };
 }

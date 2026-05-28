@@ -38,14 +38,28 @@ export async function getActiveAIProvider(userId: string): Promise<AIProviderCon
   }
 }
 
-// ─── Core AI call (works with all providers) ─────────────────────────────────
+// ─── Rate limiter for AI calls ────────────────────────────────────────────────
+// Groq free tier: ~30 requests/minute. We throttle to 1 call per 2 seconds
+// and retry on 429 with exponential backoff.
+
+let lastAICallTime = 0;
+const AI_MIN_INTERVAL_MS = 2_000; // 2 seconds between calls = max 30/min
 
 async function callAI(
   provider: AIProviderConfig,
   systemPrompt: string,
   userPrompt: string,
-  maxTokens = 200
+  maxTokens = 200,
+  attempt = 0
 ): Promise<string> {
+  // Throttle — wait if last call was too recent
+  const now = Date.now();
+  const elapsed = now - lastAICallTime;
+  if (elapsed < AI_MIN_INTERVAL_MS) {
+    await new Promise(r => setTimeout(r, AI_MIN_INTERVAL_MS - elapsed));
+  }
+  lastAICallTime = Date.now();
+
   const { provider: name, api_key, active_model } = provider;
 
   if (name === 'openai' || name === 'groq') {
@@ -67,6 +81,18 @@ async function callAI(
       }),
       signal: AbortSignal.timeout(15_000),
     });
+
+    // Retry on 429 with exponential backoff (max 3 attempts)
+    if (res.status === 429) {
+      if (attempt >= 3) throw new Error(`${name} API error: 429 (rate limit exhausted after retries)`);
+      const retryAfter = res.headers.get('retry-after');
+      const waitMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : Math.min(5_000 * Math.pow(2, attempt), 30_000);
+      console.warn(`[AI Scraper] ${name} rate limited — waiting ${waitMs}ms before retry ${attempt + 1}`);
+      await new Promise(r => setTimeout(r, waitMs));
+      lastAICallTime = 0; // reset throttle after waiting
+      return callAI(provider, systemPrompt, userPrompt, maxTokens, attempt + 1);
+    }
+
     if (!res.ok) throw new Error(`${name} API error: ${res.status}`);
     const data = await res.json();
     return data.choices[0].message.content.trim();
@@ -180,16 +206,16 @@ export async function extractEmailFromContent(
   domain: string,
   provider: AIProviderConfig
 ): Promise<string | null> {
-  const system = `You are an email extraction specialist. Your job is to find real contact email addresses from website content.
+  const system = `You are an email extraction specialist. Find real contact email addresses in website content.
 Rules:
+- ONLY return an email that is EXPLICITLY present in the content provided
+- Do NOT invent, guess, or construct any email address
 - Look for mailto: links, "contact us" sections, footer emails, team pages
-- If you find a real email address, return ONLY that email address, nothing else
-- If multiple emails exist, return the most likely business contact (info@, contact@, hello@, sales@)
-- If no real email is visible but the domain is clear, you may suggest info@${domain} or contact@${domain}
+- If multiple emails exist, return the most likely business contact
 - NEVER return noreply@, donotreply@, or system emails
-- If you truly cannot find or infer any email, return exactly: NONE`;
+- If no real email is visible in the content, return exactly: NONE
+- Return ONLY the email address or NONE — nothing else`;
 
-  // Truncate to avoid token limits
   const truncated = websiteText.slice(0, 2000);
 
   const user = `Company: ${companyName}
@@ -197,21 +223,18 @@ Domain: ${domain}
 Website content:
 ${truncated}
 
-What is the contact email address for this business?`;
+Find the contact email address that is explicitly written in the content above. If none is present, return NONE.`;
 
   try {
     const response = await callAI(provider, system, user, 50);
     const cleaned = response.trim().toLowerCase();
 
-    // Validate it looks like an email
     if (cleaned === 'none' || !cleaned.includes('@')) return null;
 
     const emailMatch = cleaned.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
     if (!emailMatch) return null;
 
     const email = emailMatch[0];
-
-    // Reject blocked patterns
     const blockedPrefixes = ['noreply', 'no-reply', 'donotreply', 'privacy', 'test'];
     const local = email.split('@')[0];
     if (blockedPrefixes.some(p => local.startsWith(p))) return null;

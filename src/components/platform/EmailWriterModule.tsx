@@ -70,6 +70,10 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
   const [nicheFilter, setNicheFilter]         = useState("all");
   const [bulkUseWebResearch, setBulkUseWebResearch] = useState(false);
 
+  // ── Sender name — editable per user ──────────────────────────────────────
+  const [senderName, setSenderName] = useState("");
+  const [senderTitle, setSenderTitle] = useState("Executive Sales");
+
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(() => { fetchLeads(); loadSenderProfile(); }, []);
 
@@ -94,9 +98,25 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
     }
   };
 
-  /** Load saved company/service from followup_settings */
+  /** Load sender name from active SMTP account */
   const loadSenderProfile = async () => {
-    // Profile is now hardcoded — nothing to load
+    try {
+      const { data } = await supabase
+        .from("smtp_accounts")
+        .select("email, sender_name")
+        .eq("user_id", userId)
+        .eq("status", "active")
+        .order("sent_today", { ascending: true })
+        .limit(1)
+        .single();
+      if (data) {
+        const name = data.sender_name ||
+          data.email.split("@")[0]
+            .replace(/[._\-]/g, " ")
+            .replace(/\b\w/g, (c: string) => c.toUpperCase());
+        setSenderName(name);
+      }
+    } catch { /* no SMTP account yet */ }
   };
 
   /** Save company/service — no-op since profile is hardcoded */
@@ -161,6 +181,8 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
         tone,
         customPainPoint: customPainPoint || undefined,
         userId,
+        senderName: senderName || undefined,
+        senderTitle: senderTitle || undefined,
       });
       setGeneratedEmail({ subject, body, model: "AI" });
       setEditSubject(subject);
@@ -370,6 +392,8 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
           yourService,
           tone: bulkTone,
           customPainPoint: bulkPainPoint || undefined,
+          senderName: senderName || undefined,
+          senderTitle: senderTitle || undefined,
         }),
       });
 
@@ -661,6 +685,37 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
               )}
             </div>
 
+            {/* Sender identity */}
+            <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 flex flex-col gap-3">
+              <p className="text-xs font-semibold text-blue-800 flex items-center gap-1.5">
+                <AtSign size={12} />
+                Your Signature — appears at the bottom of every email
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Your Name</label>
+                  <input
+                    value={senderName}
+                    onChange={(e) => setSenderName(e.target.value)}
+                    placeholder="e.g. Rukundo Abkar"
+                    className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Your Title</label>
+                  <input
+                    value={senderTitle}
+                    onChange={(e) => setSenderTitle(e.target.value)}
+                    placeholder="e.g. Executive Sales"
+                    className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] text-blue-600">
+                Signature preview: <span className="font-medium">{senderName || "Your Name"} · {senderTitle || "Executive Sales"} · Pryro</span>
+              </p>
+            </div>
+
             {/* Tone selector */}
             <div>
               <label className="block text-sm font-semibold text-gray-800 mb-2">Tone</label>
@@ -801,6 +856,37 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
           <div className="p-6 flex flex-col gap-5">
             {bulkEmails.length === 0 && !isGenerating ? (
               <>
+                {/* Sender identity */}
+                <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 flex flex-col gap-3">
+                  <p className="text-xs font-semibold text-blue-800 flex items-center gap-1.5">
+                    <AtSign size={12} />
+                    Your Signature — appears at the bottom of every email
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Your Name</label>
+                      <input
+                        value={senderName}
+                        onChange={(e) => setSenderName(e.target.value)}
+                        placeholder="e.g. Rukundo Abkar"
+                        className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Your Title</label>
+                      <input
+                        value={senderTitle}
+                        onChange={(e) => setSenderTitle(e.target.value)}
+                        placeholder="e.g. Executive Sales"
+                        className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-blue-600">
+                    Signature preview: <span className="font-medium">{senderName || "Your Name"} · {senderTitle || "Executive Sales"} · Pryro</span>
+                  </p>
+                </div>
+
                 {/* Tone */}
                 <div>
                   <label className="block text-sm font-semibold text-gray-800 mb-2">Tone</label>

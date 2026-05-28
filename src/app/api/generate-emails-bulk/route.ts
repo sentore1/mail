@@ -152,289 +152,67 @@ function cleanCompanyName(name: string): string {
     .trim();
 }
 
-// ─── System prompt ────────────────────────────────────────────────────────────
-
-function buildSystemMessage(senderName: string): string {
-  return `You are writing cold outreach emails. Your goal is maximum open rate and reply rate.
-
-THE PHILOSOPHY:
-- Hardness: Be direct and confident. No softening language. No "I hope", no "just wanted to".
-- Humble: Don't oversell. Don't claim to be the best. Let the result speak.
-- Specific: Reference what THIS company actually does. Generic emails get deleted.
-- Human: Sound like a real person who did 5 minutes of research, not a marketing bot.
-
-SUBJECT LINE — MINIMUM 8 WORDS, MAXIMUM 10 WORDS:
-- Must be 8 to 10 words. Count every word. Never fewer than 8.
-- Honest curiosity — make them wonder "what is this about?"
-- Reference their specific business or industry
-- No hype words: no "amazing", "incredible", "game-changer", "opportunity", "exciting"
-- No questions that sound like ads: "Want to grow your business?"
-- No ALL CAPS, no exclamation marks, no emojis
-- Good examples (count the words — each is 8-10):
-  "How Lagos restaurants are cutting food waste by half" (9 words)
-  "Most accounting firms still track clients in spreadsheets today" (9 words)
-  "What changed for dental clinics that dropped manual scheduling" (9 words)
-  "Three things slowing down mid-size logistics companies right now" (9 words)
-  "Independent pharmacies spend 12 hours weekly on disconnected systems" (9 words)
-  "How retail stores in Nairobi are reducing stock errors" (9 words)
-
-EMAIL BODY RULES:
-- EXACTLY 3 short paragraphs separated by blank lines. No exceptions.
-- Max 90 words total across all 3 paragraphs.
-- Paragraph 1 (1-2 sentences): One specific, true observation about their business or industry. Show you know their world. No compliments. No "I noticed your website". Just state the reality.
-- Paragraph 2 (1-2 sentences): What you do, in plain language. One concrete result or number if you have it. No feature lists. No "we help companies like yours".
-- Paragraph 3 (1 sentence): Soft ask. "Worth a 15-minute call?" or "Open to a quick chat?" — short, no pressure.
-- Then signature on its own paragraph.
-
-SIGNATURE FORMAT (always exactly like this):
-Best regards,
-${senderName}
-${senderName.split(" ")[0]} | Pryro
-
-BANNED WORDS — never use any of these:
-"reach out", "I noticed", "I came across", "I hope this email finds you well",
-"I wanted to", "touching base", "synergy", "leverage", "game-changer", "excited to",
-"thrilled to", "I am writing to", "streamline", "I'd love to", "would love to",
-"unlock", "revolutionize", "cutting-edge", "innovative", "solution", "platform",
-"empower", "transform", "scale", "optimize", "seamlessly", "robust", "holistic"
-
-OUTPUT FORMAT — respond ONLY in this exact format, nothing else:
-SUBJECT: [8 to 10 words — count them before writing]
-BODY: [3 paragraphs separated by blank lines, then blank line, then signature]`;
+// ─── Niche to readable sector label ──────────────────────────────────────────
+function getSectorLabel(niche: string | null): string {
+  if (!niche) return 'business';
+  const n = niche.toLowerCase();
+  if (/pharmacy|chemist|drug store|dispensary/.test(n)) return 'healthcare';
+  if (/clinic|dental|dentist|hospital|medical|doctor|physician|surgery|optom|chiro|physio|vet|nursing|rehab|radiol|pediatr|dermat/.test(n)) return 'healthcare';
+  if (/restaurant|hotel|lodge|hospitality|catering|bakery|coffee|bar |nightclub|fast food/.test(n)) return 'hospitality';
+  if (/retail|shop|store|supermarket|e-commerce|ecommerce|clothing|electronics|furniture|hardware|jewelry|shoe|sporting/.test(n)) return 'retail';
+  if (/construction|engineering|contractor|architecture|surveying|interior design/.test(n)) return 'construction';
+  if (/logistics|transport|trucking|freight|shipping|courier|fleet|warehouse|moving/.test(n)) return 'logistics';
+  if (/school|college|university|education|training|coaching|driving school|language|nursery|vocational/.test(n)) return 'education';
+  if (/ngo|non-profit|nonprofit|foundation|charity|church|mosque|temple|religious/.test(n)) return 'non-profit';
+  if (/manufacturing|factory|production|textile|packaging|chemical|food processing/.test(n)) return 'manufacturing';
+  if (/agency|consulting|marketing|advertising|pr |media|digital|seo|web design|app dev|software|it service|tech/.test(n)) return 'professional services';
+  if (/bank|finance|insurance|investment|microfinance|forex|mortgage|credit|savings|stock/.test(n)) return 'financial services';
+  if (/farm|agriculture|agri/.test(n)) return 'agriculture';
+  if (/real estate|property|estate agent/.test(n)) return 'real estate';
+  return niche.replace(/\b(services?|solutions?|management|systems?|group|company|ltd|inc)\b/gi, '').replace(/\s+/g, ' ').trim().toLowerCase() || 'business';
 }
 
-// ─── Prompt builder ───────────────────────────────────────────────────────────
+// ─── Subject patterns ─────────────────────────────────────────────────────────
 
-function buildPrompt(
-  lead: LeadInput,
-  yourCompany: string,
-  yourService: string,
-  tone: string,
-  websiteResearch: string | null,
-  customPainPoint?: string
-): string {
-  const name = cleanCompanyName(lead.company_name);
+const SUBJECT_PATTERNS = [
+  (company: string, _s: string) => `${company}, is this relevant to you?`,
+  (_c: string, sector: string) => `For ${sector} businesses — worth reading`,
+  (company: string, _s: string) => `${company}, could we have 10 minutes?`,
+  (_c: string, sector: string) => `Something that may help ${sector} teams`,
+  (company: string, _s: string) => `${company}, honest question`,
+  (_c: string, sector: string) => `${sector} businesses and a tool worth knowing`,
+  (company: string, _s: string) => `${company}, would this be useful to you?`,
+  (_c: string, sector: string) => `For ${sector} teams dealing with too many tools`,
+];
 
-  // Build the richest possible context about this company
-  const contextParts: string[] = [];
+// ─── Direct email builder — no AI, exact template every time ─────────────────
 
-  if (websiteResearch) {
-    contextParts.push(`WHAT THEY DO (from their website): ${websiteResearch}`);
-  } else if (lead.company_context) {
-    contextParts.push(`KNOWN CONTEXT: ${lead.company_context.slice(0, 300)}`);
-  }
+function buildDirectEmail(
+  companyName: string,
+  niche: string | null,
+  senderName: string,
+  senderTitle: string,
+  idx: number
+): { subject: string; body: string } {
+  const sector = getSectorLabel(niche);
+  const patternFn = SUBJECT_PATTERNS[idx % SUBJECT_PATTERNS.length]!;
+  const subject = patternFn(companyName, sector);
 
-  if (lead.niche) contextParts.push(`INDUSTRY: ${lead.niche}`);
-  if (lead.location) contextParts.push(`LOCATION: ${lead.location}`);
-  if (customPainPoint) contextParts.push(`SPECIFIC PAIN POINT: ${customPainPoint}`);
+  const body =
+`Dear Sir/Madam,
 
-  const toneNote =
-    tone === "Aggressive"
-      ? "Be more direct and confident. Open with a bold industry observation."
-      : tone === "Surgical"
-      ? "Be hyper-specific to their business. Reference something concrete from their website."
-      : "Be direct and human. Confident but not pushy.";
+${companyName} and many ${sector} businesses often deal with manual workflows and fragmented tools that slow teams down.
 
-  return `Write a cold outreach email for this company.
+Pryro is an ERP that replaces those inefficiencies with one unified system and we offer a 20-30% commission for every successfully referred client.
 
-SENDER: ${yourCompany} — ${yourService}
-RECIPIENT: ${name}
-${contextParts.join("\n")}
-
-TONE NOTE: ${toneNote}
-
-Remember: subject must be EXACTLY 8 words. Body max 90 words. Reference what THIS company specifically does — not a generic industry observation.`;
-}
-
-// ─── AI caller with provider fallback ────────────────────────────────────────
-
-async function callAI(
-  providers: { provider: string; api_key: string; active_model: string | null }[],
-  prompt: string,
-  systemMessage: string,
-  attempt = 0
-): Promise<string> {
-  const MAX_ATTEMPTS = 3;
-
-  for (let pi = 0; pi < providers.length; pi++) {
-    const provider = providers[pi];
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    let url = "";
-    let body: object;
-
-    if (provider.provider === "openai") {
-      url = "https://api.openai.com/v1/chat/completions";
-      headers["Authorization"] = `Bearer ${provider.api_key}`;
-      body = {
-        model: provider.active_model ?? "gpt-4o-mini",
-        messages: [
-          { role: "system", content: systemMessage },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.5,
-        max_tokens: 450,
-      };
-    } else if (provider.provider === "anthropic") {
-      url = "https://api.anthropic.com/v1/messages";
-      headers["x-api-key"] = provider.api_key;
-      headers["anthropic-version"] = "2023-06-01";
-      body = {
-        model: provider.active_model ?? "claude-3-5-haiku-20241022",
-        max_tokens: 450,
-        system: systemMessage,
-        messages: [{ role: "user", content: prompt }],
-      };
-    } else if (provider.provider === "gemini") {
-      url = `https://generativelanguage.googleapis.com/v1beta/models/${
-        provider.active_model ?? "gemini-1.5-flash"
-      }:generateContent?key=${provider.api_key}`;
-      body = {
-        contents: [{ parts: [{ text: systemMessage + "\n\n" + prompt }] }],
-        generationConfig: { temperature: 0.5, maxOutputTokens: 450 },
-      };
-    } else if (provider.provider === "mistral") {
-      url = "https://api.mistral.ai/v1/chat/completions";
-      headers["Authorization"] = `Bearer ${provider.api_key}`;
-      body = {
-        model: provider.active_model ?? "mistral-small",
-        messages: [
-          { role: "system", content: systemMessage },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.5,
-        max_tokens: 450,
-      };
-    } else {
-      // groq / openai-compatible default
-      url = "https://api.groq.com/openai/v1/chat/completions";
-      headers["Authorization"] = `Bearer ${provider.api_key}`;
-      body = {
-        model: provider.active_model ?? "llama-3.1-8b-instant",
-        messages: [
-          { role: "system", content: systemMessage },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.5,
-        max_tokens: 450,
-      };
-    }
-
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-      });
-
-      if (res.status === 429) {
-        console.warn(`[AI] ${provider.provider} rate limited — trying next`);
-        continue;
-      }
-      if (res.status === 401 || res.status === 403) {
-        console.warn(`[AI] ${provider.provider} auth error ${res.status} — trying next`);
-        continue;
-      }
-      if (!res.ok) {
-        if (attempt < MAX_ATTEMPTS - 1) {
-          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
-          return callAI(providers, prompt, systemMessage, attempt + 1);
-        }
-        console.warn(`[AI] ${provider.provider} error ${res.status} — trying next`);
-        continue;
-      }
-
-      const data = await res.json();
-      if (provider.provider === "anthropic") return data.content[0].text as string;
-      if (provider.provider === "gemini")
-        return data.candidates[0].content.parts[0].text as string;
-      return data.choices[0].message.content as string;
-    } catch (err: any) {
-      console.warn(`[AI] ${provider.provider} threw: ${err?.message} — trying next`);
-      continue;
-    }
-  }
-
-  throw new Error("rate_limit_exhausted");
-}
-
-// ─── Response parser ──────────────────────────────────────────────────────────
-
-function stripMarkdown(text: string): string {
-  return text
-    .replace(/\*\*(.+?)\*\*/g, "$1")
-    .replace(/\*(.+?)\*/g, "$1")
-    .replace(/^#{1,6}\s+/gm, "")
-    .replace(/^[-*+]\s+/gm, "")
-    .replace(/`(.+?)`/g, "$1")
-    .replace(/_{1,2}(.+?)_{1,2}/g, "$1")
-    .trim();
-}
-
-function parseResponse(raw: string): { subject: string; body: string } {
-  const subjectMatch = raw.match(/SUBJECT:\s*(.+?)(?:\n|$)/i);
-  const bodyMatch = raw.match(/BODY:\s*([\s\S]+?)$/i);
-  if (subjectMatch && bodyMatch) {
-    return {
-      subject: stripMarkdown(subjectMatch[1].replace(/^["']|["']$/g, "").trim()),
-      body: stripMarkdown(bodyMatch[1].replace(/^["']|["']$/g, "").trim()),
-    };
-  }
-  const lines = raw.trim().split("\n");
-  if (lines.length >= 2) {
-    return {
-      subject: stripMarkdown(
-        lines[0].replace(/^(SUBJECT:|Subject:)/i, "").trim()
-      ),
-      body: stripMarkdown(
-        lines
-          .slice(1)
-          .join("\n")
-          .replace(/^(BODY:|Body:)/i, "")
-          .trim()
-      ),
-    };
-  }
-  throw new Error("Could not parse AI response");
-}
-
-// ─── Fallback email (when AI fails) ──────────────────────────────────────────
-
-function makeFallback(
-  lead: LeadInput,
-  senderName: string
-): object {
-  const name = cleanCompanyName(lead.company_name);
-  const niche = (lead.niche ?? "business").toLowerCase();
-
-  // Hardness-style fallback subjects — exactly 8 words each
-  const fallbackSubjects = [
-    `Most ${niche} teams still handle this the hard way`,
-    `What changed for ${niche} businesses that dropped manual tracking`,
-    `Three things slowing down ${niche} operations right now`,
-    `How ${niche} companies are cutting admin time in half`,
-    `The ${niche} workflow problem most owners don't talk about`,
-  ];
-  const idx =
-    Math.abs(name.charCodeAt(0) + name.charCodeAt(name.length - 1)) %
-    fallbackSubjects.length;
-
-  return {
-    lead_id: lead.id,
-    lead_email: lead.email,
-    company_name: name,
-    subject: fallbackSubjects[idx],
-    body: `${niche.charAt(0).toUpperCase() + niche.slice(1)} teams spend a lot of time on tasks that should be automatic — scheduling, follow-ups, reporting. It adds up.
-
-Pryro handles that layer. Teams using it typically cut 8-10 admin hours a week without changing how they work.
-
-Worth a 15-minute call to see if it fits ${name}?
+Would you be open to a 10-minute call to see if it is relevant?
 
 Best regards,
 ${senderName}
-${senderName.split(" ")[0]} | Pryro`,
-    model: "Fallback",
-    isFallback: true,
-  };
+${senderTitle}
+Pryro`;
+
+  return { subject, body };
 }
 
 // ─── SSE streaming POST handler ───────────────────────────────────────────────
@@ -452,13 +230,15 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const { leads, yourCompany, yourService, tone, customPainPoint } =
+  const { leads, yourCompany, yourService, tone, customPainPoint, senderName: bodySenderName, senderTitle: bodySenderTitle } =
     (await request.json()) as {
       leads: LeadInput[];
       yourCompany: string;
       yourService: string;
       tone: string;
       customPainPoint?: string;
+      senderName?: string;
+      senderTitle?: string;
     };
 
   if (!leads?.length) {
@@ -467,64 +247,32 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // Load all configured AI providers — active first for fallback rotation
+  // No AI needed — emails are generated from a fixed template
   const serviceSupabase = createServiceClient();
-  const { data: allAiProviders } = await serviceSupabase
-    .from("ai_settings")
-    .select("provider, api_key, active_model, is_active")
-    .eq("user_id", user.id)
-    .not("api_key", "is", null);
 
-  if (!allAiProviders || allAiProviders.length === 0) {
-    return new Response(
-      JSON.stringify({ error: "No AI provider configured." }),
-      { status: 400 }
-    );
+  // Load sender name — use provided name first, fall back to SMTP account
+  let senderName = bodySenderName || "Sales Team";
+  const senderTitle = bodySenderTitle || "Executive Sales";
+  if (!bodySenderName) {
+    try {
+      const { data: smtpAccount } = await serviceSupabase
+        .from("smtp_accounts")
+        .select("email, sender_name")
+        .eq("user_id", user.id)
+        .eq("status", "active")
+        .order("sent_today", { ascending: true })
+        .limit(1)
+        .single();
+      if (smtpAccount) {
+        senderName =
+          smtpAccount.sender_name ||
+          smtpAccount.email
+            .split("@")[0]
+            .replace(/[._\-]/g, " ")
+            .replace(/\b\w/g, (c: string) => c.toUpperCase());
+      }
+    } catch { /* use default */ }
   }
-
-  const providers = [
-    ...allAiProviders.filter((p: any) => p.is_active),
-    ...allAiProviders.filter((p: any) => !p.is_active),
-  ];
-
-  // Sender name from SMTP account
-  let senderName = "Sales Team";
-  try {
-    const { data: smtpAccount } = await serviceSupabase
-      .from("smtp_accounts")
-      .select("email, sender_name")
-      .eq("user_id", user.id)
-      .eq("status", "active")
-      .order("sent_today", { ascending: true })
-      .limit(1)
-      .single();
-    if (smtpAccount) {
-      senderName =
-        smtpAccount.sender_name ||
-        smtpAccount.email
-          .split("@")[0]
-          .replace(/[._\-]/g, " ")
-          .replace(/\b\w/g, (c: string) => c.toUpperCase());
-    }
-  } catch {
-    /* use default */
-  }
-
-  const SYSTEM_MESSAGE = buildSystemMessage(senderName);
-
-  // Rate limits per provider
-  const providerLimits: Record<string, { concurrency: number; delayMs: number }> = {
-    groq:      { concurrency: 5,  delayMs: 800 },
-    openai:    { concurrency: 10, delayMs: 200 },
-    anthropic: { concurrency: 10, delayMs: 200 },
-    gemini:    { concurrency: 8,  delayMs: 300 },
-    mistral:   { concurrency: 8,  delayMs: 300 },
-  };
-  const activeProvider = providers[0];
-  const limits =
-    providerLimits[activeProvider.provider] ?? { concurrency: 5, delayMs: 800 };
-  const CONCURRENCY = limits.concurrency;
-  const BATCH_DELAY = limits.delayMs;
 
   // ── SSE stream ────────────────────────────────────────────────────────────
   const stream = new ReadableStream({
@@ -536,117 +284,44 @@ export async function POST(request: NextRequest) {
           controller.enqueue(
             enc.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
           );
-        } catch {
-          // client disconnected
-        }
+        } catch { /* client disconnected */ }
       };
 
       send("start", { total: leads.length });
 
       let done = 0;
-      let fallbacks = 0;
 
-      const processLead = async (lead: LeadInput, idx: number) => {
+      for (let idx = 0; idx < leads.length; idx++) {
+        const lead = leads[idx]!;
+
         // Skip junk scrape results
         if (isJunkCompanyName(lead.company_name)) {
           console.warn(`⏭  Skipping junk: "${lead.company_name}"`);
           done++;
-          send("skipped", {
-            company_name: lead.company_name,
-            done,
-            total: leads.length,
-          });
-          return null;
+          send("skipped", { company_name: lead.company_name, done, total: leads.length });
+          continue;
         }
 
         const cleanedName = cleanCompanyName(lead.company_name);
-        const cleanedLead = { ...lead, company_name: cleanedName };
+        const { subject, body } = buildDirectEmail(cleanedName, lead.niche, senderName, senderTitle, idx);
 
-        // ── Step 1: Visit their website and learn what they do ────────────
-        let websiteResearch: string | null = null;
-        try {
-          websiteResearch = await researchCompany(cleanedLead);
-          if (websiteResearch) {
-            console.log(
-              `🔍 Researched ${cleanedName}: ${websiteResearch.slice(0, 80)}…`
-            );
-          }
-        } catch {
-          // Research failed — use existing context
-        }
-
-        // ── Step 2: Generate email with real company context ──────────────
-        try {
-          const prompt = buildPrompt(
-            cleanedLead,
-            yourCompany,
-            yourService,
-            tone,
-            websiteResearch,
-            customPainPoint
-          );
-          const raw = await callAI(providers, prompt, SYSTEM_MESSAGE);
-          let { subject, body } = parseResponse(raw);
-
-          // Clean up any leftover placeholders
-          body = body
-            .replace(/\[Sender Name\]/gi, senderName)
-            .replace(/\[Your Name\]/gi, senderName)
-            .replace(/\[Name\]/gi, senderName);
-          subject = subject
-            .replace(/List of [^,\n]+/gi, cleanedName)
-            .replace(/\[Company Name\]/gi, cleanedName);
-
-          // Enforce subject word count — pad if AI returned fewer than 8 words
-          const wordCount = subject.trim().split(/\s+/).length;
-          if (wordCount < 8) {
-            const niche = (cleanedLead.niche ?? 'business').toLowerCase();
-            subject = `How ${niche} businesses like ${cleanedName} are saving time`;
-          }
-
-          const email = {
+        done++;
+        send("email", {
+          email: {
             lead_id: lead.id,
             lead_email: lead.email,
             company_name: cleanedName,
             subject,
             body,
-            model: activeProvider.active_model ?? activeProvider.provider,
+            model: "template",
             isFallback: false,
-            researched: !!websiteResearch,
-          };
-          done++;
-          send("email", { email, done, total: leads.length });
-          return email;
-        } catch (err: any) {
-          console.error(
-            `AI failed for "${cleanedName}":`,
-            err?.message ?? err
-          );
-          const email = makeFallback(cleanedLead, senderName);
-          done++;
-          fallbacks++;
-          send("email", { email, done, total: leads.length });
-          return email;
-        }
-      };
-
-      // Process in parallel batches
-      for (let i = 0; i < leads.length; i += CONCURRENCY) {
-        const batch = leads.slice(i, i + CONCURRENCY);
-        await Promise.all(
-          batch.map((lead, batchIdx) => processLead(lead, i + batchIdx))
-        );
-        if (i + CONCURRENCY < leads.length) {
-          await new Promise((r) => setTimeout(r, BATCH_DELAY));
-        }
+          },
+          done,
+          total: leads.length,
+        });
       }
 
-      send("done", {
-        total: leads.length,
-        ai: leads.length - fallbacks,
-        fallback: fallbacks,
-      });
-
+      send("done", { total: leads.length, ai: leads.length, fallback: 0 });
       controller.close();
     },
   });

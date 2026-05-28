@@ -958,57 +958,33 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
       const res = await fetch("/api/csv-import", { method: "POST", body: formData });
       const data = await res.json();
 
-      if (!data.success) {
+      if (!res.ok || !data.success) {
         toast.error(data.error || "Import failed");
         setCsvImporting(false);
         return;
       }
 
-      toast.success(`Processing ${data.totalRows} rows in ${data.totalChunks} chunks…`);
+      // New API returns results directly — no polling needed
+      const { imported, duplicates, failed, total } = data;
+      let msg = `✅ ${imported} lead${imported !== 1 ? "s" : ""} imported`;
+      if (duplicates > 0) msg += ` · ${duplicates} duplicate${duplicates !== 1 ? "s" : ""} skipped`;
+      if (failed > 0) msg += ` · ${failed} failed`;
+      toast.success(msg);
+
       setCsvJob({
-        jobId: data.jobId,
-        totalRows: data.totalRows,
-        totalChunks: data.totalChunks,
-        currentChunk: 0,
-        totalSaved: 0,
-        totalFailed: 0,
-        status: "running",
+        jobId: "direct",
+        totalRows: total,
+        totalChunks: 1,
+        currentChunk: 1,
+        totalSaved: imported,
+        totalFailed: failed,
+        status: "completed",
       });
 
-      // Poll job progress every 2 seconds
-      if (csvPollRef.current) clearInterval(csvPollRef.current);
-      csvPollRef.current = setInterval(async () => {
-        const { data: job } = await supabase
-          .from("scrape_jobs")
-          .select("*")
-          .eq("id", data.jobId)
-          .single();
-
-        if (job) {
-          setCsvJob({
-            jobId: job.id,
-            totalRows: job.max_results,
-            totalChunks: job.total_chunks,
-            currentChunk: job.current_chunk,
-            totalSaved: job.total_saved ?? 0,
-            totalFailed: job.total_failed ?? 0,
-            status: job.status,
-          });
-
-          if (job.status === "completed" || job.status === "failed") {
-            clearInterval(csvPollRef.current!);
-            setCsvImporting(false);
-            if (job.status === "completed") {
-              toast.success(`Import complete: ${job.total_saved ?? 0} leads added`);
-              onLeadsAdded?.();
-            } else {
-              toast.error("Import failed. Check error log.");
-            }
-          }
-        }
-      }, 2000);
+      if (imported > 0) onLeadsAdded?.();
     } catch {
       toast.error("Import failed. Please try again.");
+    } finally {
       setCsvImporting(false);
     }
   };
