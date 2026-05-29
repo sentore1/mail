@@ -652,8 +652,19 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
   } | null>(null);
   const csvPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const scrapeAbortRef = useRef<AbortController | null>(null);
+  const scrapeReaderRef = useRef<ReadableStreamDefaultReader | null>(null);
 
   const supabase = createClient();
+
+  const handleStopScraping = () => {
+    scrapeAbortRef.current?.abort();
+    scrapeReaderRef.current?.cancel().catch(() => {});
+    setIsScraping(false);
+    setIsScrapeAndGenerate(false);
+    setPipelinePhase("idle");
+    toast.info("Scraping stopped.");
+  };
 
   const handleScrape = async () => {
     if (!niche.trim()) { toast.error("Select a niche first"); return; }
@@ -665,11 +676,15 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
     setProgress(null);
     setChunkLog([]);
 
+    const abort = new AbortController();
+    scrapeAbortRef.current = abort;
+
     try {
       const res = await fetch("/api/scrape-stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ niche: niche.trim(), location: resolvedLocation.trim(), maxResults }),
+        signal: abort.signal,
       });
 
       if (!res.ok || !res.body) {
@@ -680,6 +695,7 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
       }
 
       const reader = res.body.getReader();
+      scrapeReaderRef.current = reader;
       const decoder = new TextDecoder();
       let buffer = "";
 
@@ -728,8 +744,8 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
           }
         }
       }
-    } catch {
-      toast.error("Scraping failed. Please try again.");
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') toast.error("Scraping failed. Please try again.");
     } finally {
       setIsScraping(false);
     }
@@ -749,6 +765,9 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
     setPipelinePhase("scraping");
     setPipelineStats({ scraped: 0, emails: 0, fallbacks: 0, total: maxResults });
 
+    const abort = new AbortController();
+    scrapeAbortRef.current = abort;
+
     try {
       const res = await fetch("/api/scrape-and-generate", {
         method: "POST",
@@ -761,6 +780,7 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
           yourService: "ERP platform for business automation",
           tone: "Direct",
         }),
+        signal: abort.signal,
       });
 
       if (!res.ok || !res.body) {
@@ -770,6 +790,7 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
       }
 
       const reader = res.body.getReader();
+      scrapeReaderRef.current = reader;
       const decoder = new TextDecoder();
       let buffer = "";
 
@@ -812,8 +833,8 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
           }
         }
       }
-    } catch {
-      toast.error("Pipeline failed. Please try again.");
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') toast.error("Pipeline failed. Please try again.");
     } finally {
       setIsScrapeAndGenerate(false);
     }
@@ -1236,6 +1257,17 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
               : <><Zap size={14} />Scrape + AI Emails</>
             }
           </button>
+
+          {/* Stop button — only shown while scraping */}
+          {(isScraping || isScrapeAndGenerate) && (
+            <button
+              onClick={handleStopScraping}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold bg-red-600 text-white hover:bg-red-700 transition-colors"
+            >
+              <X size={14} />
+              Stop
+            </button>
+          )}
         </div>
 
         {(isScraping || isScrapeAndGenerate) && (
