@@ -304,15 +304,20 @@ export async function scrapeGoogleMaps(
       puppeteer.launch({
         headless: true,
         args: [
-          '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-          '--disable-blink-features=AutomationControlled', '--disable-gpu',
-          '--window-size=1280,800', '--disable-web-security',
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-gpu',
+          '--single-process',        // Required on Windows
+          '--no-zygote',             // Required on Windows
+          '--window-size=1280,800',
+          '--disable-web-security',
           '--disable-features=IsolateOrigins,site-per-process',
-          '--user-data-dir=/tmp/puppeteer-maps',
         ],
       }),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Puppeteer launch timeout — Chrome not available')), 15_000)
+        setTimeout(() => reject(new Error('Puppeteer launch timeout — Chrome not available')), 20_000)
       ),
     ]);
 

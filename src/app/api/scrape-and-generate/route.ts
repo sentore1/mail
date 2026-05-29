@@ -83,6 +83,17 @@ BODY: [email body]`;
 }
 
 // ── Niche to readable sector label ───────────────────────────────────────────
+// ── Niche to readable sector label ───────────────────────────────────────────
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&#x27;/gi, "'").replace(/&#39;/gi, "'").replace(/&apos;/gi, "'")
+    .replace(/&amp;/gi, '&').replace(/&quot;/gi, '"').replace(/&#x22;/gi, '"')
+    .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&nbsp;/gi, ' ')
+    .replace(/&#(\d+);/gi, (_, c) => String.fromCharCode(parseInt(c, 10)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .trim();
+}
+
 function getSectorLabel(niche: string | null): string {
   if (!niche) return 'business';
   const n = niche.toLowerCase();
@@ -104,14 +115,14 @@ function getSectorLabel(niche: string | null): string {
 
 // ── Subject patterns (rotated per lead so bulk emails vary) ──────────────────
 const SUBJECT_PATTERNS_BULK = [
-  (company: string, _s: string) => `${company}, is this relevant to you?`,
-  (_c: string, sector: string) => `For ${sector} businesses — worth reading`,
-  (company: string, _s: string) => `${company}, could we have 10 minutes?`,
-  (_c: string, sector: string) => `Something that may help ${sector} teams`,
-  (company: string, _s: string) => `${company}, honest question`,
-  (_c: string, sector: string) => `${sector} businesses and a tool worth knowing`,
-  (company: string, _s: string) => `${company}, would this be useful to you?`,
-  (_c: string, sector: string) => `For ${sector} teams dealing with too many tools`,
+  (company: string, sector: string) => `Still managing ${sector} manually? ${company}`,
+  (company: string, _sector: string) => `Too many tools slowing your team? ${company}`,
+  (company: string, sector: string) => `Is ${sector} admin costing you hours? ${company}`,
+  (company: string, _sector: string) => `Fragmented tools slowing growth? ${company}`,
+  (company: string, sector: string) => `${sector} teams losing hours to this, ${company}`,
+  (company: string, _sector: string) => `What if one system replaced them all? ${company}`,
+  (company: string, sector: string) => `The ${sector} back-office problem, ${company}`,
+  (company: string, _sector: string) => `Could your team save 10 hours a week? ${company}`,
 ];
 
 // ── Direct email builder — no AI, exact template every time ──────────────────
@@ -121,14 +132,15 @@ function buildDirectEmail(
   senderName: string,
   idx: number
 ): { subject: string; body: string } {
+  const company = decodeHtmlEntities(companyName);
   const sector = getSectorLabel(niche);
   const patternFn = SUBJECT_PATTERNS_BULK[idx % SUBJECT_PATTERNS_BULK.length]!;
-  const subject = patternFn(companyName, sector);
+  const subject = patternFn(company, sector);
 
   const body =
 `Dear Sir/Madam,
 
-${companyName} and many ${sector} businesses often deal with manual workflows and fragmented tools that slow teams down.
+${company} and many ${sector} businesses often deal with manual workflows and fragmented tools that slow teams down.
 
 Pryro is an ERP that replaces those inefficiencies with one unified system and we offer a 20-30% commission for every successfully referred client.
 

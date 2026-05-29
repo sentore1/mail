@@ -4,7 +4,7 @@ import { createServiceClient } from "../../../../supabase/service";
 import { SMTPManager } from "@/utils/smtp-server";
 import { randomUUID } from "crypto";
 import { classifyBounce } from "@/types/platform";
-import { verifyEmail } from "@/utils/email-verifier";
+import { verifyEmailDNS } from "@/utils/email-verifier";
 
 export const runtime = "nodejs";
 
