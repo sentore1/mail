@@ -70,12 +70,32 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
   const [nicheFilter, setNicheFilter]         = useState("all");
   const [bulkUseWebResearch, setBulkUseWebResearch] = useState(false);
 
+  // ── Batch sending state ───────────────────────────────────────────────────
+  const BATCH_SIZE = 10;
+  const [batchOffset, setBatchOffset]         = useState(0);
+  const [batchPaused, setBatchPaused]         = useState(false);
+  const [autoSendCountdown, setAutoSendCountdown] = useState(0); // seconds remaining
+  const autoSendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isOnPlatformRef = useRef(true);
+
   // ── Sender name — editable per user ──────────────────────────────────────
   const [senderName, setSenderName] = useState("");
   const [senderTitle, setSenderTitle] = useState("Executive Sales");
 
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(() => { fetchLeads(); loadSenderProfile(); }, []);
+
+  // Track whether user is on the platform (for auto-send timer)
+  useEffect(() => {
+    const onVisibility = () => { isOnPlatformRef.current = document.visibilityState === 'visible'; };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (autoSendTimerRef.current) clearTimeout(autoSendTimerRef.current);
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (preloadedLead) {
@@ -464,28 +484,26 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
     }
   };
 
-  const sendBulkEmails = async () => {
-    if (bulkEmails.length === 0) return;
+  // ── Batch send helpers ────────────────────────────────────────────────────
+  const clearBatchTimers = () => {
+    if (autoSendTimerRef.current) { clearTimeout(autoSendTimerRef.current); autoSendTimerRef.current = null; }
+    if (countdownIntervalRef.current) { clearInterval(countdownIntervalRef.current); countdownIntervalRef.current = null; }
+    setAutoSendCountdown(0);
+  };
 
-    // Filter out any emails with no recipient — warn the user
-    const validEmails = bulkEmails.filter(e => e.lead_email && e.lead_email.trim());
-    const skipped = bulkEmails.length - validEmails.length;
-    if (skipped > 0) {
-      toast.warning(`${skipped} lead${skipped > 1 ? 's' : ''} skipped — no email address. Add emails to those leads first.`);
-    }
-    if (validEmails.length === 0) {
-      toast.error("None of the selected leads have an email address.");
-      return;
-    }
+  const sendBatch = async (offset: number, allEmails: any[]) => {
+    const batch = allEmails.slice(offset, offset + BATCH_SIZE);
+    const validBatch = batch.filter(e => e.lead_email && e.lead_email.trim());
+    if (validBatch.length === 0) return;
 
     setIsSendingBulk(true);
-    const sendToastId = toast.loading(`Sending ${validEmails.length} emails…`);
+    const sendToastId = toast.loading(`Sending batch ${Math.floor(offset / BATCH_SIZE) + 1} (${validBatch.length} emails)…`);
     try {
       const res = await fetch("/api/send-bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          emails: validEmails.map(email => ({
+          emails: validBatch.map(email => ({
             leadId: email.lead?.id || "",
             to: email.lead_email,
             companyName: email.company_name,
@@ -503,41 +521,96 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
       toast.dismiss(sendToastId);
 
       if (data.success) {
-        const { sent, failed, total, errors } = data.results;
-        if (failed === 0) {
-          toast.success(`All ${sent} emails sent successfully!`);
-        } else if (sent === 0) {
-          // Show the actual first error so user knows what's wrong
-          const firstError = errors?.[0] ?? '';
-          if (firstError.includes('AI-predicted') || firstError.includes('low confidence')) {
-            toast.error(`All ${failed} emails skipped — AI-predicted addresses blocked. Only verified emails are sent.`);
-          } else if (firstError.includes('invalid email format')) {
-            toast.error(`All ${failed} emails failed — invalid email addresses.`);
-          } else if (firstError.includes('DNS') || firstError.includes('MX')) {
-            toast.error(`All ${failed} emails failed — email domains have no mail servers.`);
-          } else if (firstError) {
-            toast.error(`All ${failed} emails failed: ${firstError.slice(0, 120)}`);
-          } else {
-            toast.error(`All ${failed} emails failed. Check your SMTP account in SMTP Manager.`);
-          }
-        } else {
-          toast.warning(`${sent} sent, ${failed} failed out of ${total} total.`);
-        }
-        setBulkEmails([]);
-        setMode("single");
-        setSelectedLeadIds(new Set());
+        const { sent, failed, errors } = data.results;
+        const nextOffset = offset + BATCH_SIZE;
+        const remaining = allEmails.length - nextOffset;
+
+        if (sent > 0) toast.success(`Batch sent: ${sent} delivered${failed > 0 ? `, ${failed} skipped` : ''}`);
+        else if (errors?.[0]) toast.error(`Batch failed: ${errors[0].slice(0, 100)}`);
+
         fetchLeads();
+
+        if (nextOffset < allEmails.length) {
+          // More batches remain — pause and wait for user action
+          setBatchOffset(nextOffset);
+          setBatchPaused(true);
+
+          // Start 10-minute auto-send countdown
+          const AUTO_SEND_DELAY = 10 * 60; // 10 minutes in seconds
+          setAutoSendCountdown(AUTO_SEND_DELAY);
+
+          countdownIntervalRef.current = setInterval(() => {
+            setAutoSendCountdown(prev => {
+              if (prev <= 1) {
+                clearInterval(countdownIntervalRef.current!);
+                countdownIntervalRef.current = null;
+                return 0;
+              }
+              return prev - 1;
+            });
+          }, 1000);
+
+          autoSendTimerRef.current = setTimeout(() => {
+            // Auto-send only if user is NOT on the platform
+            if (!isOnPlatformRef.current) {
+              setBatchPaused(false);
+              sendBatch(nextOffset, allEmails);
+            }
+          }, AUTO_SEND_DELAY * 1000);
+
+          toast.info(`${remaining} emails remaining. Review next batch or wait 10 min for auto-send.`, { duration: 6000 });
+        } else {
+          // All batches done
+          setBulkEmails([]);
+          setBatchOffset(0);
+          setBatchPaused(false);
+          setMode("single");
+          setSelectedLeadIds(new Set());
+          toast.success(`All ${allEmails.length} emails processed!`);
+        }
       } else if (res.status === 429) {
+        toast.dismiss(sendToastId);
         toast.error("Daily SMTP limit reached. Try again tomorrow.");
       } else {
-        toast.error(data.error || "Failed to send emails");
+        toast.dismiss(sendToastId);
+        toast.error(data.error || "Failed to send batch");
       }
     } catch (err: any) {
       toast.dismiss(sendToastId);
-      toast.error(err?.message || "Network error sending emails");
+      toast.error(err?.message || "Network error sending batch");
     } finally {
       setIsSendingBulk(false);
     }
+  };
+
+  const sendBulkEmails = async () => {
+    if (bulkEmails.length === 0) return;
+    const validEmails = bulkEmails.filter(e => e.lead_email && e.lead_email.trim());
+    const skipped = bulkEmails.length - validEmails.length;
+    if (skipped > 0) toast.warning(`${skipped} lead${skipped > 1 ? 's' : ''} skipped — no email address.`);
+    if (validEmails.length === 0) { toast.error("None of the selected leads have an email address."); return; }
+
+    clearBatchTimers();
+    setBatchOffset(0);
+    setBatchPaused(false);
+    await sendBatch(0, validEmails);
+  };
+
+  const sendNextBatch = () => {
+    clearBatchTimers();
+    setBatchPaused(false);
+    const validEmails = bulkEmails.filter(e => e.lead_email && e.lead_email.trim());
+    sendBatch(batchOffset, validEmails);
+  };
+
+  const cancelAutoSend = () => {
+    clearBatchTimers();
+    setBatchPaused(false);
+    setBulkEmails([]);
+    setBatchOffset(0);
+    setMode("single");
+    setSelectedLeadIds(new Set());
+    toast.info("Batch sending cancelled.");
   };
 
   const sendTestEmail = async () => {
@@ -1123,17 +1196,83 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
                   </button>
                   <button
                     onClick={sendBulkEmails}
-                    disabled={isSendingBulk || isGenerating}
+                    disabled={isSendingBulk || isGenerating || batchPaused}
                     className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
                   >
                     {isSendingBulk
-                      ? <><Loader2 size={15} className="animate-spin" /> Sending…</>
+                      ? <><Loader2 size={15} className="animate-spin" /> Sending batch…</>
                       : isGenerating
                       ? <><Loader2 size={15} className="animate-spin" /> Generating {bulkEmails.length}/{selectedLeadIds.size}…</>
-                      : <><Send size={15} /> Send {bulkEmails.length} Emails · 10 per batch · 10 min apart</>
+                      : <><Send size={15} /> Send first {Math.min(BATCH_SIZE, bulkEmails.filter(e => e.lead_email).length)} emails</>
                     }
                   </button>
                 </div>
+
+                {/* Batch pause panel — shown after first batch is sent */}
+                {batchPaused && (() => {
+                  const validEmails = bulkEmails.filter(e => e.lead_email && e.lead_email.trim());
+                  const remaining = validEmails.length - batchOffset;
+                  const nextBatch = validEmails.slice(batchOffset, batchOffset + BATCH_SIZE);
+                  const mins = Math.floor(autoSendCountdown / 60);
+                  const secs = autoSendCountdown % 60;
+                  return (
+                    <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-4 flex flex-col gap-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-semibold text-blue-900">
+                            Batch sent ✓ — {remaining} emails remaining
+                          </p>
+                          <p className="text-xs text-blue-700 mt-0.5">
+                            Review the next {nextBatch.length} emails below, edit if needed, then send.
+                          </p>
+                        </div>
+                        {autoSendCountdown > 0 && (
+                          <div className="text-right flex-shrink-0 ml-4">
+                            <p className="text-xs text-blue-600 font-medium">Auto-sends if you leave</p>
+                            <p className="text-lg font-bold text-blue-800 tabular-nums">
+                              {mins}:{secs.toString().padStart(2, '0')}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Preview next batch */}
+                      <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
+                        {nextBatch.map((email, i) => (
+                          <div key={i} className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-blue-100 text-xs">
+                            <span className="font-medium text-gray-800 truncate flex-1">{email.company_name}</span>
+                            <span className="text-gray-400 truncate max-w-[140px]">{email.lead_email}</span>
+                            <button
+                              onClick={() => setPreviewIndex(batchOffset + i)}
+                              className="text-blue-600 hover:text-blue-800 flex-shrink-0 font-medium"
+                            >
+                              Edit
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex gap-2">
+                        <button
+                          onClick={sendNextBatch}
+                          disabled={isSendingBulk}
+                          className="flex-1 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                          {isSendingBulk
+                            ? <><Loader2 size={13} className="animate-spin" /> Sending…</>
+                            : <><Send size={13} /> Send next {nextBatch.length} emails</>
+                          }
+                        </button>
+                        <button
+                          onClick={cancelAutoSend}
+                          className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-300 text-gray-600 hover:bg-gray-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Full email edit modal */}
                 {previewIndex >= 0 && bulkEmails[previewIndex] && (
