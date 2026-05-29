@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "../../../../supabase/server";
 import { createServiceClient } from "../../../../supabase/service";
 import { SMTPManager } from "@/utils/smtp-server";
-import { verifyEmail } from "@/utils/email-verifier";
+import { verifyEmailDNS } from "@/utils/email-verifier";
 
 // nodemailer requires the Node.js runtime (not Edge)
 export const runtime = "nodejs";
@@ -13,6 +13,10 @@ export interface BulkEmailItem {
   companyName: string;
   subject: string;
   body: string;
+  /** confidence_score from leads table — 90 = real scraped, 50 = AI predicted */
+  confidenceScore?: number;
+  /** email_verified from leads table */
+  emailVerified?: boolean;
 }
 
 export interface SendBulkRequest {
@@ -73,12 +77,7 @@ ${paragraphs}
 </html>`;
 }
 
-/** Lightweight DNS-based email validation — replaced by email-verifier utility */
-async function verifyEmailDNS(email: string): Promise<boolean> {
-  const { verifyEmail: verify } = await import("@/utils/email-verifier");
-  const result = await verify(email);
-  return result.valid;
-}
+/** Lightweight DNS-based email validation — uses imported verifyEmailDNS */
 
 export async function POST(request: NextRequest) {
   try {
@@ -158,24 +157,37 @@ export async function POST(request: NextRequest) {
         if (!emailRegex.test(email.to)) {
           results.failed++;
           results.errors.push(`${email.to}: invalid email format`);
-
           await serviceSupabase.from("email_queue").insert({
-            user_id: user.id,
-            campaign_id: campaignId,
-            lead_id: email.leadId,
-            recipient_email: email.to,
-            recipient_name: email.companyName,
-            subject: email.subject,
-            body: email.body,
-            status: "failed",
-            error_message: "Invalid email format",
+            user_id: user.id, campaign_id: campaignId, lead_id: email.leadId,
+            recipient_email: email.to, recipient_name: email.companyName,
+            subject: email.subject, body: email.body,
+            status: "failed", error_message: "Invalid email format",
           });
           continue;
         }
 
-        // Email verification — check format + MX + mailbox existence
+        // Skip AI-predicted emails (confidence < 70 and not verified)
+        // These are guessed addresses that frequently bounce
+        const score = email.confidenceScore ?? 90;
+        const verified = email.emailVerified ?? false;
+        if (!verified && score < 70) {
+          results.failed++;
+          results.errors.push(`${email.to}: skipped — AI-predicted email (low confidence)`);
+          await serviceSupabase.from("sent_emails").insert({
+            user_id: user.id, lead_id: email.leadId || null, campaign_id: campaignId,
+            to_email: email.to, subject: email.subject, body: email.body,
+            sent_at: new Date().toISOString(), status: "failed",
+            bounce_reason: "Email not sent — AI-predicted address (unverified, low confidence)",
+          });
+          if (email.leadId) {
+            await serviceSupabase.from("leads")
+              .update({ status: "invalid_email", updated_at: new Date().toISOString() })
+              .eq("id", email.leadId);
+          }
+          continue;
+        }        // Email verification — fast DNS/MX check only (SMTP probe disabled — too slow)
         if (verifyEmails) {
-          const verification = await verifyEmail(email.to);
+          const verification = await verifyEmailDNS(email.to);
           if (!verification.valid) {
             results.failed++;
             results.errors.push(`${email.to}: ${verification.detail ?? verification.reason}`);
@@ -242,6 +254,8 @@ export async function POST(request: NextRequest) {
           plainToHtml(email.body)
         );
 
+        console.log(`[send-bulk] ${email.to}: ${sendResult.success ? '✅ sent' : '❌ ' + sendResult.error}`);
+
         if (sendResult.success) {
           results.sent++;
 
@@ -293,20 +307,11 @@ export async function POST(request: NextRequest) {
           results.failed++;
           results.errors.push(`${email.to}: ${sendResult.error}`);
 
-          await serviceSupabase.from("email_queue").insert({
-            user_id: user.id,
-            campaign_id: campaignId,
-            lead_id: email.leadId,
-            recipient_email: email.to,
-            recipient_name: email.companyName,
-            subject: email.subject,
-            body: email.body,
-            status: "failed",
-            error_message: sendResult.error,
-            retry_count: 0,
-          });
+          // Detect hard bounces — "address not found", "user unknown", etc.
+          const errorMsg = (sendResult.error ?? '').toLowerCase();
+          const isHardBounce = /address.*not.*found|user.*unknown|no.*such.*user|mailbox.*not.*found|does.*not.*exist|invalid.*recipient|550|551|553/.test(errorMsg);
+          const leadStatus = isHardBounce ? "bounced" : "failed";
 
-          // Also log to sent_emails so CRM and Follow-Up can show the failure
           await serviceSupabase.from("sent_emails").insert({
             user_id: user.id,
             lead_id: email.leadId,
@@ -319,11 +324,14 @@ export async function POST(request: NextRequest) {
             bounce_reason: sendResult.error ?? "Send failed",
           });
 
-          // Mark lead as failed
           if (email.leadId) {
             await serviceSupabase
               .from("leads")
-              .update({ status: "failed", updated_at: new Date().toISOString() })
+              .update({
+                status: leadStatus,
+                email_verified: isHardBounce ? false : undefined,
+                updated_at: new Date().toISOString(),
+              })
               .eq("id", email.leadId);
           }
         }

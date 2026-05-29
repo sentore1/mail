@@ -491,9 +491,11 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
             companyName: email.company_name,
             subject: email.editSubject || email.subject,
             body: email.editBody || email.body,
+            confidenceScore: (email.lead as any)?.confidence_score ?? 90,
+            emailVerified: (email.lead as any)?.email_verified ?? false,
           })),
-          delayMs: 2000,       // 2 seconds between emails — safe, fast
-          verifyEmails: false,
+          delayMs: 2000,
+          verifyEmails: true,
         }),
       });
 
@@ -501,11 +503,23 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
       toast.dismiss(sendToastId);
 
       if (data.success) {
-        const { sent, failed, total } = data.results;
+        const { sent, failed, total, errors } = data.results;
         if (failed === 0) {
           toast.success(`All ${sent} emails sent successfully!`);
         } else if (sent === 0) {
-          toast.error(`All ${failed} emails failed. Check your SMTP account in SMTP Manager.`);
+          // Show the actual first error so user knows what's wrong
+          const firstError = errors?.[0] ?? '';
+          if (firstError.includes('AI-predicted') || firstError.includes('low confidence')) {
+            toast.error(`All ${failed} emails skipped — AI-predicted addresses blocked. Only verified emails are sent.`);
+          } else if (firstError.includes('invalid email format')) {
+            toast.error(`All ${failed} emails failed — invalid email addresses.`);
+          } else if (firstError.includes('DNS') || firstError.includes('MX')) {
+            toast.error(`All ${failed} emails failed — email domains have no mail servers.`);
+          } else if (firstError) {
+            toast.error(`All ${failed} emails failed: ${firstError.slice(0, 120)}`);
+          } else {
+            toast.error(`All ${failed} emails failed. Check your SMTP account in SMTP Manager.`);
+          }
         } else {
           toast.warning(`${sent} sent, ${failed} failed out of ${total} total.`);
         }
