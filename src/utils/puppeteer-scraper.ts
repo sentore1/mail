@@ -943,6 +943,13 @@ const BAD_TITLE_PATTERNS = [
   /^(news|blog|articles?)$/i,
   /^(login|sign\s?in|register|sign\s?up)$/i,
   /^(cart|checkout|basket)$/i,
+  // List/directory pages — not real companies
+  /companies\s+in\s+/i,
+  /colleges?\s+(and|&)\s+universities/i,
+  /top\s+\d*\s*(colleges?|universities|schools|hospitals|clinics)/i,
+  /list\s+of\s+(top|best)/i,
+  /\bin\s+[a-z\s]+$/i,  // ends with "in [city]" — likely a list page
+  /^(top|best|leading)\s+(colleges?|universities|schools|hospitals|pharmacies|hotels|restaurants)/i,
 ];
 
 // Bad prefixes to strip from company names
@@ -1039,6 +1046,39 @@ async function scrapeSerperSearch(
   // Collect all unique website URLs from all queries first
   const websiteMap = new Map<string, { name: string; snippet: string; url: string }>();
 
+  // Extract country code from location for geo-targeted search
+  const getCountryCode = (loc: string): string => {
+    const l = loc.toLowerCase();
+    if (/usa|united states|new york|los angeles|chicago|houston|miami|dallas|seattle|boston|denver|atlanta/.test(l)) return 'us';
+    if (/uk|united kingdom|london|manchester|birmingham|edinburgh/.test(l)) return 'gb';
+    if (/canada|toronto|vancouver|montreal|calgary/.test(l)) return 'ca';
+    if (/australia|sydney|melbourne|brisbane|perth/.test(l)) return 'au';
+    if (/uae|dubai|abu dhabi|sharjah/.test(l)) return 'ae';
+    if (/saudi|riyadh|jeddah|mecca/.test(l)) return 'sa';
+    if (/qatar|doha/.test(l)) return 'qa';
+    if (/kenya|nairobi|mombasa/.test(l)) return 'ke';
+    if (/nigeria|lagos|abuja/.test(l)) return 'ng';
+    if (/south africa|johannesburg|cape town|durban/.test(l)) return 'za';
+    if (/india|mumbai|delhi|bangalore|hyderabad|chennai/.test(l)) return 'in';
+    if (/singapore/.test(l)) return 'sg';
+    if (/malaysia|kuala lumpur/.test(l)) return 'my';
+    if (/ghana|accra/.test(l)) return 'gh';
+    if (/egypt|cairo/.test(l)) return 'eg';
+    if (/france|paris/.test(l)) return 'fr';
+    if (/germany|berlin|munich/.test(l)) return 'de';
+    if (/pakistan|karachi|lahore/.test(l)) return 'pk';
+    if (/bangladesh|dhaka/.test(l)) return 'bd';
+    if (/ethiopia|addis ababa/.test(l)) return 'et';
+    if (/tanzania|dar es salaam/.test(l)) return 'tz';
+    if (/uganda|kampala/.test(l)) return 'ug';
+    if (/rwanda|kigali/.test(l)) return 'rw';
+    return 'us'; // default
+  };
+
+  const countryCode = getCountryCode(location);
+  // Extract city name for snippet filtering
+  const cityName = location.split(',')[0]?.trim().toLowerCase() ?? location.toLowerCase();
+
   for (const query of queries) {
     if (websiteMap.size >= needed * 3) break; // collect 3x more than needed
     try {
@@ -1046,20 +1086,34 @@ async function scrapeSerperSearch(
       const res = await fetch('https://google.serper.dev/search', {
         method: 'POST',
         headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q: query, num: 10, gl: 'us', hl: 'en' }),
+        body: JSON.stringify({ q: query, num: 10, gl: countryCode, hl: 'en', location: location }),
         signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) { console.log(`  ⚠️  Serper ${res.status} on: ${query}`); continue; }
       const data = await res.json();
 
-      // Collect from organic results
+      // Collect from organic results — filter by location relevance
       for (const item of (data.organic ?? [])) {
         const rawUrl = item.link ?? '';
         if (!rawUrl || isBlockedDomain(rawUrl)) continue;
         const companyName = extractCompanyName(item.title ?? '', rawUrl);
         if (!companyName) continue;
+
+        // Location relevance check — skip results that clearly belong to a different location
+        // Check snippet and title for location mentions
+        const resultText = ((item.title ?? '') + ' ' + (item.snippet ?? '')).toLowerCase();
+        const urlDomain = new URL(rawUrl).hostname.toLowerCase();
+
+        // If the snippet mentions a completely different major city, skip it
+        // (but only if it doesn't also mention our target city)
+        const otherCities = ['new york', 'london', 'paris', 'tokyo', 'sydney', 'toronto', 'berlin', 'singapore', 'mumbai', 'beijing'];
+        const mentionsOtherCity = otherCities.some(city =>
+          city !== cityName && resultText.includes(city) && !resultText.includes(cityName)
+        );
+        if (mentionsOtherCity) continue;
+
         // Use URL as dedup key so we don't visit same site twice
-        const urlKey = new URL(rawUrl).hostname.replace(/^www\./, '');
+        const urlKey = urlDomain.replace(/^www\./, '');
         if (!websiteMap.has(urlKey)) {
           websiteMap.set(urlKey, {
             name: companyName,

@@ -221,7 +221,7 @@ function buildDirectEmail(
   const body =
 `Dear Sir/Madam,
 
-${company} and many ${sectorName} often deal with ${painPoint}.
+${company} is in the ${sectorName} sector, where ${painPoint} is a common challenge.
 
 Pryro is an ERP that replaces those inefficiencies with one unified system. It ${pryroValue} and we offer a 20-30% commission for every successfully referred client.
 
