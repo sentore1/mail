@@ -120,6 +120,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
 
   /** Load sender name from active SMTP account */
   const loadSenderProfile = async () => {
+    // Only pre-fill if the user hasn't already set a name
     try {
       const { data } = await supabase
         .from("smtp_accounts")
@@ -512,7 +513,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
             confidenceScore: (email.lead as any)?.confidence_score ?? 90,
             emailVerified: (email.lead as any)?.email_verified ?? false,
           })),
-          delayMs: 2000,
+          delayMs: 3000,
           verifyEmails: true,
         }),
       });
@@ -955,7 +956,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
                       <input
                         value={senderName}
                         onChange={(e) => setSenderName(e.target.value)}
-                        placeholder="e.g. Rukundo Abkar"
+                        placeholder="Type your full name here"
                         className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"
                       />
                     </div>
