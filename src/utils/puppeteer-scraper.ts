@@ -155,9 +155,10 @@ async function aiPredict(
 // ─── Deep website email scraper ───────────────────────────────────────────────
 
 /**
- * Returns { email, isReal } where:
+ * Returns { email, isReal, realName } where:
  *   isReal = true  → email was found explicitly on a page (scraped)
  *   isReal = false → email was predicted by AI from domain + company info
+ *   realName       → business name extracted from the website (if found)
  */
 async function deepScrapeWebsite(
   website: string,
@@ -166,7 +167,7 @@ async function deepScrapeWebsite(
   location: string,
   aiProvider: AIProviderConfig | null,
   browser?: Browser
-): Promise<{ email: string; isReal: boolean } | null> {
+): Promise<{ email: string; isReal: boolean; realName?: string } | null> {
   if (!website.startsWith('http')) website = `https://${website}`;
   let origin: string;
   try { origin = new URL(website).origin; } catch { return null; }
@@ -178,13 +179,53 @@ async function deepScrapeWebsite(
     'Accept-Language': 'en-US,en;q=0.9',
   };
 
-  const pagePaths = [
+  // Priority pages — try these first with regex only (fast, no AI)
+  const regexOnlyPaths = [
     '/contact', '/contact-us', '/contacts', '/contact.html',
     '/about', '/about-us', '/about.html',
-    '/team', '/our-team', '/meet-the-team', '/staff', '/people',
-    '/imprint', '/impressum', '/legal',
+    '/team', '/our-team', '/staff',
+    '/imprint', '/impressum',
     '/',
   ];
+
+  // AI-assisted pages — only try these if regex found nothing, and only on the most likely pages
+  const aiAssistedPaths = ['/contact', '/about', '/'];
+
+  // Extract real business name from HTML
+  const extractBusinessName = (html: string, pageUrl: string): string | null => {
+    // Try og:site_name meta tag (most reliable)
+    const ogSite = html.match(/<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']{3,80})["']/i)?.[1]
+                ?? html.match(/<meta[^>]+content=["']([^"']{3,80})["'][^>]+property=["']og:site_name["']/i)?.[1];
+    if (ogSite) return decodeHtmlEntitiesSimple(ogSite.trim());
+
+    // Try <title> tag — take the part before | or - separator
+    const titleMatch = html.match(/<title[^>]*>([^<]{3,100})<\/title>/i)?.[1];
+    if (titleMatch) {
+      const cleaned = titleMatch.replace(/\s*[-|–|—|·|»]\s*.+$/, '').trim();
+      if (cleaned.length >= 3 && cleaned.length <= 80 && !BAD_TITLE_PATTERNS.some(p => p.test(cleaned))) {
+        return decodeHtmlEntitiesSimple(cleaned);
+      }
+    }
+
+    // Try h1 on homepage
+    const h1Match = html.match(/<h1[^>]*>([^<]{3,80})<\/h1>/i)?.[1];
+    if (h1Match) {
+      const cleaned = h1Match.replace(/<[^>]+>/g, '').trim();
+      if (cleaned.length >= 3 && cleaned.length <= 60 && !BAD_TITLE_PATTERNS.some(p => p.test(cleaned))) {
+        return decodeHtmlEntitiesSimple(cleaned);
+      }
+    }
+
+    return null;
+  };
+
+  function decodeHtmlEntitiesSimple(text: string): string {
+    return text
+      .replace(/&#x27;/gi, "'").replace(/&#39;/gi, "'")
+      .replace(/&amp;/gi, '&').replace(/&quot;/gi, '"')
+      .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+      .replace(/&nbsp;/gi, ' ').trim();
+  }
 
   const decodeHtml = (html: string): string => {
     html = html
@@ -202,7 +243,7 @@ async function deepScrapeWebsite(
     return html;
   };
 
-  const fetchPage = async (url: string): Promise<string | null> => {
+  const fetchPage = async (url: string, useAI = false): Promise<{ email: string; name?: string } | null> => {
     try {
       const res = await fetch(url, { headers, signal: AbortSignal.timeout(7_000) });
       if (!res.ok) return null;
@@ -212,23 +253,43 @@ async function deepScrapeWebsite(
       let mm: RegExpExecArray | null;
       while ((mm = mr.exec(html)) !== null) mailtos.push(mm[1].toLowerCase());
       const found = bestEmail([...mailtos, ...extractEmails(html)]);
-      if (found) return found;
-      // AI extraction — only returns emails explicitly found in the content
-      if (aiProvider) {
-        const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 3000);
-        const aiEmail = await aiExtract(companyName, domain, text, aiProvider);
-        if (aiEmail) return aiEmail;
+      // Extract real business name from this page
+      const realName = extractBusinessName(html, url) ?? undefined;
+      if (found) return { email: found, name: realName };
+      // AI extraction — only on specific pages and only if page has enough content
+      if (useAI && aiProvider) {
+        const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        if (text.length > 200) {
+          const aiEmail = await aiExtract(companyName, domain, text.slice(0, 3000), aiProvider);
+          if (aiEmail) return { email: aiEmail, name: realName };
+        }
       }
       return null;
     } catch { return null; }
   };
 
-  // Try pages sequentially — stop as soon as email found.
-  // Sequential is critical: parallel calls hammer the AI rate limit.
-  const urls = pagePaths.map(p => `${origin}${p}`);
-  for (const url of urls) {
-    const email = await fetchPage(url);
-    if (email) return { email, isReal: true };
+  let foundRealName: string | undefined;
+
+  // Phase 1: Try all pages with regex only (fast, no AI calls)
+  const regexUrls = regexOnlyPaths.map(p => `${origin}${p}`);
+  for (const url of regexUrls) {
+    const result = await fetchPage(url, false);
+    if (result) {
+      if (result.name) foundRealName = result.name;
+      return { email: result.email, isReal: true, realName: foundRealName };
+    }
+  }
+
+  // Phase 2: Try top 3 pages with AI (only if regex found nothing)
+  if (aiProvider) {
+    const aiUrls = aiAssistedPaths.map(p => `${origin}${p}`);
+    for (const url of aiUrls) {
+      const result = await fetchPage(url, true);
+      if (result) {
+        if (result.name) foundRealName = result.name;
+        return { email: result.email, isReal: true, realName: foundRealName };
+      }
+    }
   }
 
   // Puppeteer fallback for JS-heavy sites
@@ -526,8 +587,9 @@ async function scrapeBingSearch(
 
       for (const item of items) {
         if (leads.length >= needed) break;
-        const cleanName = item.name.replace(/\s*[-|–·|]\s*.+$/, '').trim();
+        const cleanName = extractCompanyName(item.name, item.url);
         if (!cleanName || cleanName.length < 3 || cleanName.length > 80) continue;
+        if (BAD_TITLE_PATTERNS.some(p => p.test(cleanName))) continue;
         if (seen.has(cleanName.toLowerCase())) continue;
 
         // Check page emails first
@@ -539,7 +601,21 @@ async function scrapeBingSearch(
 
         if (!email) {
           const result = await deepScrapeWebsite(item.url, cleanName, niche, location, aiProvider);
-          if (result) { email = result.email; emailIsReal = result.isReal; }
+          if (result) {
+            email = result.email;
+            emailIsReal = result.isReal;
+            // Use real name from website if better
+            if (result.realName) {
+              const better = extractCompanyName(result.realName, item.url);
+              if (better && !BAD_TITLE_PATTERNS.some(p => p.test(better))) {
+                seen.add(better.toLowerCase());
+                const lead: ScrapedLead = { company_name: better, email, emailIsReal, niche, location, company_context: `${better} is a ${niche} in ${location}.`, source_url: item.url, website: item.url };
+                leads.push(lead); onLead(lead);
+                console.log(`    ✅ ${better} → ${email}${emailIsReal ? '' : ' (AI predicted)'}`);
+                continue;
+              }
+            }
+          }
         }
 
         if (!email) continue;
@@ -629,8 +705,9 @@ async function scrapeDDGSearch(
 
       for (const item of items) {
         if (leads.length >= needed) break;
-        const cleanName = item.name.replace(/\s*[-|–·|]\s*.+$/, '').trim();
+        const cleanName = extractCompanyName(item.name, item.url);
         if (!cleanName || cleanName.length < 3) continue;
+        if (BAD_TITLE_PATTERNS.some(p => p.test(cleanName))) continue;
         if (seen.has(cleanName.toLowerCase())) continue;
 
         let email = bestEmail(extractEmails(item.snippet));
@@ -830,7 +907,106 @@ async function scrapeDirectories(
 
 // ─── Source: Serper.dev (Google Search JSON API — free 2,500/month) ──────────
 
-// ─── Source: Serper.dev — Google Search + Website Visit + AI Email Extraction ─
+// ─── Bad title patterns — these are page titles, not company names ────────────
+const BAD_TITLE_PATTERNS = [
+  /^contact\s*(us)?$/i,
+  /^about\s*(us)?$/i,
+  /^home$/i,
+  /^welcome$/i,
+  /^shop\s/i,
+  /^buy\s/i,
+  /^order\s/i,
+  /^our\s(team|services|products|story)/i,
+  /^get\s(in touch|a quote|started)/i,
+  /^find\s(us|a\s)/i,
+  /^reach\s(us|out)/i,
+  /^email\s(us)?$/i,
+  /^phone\s(us)?$/i,
+  /^call\s(us)?$/i,
+  /^directions?$/i,
+  /^location(s)?$/i,
+  /^hours?$/i,
+  /^faq$/i,
+  /^privacy\s(policy)?$/i,
+  /^terms/i,
+  /^sitemap$/i,
+  /^search\s(results)?$/i,
+  /^page\s(not\s)?found/i,
+  /^404/i,
+  /^error/i,
+  /^\d+\s(best|top|leading)/i,
+  /^(best|top|leading)\s\d+/i,
+  /^list\sof/i,
+  /^online\s(shop|store|shopping)$/i,
+  /^(e-?commerce|ecommerce)$/i,
+  /^(products?|services?|solutions?)$/i,
+  /^(news|blog|articles?)$/i,
+  /^(login|sign\s?in|register|sign\s?up)$/i,
+  /^(cart|checkout|basket)$/i,
+];
+
+// Bad prefixes to strip from company names
+const BAD_NAME_PREFIXES = [
+  /^contact\s+/i,
+  /^email\s+/i,
+  /^call\s+/i,
+  /^visit\s+/i,
+  /^about\s+/i,
+  /^welcome\s+to\s+/i,
+  /^home\s*[-|–]\s*/i,
+  /^online\s+/i,
+  /^official\s+/i,
+  /^the\s+official\s+/i,
+];
+
+/**
+ * Extract a clean company name from a Google result.
+ * Falls back to deriving the name from the domain if the title is generic.
+ */
+function extractCompanyName(title: string, url: string): string | null {
+  // Clean the title — remove everything after a separator
+  let name = title
+    .replace(/\s*[-|–|·|—|»|›|:]\s*.+$/, '')
+    .replace(/\s*\|\s*.+$/, '')
+    .replace(/\s*,\s*.+$/, '')
+    .trim();
+
+  // Decode HTML entities
+  name = name
+    .replace(/&#x27;/gi, "'").replace(/&#39;/gi, "'")
+    .replace(/&amp;/gi, '&').replace(/&quot;/gi, '"')
+    .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>');
+
+  // Strip bad prefixes (e.g. "Contact Gulf Electronics" → "Gulf Electronics")
+  for (const prefix of BAD_NAME_PREFIXES) {
+    const stripped = name.replace(prefix, '').trim();
+    if (stripped.length >= 3) {
+      name = stripped;
+      break;
+    }
+  }
+
+  // Check if it's a bad/generic title after stripping
+  const isBad = BAD_TITLE_PATTERNS.some(p => p.test(name)) || name.length < 3 || name.length > 80;
+
+  if (isBad) {
+    // Fall back to domain name — convert "strandbooks.com" → "Strand Books"
+    try {
+      const domain = new URL(url).hostname.replace(/^www\./, '').replace(/\.(com|org|net|co\.\w+|io|biz|ae|uk|au|ca|in|sg)$/, '');
+      const fromDomain = domain
+        .replace(/[-_]/g, ' ')
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .replace(/\b\w/g, c => c.toUpperCase())
+        .trim();
+      if (fromDomain.length >= 3 && fromDomain.length <= 60 && !BAD_TITLE_PATTERNS.some(p => p.test(fromDomain))) {
+        return fromDomain;
+      }
+    } catch { /* invalid URL */ }
+    return null;
+  }
+
+  return name;
+}
 // Strategy: Run many diverse queries → collect all unique company websites →
 // visit each website's contact/about page → extract real email with AI.
 // This gives the highest quality leads with verified real emails.
@@ -880,13 +1056,13 @@ async function scrapeSerperSearch(
       for (const item of (data.organic ?? [])) {
         const rawUrl = item.link ?? '';
         if (!rawUrl || isBlockedDomain(rawUrl)) continue;
-        const rawName = (item.title ?? '').replace(/\s*[-|–|·|—]\s*.+$/, '').trim();
-        if (!rawName || rawName.length < 3) continue;
+        const companyName = extractCompanyName(item.title ?? '', rawUrl);
+        if (!companyName) continue;
         // Use URL as dedup key so we don't visit same site twice
         const urlKey = new URL(rawUrl).hostname.replace(/^www\./, '');
         if (!websiteMap.has(urlKey)) {
           websiteMap.set(urlKey, {
-            name: rawName,
+            name: companyName,
             snippet: item.snippet ?? '',
             url: rawUrl,
           });
@@ -921,8 +1097,11 @@ async function scrapeSerperSearch(
   for (const [, item] of Array.from(websiteMap)) {
     if (leads.length >= needed) break;
 
-    const cleanName = item.name.replace(/\s*[-|–|·|—]\s*.+$/, '').trim();
+    // Name already cleaned by extractCompanyName when stored in websiteMap
+    const cleanName = item.name;
     if (!cleanName || cleanName.length < 3) continue;
+    // Extra guard — skip if name still looks like a generic page title
+    if (BAD_TITLE_PATTERNS.some(p => p.test(cleanName))) continue;
     if (seen.has(cleanName.toLowerCase())) continue;
 
     // Step 1: Check if email is already in the snippet (fastest)
@@ -933,7 +1112,30 @@ async function scrapeSerperSearch(
     if (!email) {
       console.log(`  🌐 Visiting: ${item.url}`);
       const result = await deepScrapeWebsite(item.url, cleanName, niche, location, aiProvider);
-      if (result) { email = result.email; emailIsReal = result.isReal; }
+      if (result) {
+        email = result.email;
+        emailIsReal = result.isReal;
+        // Use the real business name from the website if found and better than what we have
+        if (result.realName && result.realName.length >= 3 && !BAD_TITLE_PATTERNS.some(p => p.test(result.realName!))) {
+          const betterName = extractCompanyName(result.realName, item.url);
+          if (betterName) {
+            console.log(`  📛 Real name from website: "${betterName}" (was: "${cleanName}")`);
+            // Update seen set with new name
+            seen.delete(cleanName.toLowerCase());
+            seen.add(betterName.toLowerCase());
+            // Use the real name for the lead
+            const lead: ScrapedLead = {
+              company_name: betterName, email, emailIsReal, niche, location,
+              company_context: item.snippet || `${betterName} is a ${niche} in ${location}.`,
+              source_url: item.url, website: item.url,
+            };
+            leads.push(lead);
+            onLead(lead);
+            console.log(`  ✅ ${betterName} → ${email}${emailIsReal ? '' : ' (AI predicted)'}`);
+            continue;
+          }
+        }
+      }
     }
 
     if (!email) {

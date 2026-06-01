@@ -136,6 +136,10 @@ export class SMTPManager {
       connectionTimeout: 10_000,
       greetingTimeout: 10_000,
       socketTimeout: 15_000,
+      // Improve deliverability — identify as a real mail client
+      tls: {
+        rejectUnauthorized: false,
+      },
     });
   }
 

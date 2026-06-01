@@ -43,7 +43,8 @@ export async function getActiveAIProvider(userId: string): Promise<AIProviderCon
 // and retry on 429 with exponential backoff.
 
 let lastAICallTime = 0;
-const AI_MIN_INTERVAL_MS = 2_000; // 2 seconds between calls = max 30/min
+const AI_MIN_INTERVAL_MS = 4_000; // 4 seconds between calls = max 15/min (well under Groq's 30/min limit)
+let aiRateLimitedUntil = 0; // timestamp — skip all AI calls until this time
 
 async function callAI(
   provider: AIProviderConfig,
@@ -52,6 +53,12 @@ async function callAI(
   maxTokens = 200,
   attempt = 0
 ): Promise<string> {
+  // If globally rate limited, skip immediately
+  if (Date.now() < aiRateLimitedUntil) {
+    const remaining = Math.round((aiRateLimitedUntil - Date.now()) / 1000);
+    throw new Error(`${provider.provider} rate limited — skipping AI for ${remaining}s`);
+  }
+
   // Throttle — wait if last call was too recent
   const now = Date.now();
   const elapsed = now - lastAICallTime;
@@ -82,17 +89,15 @@ async function callAI(
       signal: AbortSignal.timeout(15_000),
     });
 
-    // Retry on 429 with exponential backoff (max 3 attempts)
+    // On 429 — set global cooldown and skip AI entirely, don't block scraping
     if (res.status === 429) {
-      if (attempt >= 3) throw new Error(`${name} API error: 429 (rate limit exhausted after retries)`);
       const retryAfter = res.headers.get('retry-after');
-      const waitMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : Math.min(5_000 * Math.pow(2, attempt), 30_000);
-      console.warn(`[AI Scraper] ${name} rate limited — waiting ${waitMs}ms before retry ${attempt + 1}`);
-      await new Promise(r => setTimeout(r, waitMs));
-      lastAICallTime = 0; // reset throttle after waiting
-      return callAI(provider, systemPrompt, userPrompt, maxTokens, attempt + 1);
+      const waitSec = retryAfter ? parseInt(retryAfter, 10) : 60;
+      // Set global cooldown so all subsequent AI calls are skipped during this period
+      aiRateLimitedUntil = Date.now() + (waitSec * 1000);
+      console.warn(`[AI Scraper] ${name} rate limited — AI disabled for ${waitSec}s, scraping continues without AI`);
+      throw new Error(`${name} rate limit — AI skipped for ${waitSec}s`);
     }
-
     if (!res.ok) throw new Error(`${name} API error: ${res.status}`);
     const data = await res.json();
     return data.choices[0].message.content.trim();
