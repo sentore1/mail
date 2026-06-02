@@ -160,11 +160,17 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
     : leads;
 
   // ── Shared send helper ────────────────────────────────────────────────────
-  const callSendEmail = async (to: string, subject: string, body: string, leadId?: string) => {
+  const callSendEmail = async (to: string, subject: string, body: string, leadId?: string, campaignId?: string) => {
     const res = await fetch("/api/send-email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to, subject, body, ...(leadId ? { leadId } : {}) }),
+      body: JSON.stringify({
+        to,
+        subject,
+        body,
+        ...(leadId ? { leadId } : {}),
+        ...(campaignId ? { campaignId, scheduleFollowups: true } : { scheduleFollowups: false }),
+      }),
     });
     return { res, data: await res.json() };
   };
@@ -515,6 +521,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
           })),
           delayMs: 3000,
           verifyEmails: true,
+          scheduleFollowups: true,
         }),
       });
 
@@ -522,12 +529,14 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
       toast.dismiss(sendToastId);
 
       if (data.success) {
-        const { sent, failed, errors } = data.results;
+        const { sent, failed, errors, followupsScheduled } = data.results;
         const nextOffset = offset + BATCH_SIZE;
         const remaining = allEmails.length - nextOffset;
 
-        if (sent > 0) toast.success(`Batch sent: ${sent} delivered${failed > 0 ? `, ${failed} skipped` : ''}`);
-        else if (errors?.[0]) toast.error(`Batch failed: ${errors[0].slice(0, 100)}`);
+        if (sent > 0) {
+          const followupMsg = followupsScheduled > 0 ? ` · ${followupsScheduled} follow-ups scheduled` : '';
+          toast.success(`Batch sent: ${sent} delivered${failed > 0 ? `, ${failed} skipped` : ''}${followupMsg}`);
+        } else if (errors?.[0]) toast.error(`Batch failed: ${errors[0].slice(0, 100)}`);
 
         fetchLeads();
 

@@ -3,6 +3,7 @@ import { createClient } from "../../../../supabase/server";
 import { createServiceClient } from "../../../../supabase/service";
 import { SMTPManager } from "@/utils/smtp-server";
 import { verifyEmailDNS } from "@/utils/email-verifier";
+import { scheduleFollowUps } from "@/utils/followup-processor";
 
 // nodemailer requires the Node.js runtime (not Edge)
 export const runtime = "nodejs";
@@ -25,6 +26,8 @@ export interface SendBulkRequest {
   delayMs?: number;
   /** Whether to verify email DNS before sending. Defaults to true. */
   verifyEmails?: boolean;
+  /** Auto-schedule follow-ups for each sent email. Defaults to true. */
+  scheduleFollowups?: boolean;
 }
 
 export interface SendBulkResponse {
@@ -34,6 +37,7 @@ export interface SendBulkResponse {
     sent: number;
     failed: number;
     queued: number;
+    followupsScheduled: number;
     errors: string[];
   };
   campaignId?: string;
@@ -100,6 +104,7 @@ export async function POST(request: NextRequest) {
       emails,
       delayMs = 1500,
       verifyEmails = true,
+      scheduleFollowups = true,
     } = payload;
 
     if (!Array.isArray(emails) || emails.length === 0) {
@@ -147,6 +152,7 @@ export async function POST(request: NextRequest) {
       sent: 0,
       failed: 0,
       queued: 0,
+      followupsScheduled: 0,
       errors: [] as string[],
     };
 
@@ -286,16 +292,64 @@ export async function POST(request: NextRequest) {
           });
 
           // Log to sent_emails (include to_email so reply matching works)
-          await serviceSupabase.from("sent_emails").insert({
-            user_id: user.id,
-            lead_id: email.leadId,
-            campaign_id: campaignId,
-            to_email: email.to,
-            subject: email.subject,
-            body: email.body,
-            sent_at: new Date().toISOString(),
-            status: "sent",
-          });
+          const { data: sentRow } = await serviceSupabase
+            .from("sent_emails")
+            .insert({
+              user_id: user.id,
+              lead_id: email.leadId,
+              campaign_id: campaignId,
+              to_email: email.to,
+              subject: email.subject,
+              body: email.body,
+              sent_at: new Date().toISOString(),
+              status: "sent",
+              message_id: sendResult.messageId ?? null,
+            })
+            .select("id")
+            .single();
+
+          // ── Schedule follow-ups ─────────────────────────────────────────
+          const sentId = sentRow?.id ?? null;
+          const smtpMessageId = sendResult.messageId ?? null;
+
+          if (scheduleFollowups && sentId && campaignId && email.leadId && smtpMessageId) {
+            try {
+              const { data: threadId, error: threadErr } = await serviceSupabase.rpc(
+                "get_or_create_thread",
+                {
+                  p_user_id: user.id,
+                  p_lead_id: email.leadId,
+                  p_campaign_id: campaignId,
+                  p_subject: email.subject,
+                  p_message_id: smtpMessageId,
+                }
+              );
+
+              if (!threadErr && threadId) {
+                // Link the sent_emails row to the thread
+                await serviceSupabase
+                  .from("sent_emails")
+                  .update({ email_thread_id: threadId })
+                  .eq("id", sentId);
+
+                const count = await scheduleFollowUps(
+                  user.id,
+                  sentId,
+                  threadId as string,
+                  email.leadId,
+                  campaignId,
+                  smtpMessageId
+                );
+
+                results.followupsScheduled += count;
+              } else if (threadErr) {
+                console.error(`[send-bulk] Thread error for ${email.to}:`, threadErr.message);
+              }
+            } catch (fuErr) {
+              // Never fail the bulk send because of a follow-up error
+              console.error(`[send-bulk] Follow-up scheduling failed for ${email.to}:`, fuErr);
+            }
+          }
 
           // Update lead status to "contacted" if still "new"
           await serviceSupabase

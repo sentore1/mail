@@ -51,6 +51,28 @@ const BLOCKED_DOMAINS = new Set([
   'wikipedia.org','wikimedia.org','nytimes.com','bbc.com','cnn.com',
   'example.com','example.org','sentry.io','wixpress.com','localhost',
   'w3.org','schema.org','squarespace.com','wordpress.com',
+  // News & media — not businesses
+  'news.com.au','theguardian.com','reuters.com','apnews.com','forbes.com',
+  'businessinsider.com','techcrunch.com','theverge.com','wired.com',
+  'huffpost.com','dailymail.co.uk','mirror.co.uk','telegraph.co.uk',
+  'independent.co.uk','express.co.uk','metro.co.uk','sky.com',
+  'abc.net.au','smh.com.au','theage.com.au','afr.com',
+  'timesofindia.com','hindustantimes.com','ndtv.com','thehindu.com',
+  'aljazeera.com','arabnews.com','gulfnews.com','khaleejtimes.com',
+  'thenationalnews.com','zawya.com',
+  // Travel blogs & review sites
+  'thehoneycombers.com','timeout.com','lonelyplanet.com','fodors.com',
+  'frommers.com','roughguides.com','travelandleisure.com','cntraveler.com',
+  'booking.com','expedia.com','hotels.com','airbnb.com','agoda.com',
+  'kayak.com','skyscanner.com','trivago.com',
+  // Directories & aggregators (not individual businesses)
+  'justdial.com','sulekha.com','indiamart.com','tradeindia.com',
+  'alibaba.com','aliexpress.com','amazon.com','ebay.com',
+  'zomato.com','swiggy.com','ubereats.com','doordash.com','grubhub.com',
+  'talabat.com','deliveroo.com','foodpanda.com',
+  'glassdoor.com','monster.com','naukri.com','timesjobs.com',
+  'scribd.com','slideshare.net','academia.edu','researchgate.net',
+  'quora.com','answers.com','ehow.com',
 ]);
 
 const BLOCKED_EMAIL_PREFIXES = new Set([
@@ -68,8 +90,16 @@ function delay(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
 function isBlockedDomain(url: string): boolean {
   try {
-    const h = new URL(url).hostname.replace(/^www\./, '');
-    return BLOCKED_DOMAINS.has(h) || Array.from(BLOCKED_DOMAINS).some(d => h.endsWith('.' + d));
+    const parsed = new URL(url);
+    const h = parsed.hostname.replace(/^www\./, '');
+    // Check blocked domain list
+    if (BLOCKED_DOMAINS.has(h) || Array.from(BLOCKED_DOMAINS).some(d => h.endsWith('.' + d))) return true;
+    // Block news article URLs by path pattern
+    const path = parsed.pathname.toLowerCase();
+    if (/\/(news|article|articles|blog|blogs|story|stories|post|posts|press|media|editorial)\//i.test(path)) return true;
+    // Block URLs with very long paths (usually articles, not business homepages)
+    if (path.split('/').length > 6) return true;
+    return false;
   } catch { return false; }
 }
 

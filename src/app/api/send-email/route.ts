@@ -5,6 +5,7 @@ import { SMTPManager } from "@/utils/smtp-server";
 import { randomUUID } from "crypto";
 import { classifyBounce } from "@/types/platform";
 import { verifyEmailDNS } from "@/utils/email-verifier";
+import { scheduleFollowUps } from "@/utils/followup-processor";
 
 export const runtime = "nodejs";
 
@@ -52,6 +53,8 @@ export interface SendEmailRequest {
   subject: string;
   body: string;
   campaignId?: string;
+  /** When true, auto-schedule follow-ups for this email (requires campaignId) */
+  scheduleFollowups?: boolean;
 }
 
 export interface SendEmailResponse {
@@ -59,6 +62,8 @@ export interface SendEmailResponse {
   sentEmailId?: string;
   accountUsed?: string;
   leadId?: string | null;
+  followupsScheduled?: number;
+  threadId?: string | null;
   error?: string;
   warning?: string;
 }
@@ -77,6 +82,14 @@ async function logEmail(
     tracking_pixel_id?: string;
     smtp_account_id?: string | null;
     campaign_id?: string;
+    smtp_message_id?: string | null;
+    thread_id?: string | null;
+    in_reply_to?: string | null;
+    references_header?: string | null;
+    is_followup?: boolean;
+    parent_sent_email_id?: string | null;
+    followup_count?: number;
+    ai_generated?: boolean;
   }
 ): Promise<string | null> {
   const insert: Record<string, any> = {
@@ -93,6 +106,18 @@ async function logEmail(
   if (data.tracking_pixel_id) insert.tracking_pixel_id = data.tracking_pixel_id;
   if (data.smtp_account_id) insert.smtp_account_id = data.smtp_account_id;
   if (data.campaign_id) insert.campaign_id = data.campaign_id;
+  // Write to both columns: smtp_message_id (legacy) and message_id (new threading column)
+  if (data.smtp_message_id) {
+    insert.smtp_message_id = data.smtp_message_id;
+    insert.message_id = data.smtp_message_id;
+  }
+  if (data.thread_id) insert.thread_id = data.thread_id;
+  if (data.in_reply_to) insert.in_reply_to = data.in_reply_to;
+  if (data.references_header) insert.references_header = data.references_header;
+  if (data.is_followup !== undefined) insert.is_followup = data.is_followup;
+  if (data.parent_sent_email_id) insert.parent_sent_email_id = data.parent_sent_email_id;
+  if (data.followup_count !== undefined) insert.followup_count = data.followup_count;
+  if (data.ai_generated !== undefined) insert.ai_generated = data.ai_generated;
 
   const { data: row, error } = await service
     .from("sent_emails")
@@ -117,7 +142,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = (await request.json()) as SendEmailRequest;
-    const { leadId, to, subject, body: emailBody, campaignId } = body;
+    const { leadId, to, subject, body: emailBody, campaignId, scheduleFollowups = true } = body;
 
     if (!to || !subject || !emailBody) {
       return NextResponse.json(
@@ -205,8 +230,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Send
-    const result = await smtpManager.sendEmail(to, subject, emailBody);
+    // Send (with optional threading headers for follow-ups)
+    const result = await smtpManager.sendEmail(to, subject, emailBody, undefined, undefined);
 
     if (!result.success) {
       console.log(`📧 Email to ${to} FAILED: ${result.error}`);
@@ -257,6 +282,11 @@ export async function POST(request: NextRequest) {
     ).replace(/\/$/, "");
     const trackedBody = injectTracking(emailBody, trackingPixelId, baseUrl);
 
+    // Use message ID from SMTP result or generate one
+    const smtpMessageId = result.messageId ?? null;
+    // Thread ID: if this is a follow-up, use the original thread_id; otherwise use the new message ID
+    const threadId = smtpMessageId ?? randomUUID();
+
     // Log sent email
     const sentId = await logEmail(service, {
       user_id: user.id,
@@ -268,6 +298,8 @@ export async function POST(request: NextRequest) {
       tracking_pixel_id: trackingPixelId,
       smtp_account_id: smtpAccountId,
       campaign_id: campaignId,
+      smtp_message_id: smtpMessageId,
+      thread_id: threadId,
     });
 
     if (!sentId) {
@@ -308,11 +340,59 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // ── Schedule follow-ups ─────────────────────────────────────────────────
+    let followupsScheduled = 0;
+    let emailThreadId: string | null = null;
+
+    if (scheduleFollowups && campaignId && lead?.id && smtpMessageId) {
+      try {
+        // Create / retrieve thread record
+        const { data: threadId, error: threadErr } = await service.rpc(
+          "get_or_create_thread",
+          {
+            p_user_id: user.id,
+            p_lead_id: lead.id,
+            p_campaign_id: campaignId,
+            p_subject: subject,
+            p_message_id: smtpMessageId,
+          }
+        );
+
+        if (threadErr) {
+          console.error("[send-email] Thread creation error:", threadErr.message);
+        } else {
+          emailThreadId = threadId as string;
+
+          // Patch sent_emails row with the thread FK
+          await service
+            .from("sent_emails")
+            .update({ email_thread_id: emailThreadId, message_id: smtpMessageId })
+            .eq("id", sentId);
+
+          followupsScheduled = await scheduleFollowUps(
+            user.id,
+            sentId,
+            emailThreadId,
+            lead.id,
+            campaignId,
+            smtpMessageId
+          );
+
+          console.log(`📅 Scheduled ${followupsScheduled} follow-up(s) for lead ${lead.id}`);
+        }
+      } catch (fuErr) {
+        // Never fail the whole request just because follow-up scheduling failed
+        console.error("[send-email] Follow-up scheduling error:", fuErr);
+      }
+    }
+
     return NextResponse.json({
       success: true,
       sentEmailId: sentId,
       accountUsed: result.accountUsed,
       leadId: leadToUpdate?.id ?? null,
+      followupsScheduled,
+      threadId: emailThreadId,
     } satisfies SendEmailResponse);
 
   } catch (error) {

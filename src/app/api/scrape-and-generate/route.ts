@@ -85,6 +85,16 @@ BODY: [email body]`;
 // ── Niche-specific content ────────────────────────────────────────────────────
 interface NicheContent { sectorName: string; painPoint: string; pryroValue: string; }
 
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&#x27;/gi, "'").replace(/&#39;/gi, "'").replace(/&apos;/gi, "'")
+    .replace(/&amp;/gi, '&').replace(/&quot;/gi, '"').replace(/&#x22;/gi, '"')
+    .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&nbsp;/gi, ' ')
+    .replace(/&#(\d+);/gi, (_, c) => String.fromCharCode(parseInt(c, 10)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .trim();
+}
+
 function getNicheContent(niche: string | null): NicheContent {
   if (!niche) return { sectorName: 'businesses', painPoint: 'managing operations across multiple disconnected tools', pryroValue: 'consolidates finance, inventory, HR, payroll, and CRM into one system' };
   const n = niche.toLowerCase();

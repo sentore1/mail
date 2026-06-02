@@ -24,6 +24,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "../../../../../supabase/server";
 import { createServiceClient } from "../../../../../supabase/service";
+import { classifyReply } from "@/utils/ai-followup-generator";
 
 // imapflow requires the Node.js runtime (not Edge)
 export const runtime = "nodejs";
@@ -303,9 +304,9 @@ async function processInbox(
       const hasRePrefix = /^(Re|Fwd|FW|RE|FWD):/i.test(parsed.subject);
       if (!sentEmailId && !leadId && !hasRePrefix) continue;
 
-      const { sentiment, is_positive } = analyzeSentiment(parsed.body);
+      // Use enhanced classifier (pattern-based + handles auto-reply/unsubscribe)
+      const classification = classifyReply(parsed.body, parsed.subject);
 
-      // Insert reply
       const { error: insertErr } = await service.from("email_replies").insert({
         user_id: config.user_id,
         sent_email_id: sentEmailId,
@@ -314,8 +315,11 @@ async function processInbox(
         subject: parsed.subject,
         body: parsed.body,
         received_at: parsed.receivedAt.toISOString(),
-        sentiment,
-        is_positive,
+        sentiment: classification.classification,
+        is_positive: classification.isPositive,
+        classification: classification.classification,
+        is_auto_reply: classification.isAutoReply,
+        is_unsubscribe: classification.isUnsubscribe,
         ai_response_generated: false,
         ai_response_sent: false,
       });

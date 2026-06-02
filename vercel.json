@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/process-followups",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/scan-inbox",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}
