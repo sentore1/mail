@@ -54,13 +54,39 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Email not found" }, { status: 404 });
     }
 
-    const lead = sentEmail.leads as any;
+    // Fetch the original (first non-followup) email for this lead — this is what the AI must reference
+    // If sentEmailId points to a follow-up, trace back to the original
+    let originalEmail = sentEmail;
+    if ((sentEmail as any).is_followup && (sentEmail as any).parent_email_id) {
+      const { data: parentEmail } = await serviceClient
+        .from("sent_emails")
+        .select("*")
+        .eq("id", (sentEmail as any).parent_email_id)
+        .single();
+      if (parentEmail) originalEmail = parentEmail;
+    }
+    // If still a follow-up (parent not found or parent is also a FU), find the oldest email to this lead
+    if ((originalEmail as any).is_followup) {
+      const { data: firstEmail } = await serviceClient
+        .from("sent_emails")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("lead_id", (sentEmail as any).lead_id || leadId)
+        .eq("is_followup", false)
+        .order("sent_at", { ascending: true })
+        .limit(1)
+        .single();
+      if (firstEmail) originalEmail = firstEmail;
+    }
 
-    // Get previous follow-ups
+    const lead = (sentEmail as any).leads as any;
+
+    // Get ALL previous emails (original + all follow-ups) for full context
     const { data: prevFollowups } = await serviceClient
       .from("sent_emails")
-      .select("subject, body, sent_at")
-      .eq("email_thread_id", sentEmail.email_thread_id)
+      .select("subject, body, sent_at, is_followup, followup_number")
+      .eq("user_id", user.id)
+      .eq("lead_id", (sentEmail as any).lead_id || leadId)
       .eq("is_followup", true)
       .order("sent_at", { ascending: true })
       .limit(10);

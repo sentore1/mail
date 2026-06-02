@@ -204,10 +204,30 @@ Format: plain text, short paragraphs, conversational.${toneBlock}`;
   return styleInstructions[style] ?? styleInstructions.professional;
 }
 
+// ── Strip HTML to clean plain text for AI ─────────────────────────────────
+function stripHtmlForAI(html: string): string {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<img[^>]*>/gi, "") // remove tracking pixels
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#\d+;/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function buildUserPrompt(ctx: FollowUpContext, style: FollowUpStyle): string {
+  // Clean HTML from all email bodies before passing to AI
+  const cleanOriginalBody = stripHtmlForAI(ctx.originalBody).slice(0, 500);
+
   const prevHistory = ctx.previousFollowups?.length
     ? ctx.previousFollowups
-        .map((f, i) => `Follow-up #${i + 1} (${new Date(f.sentAt).toLocaleDateString()}):\nSubject: ${f.subject}\n${f.body.slice(0, 200)}...`)
+        .map((f, i) => `Follow-up #${i + 1} (${new Date(f.sentAt).toLocaleDateString()}):\nSubject: ${f.subject}\n${stripHtmlForAI(f.body).slice(0, 200)}`)
         .join("\n\n")
     : "None";
 
@@ -223,7 +243,7 @@ ENGAGEMENT: ${engagementNotes}
 
 ORIGINAL EMAIL (sent ${new Date(ctx.sentAt).toLocaleDateString()}):
 Subject: ${ctx.originalSubject}
-${ctx.originalBody.slice(0, 400)}
+${cleanOriginalBody}
 
 PREVIOUS FOLLOW-UPS:
 ${prevHistory}
@@ -231,7 +251,11 @@ ${prevHistory}
 YOUR COMPANY: ${ctx.yourCompany}
 YOUR SERVICE: ${ctx.yourService}
 
-Now write Follow-Up #${ctx.followupNumber} in "${style}" style.
+TASK: Write Follow-Up #${ctx.followupNumber} that:
+- Clearly references the original email above (mention the subject or a key point)
+- Does NOT repeat exactly what was said before
+- Feels like a natural continuation of the conversation
+- Uses the "${style}" style
 
 Output EXACTLY this format (no extra text):
 SUBJECT: [subject line here]

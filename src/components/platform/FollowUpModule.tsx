@@ -76,6 +76,7 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
   const [bulkTone, setBulkTone] = useState("Direct");
   const [bulkPainPoint, setBulkPainPoint] = useState("");
   const [bulkNiche, setBulkNiche] = useState("all");
+  const [bulkFUFilter, setBulkFUFilter] = useState<number|"all">("all"); // follow-up number filter
   const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
   const [bulkStep, setBulkStep] = useState<"select"|"review"|"sending">("select");
   const [bulkReviewIndex, setBulkReviewIndex] = useState(-1);
@@ -109,21 +110,45 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      // 1. Load contacted leads from CRM (the source of truth)
+      const { data: contactedLeads } = await sb
+        .from("leads")
+        .select("*")
+        .eq("user_id", userId)
+        .in("status", ["contacted", "Email Sent", "opened", "clicked", "Replied", "replied", "Interested"])
+        .order("last_contacted_at", { ascending: false })
+        .limit(500);
+
+      // 2. Load sent emails — only those with a lead_id and status not failed/bounced
       const [s, r, a] = await Promise.all([
-        sb.from("sent_emails").select("*").eq("user_id", userId).order("sent_at", { ascending: false }).limit(300),
+        sb.from("sent_emails")
+          .select("*")
+          .eq("user_id", userId)
+          .not("lead_id", "is", null)
+          .not("status", "in", '("failed","bounced","invalid_email")')
+          .order("sent_at", { ascending: false })
+          .limit(500),
         sb.from("email_replies").select("*").eq("user_id", userId).order("received_at", { ascending: false }),
         sb.from("ai_replies").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
       ]);
+
       if (s.data) setSentEmails(s.data as SentEmail[]);
       if (r.data) setReplies(r.data as EmailReply[]);
       if (a.data) setAiReplies(a.data as AIReply[]);
-      const ids = new Set<string>();
-      s.data?.forEach((e: any) => { if (e.lead_id) ids.add(e.lead_id); });
-      r.data?.forEach((x: any) => { if (x.lead_id) ids.add(x.lead_id); });
-      if (ids.size > 0) {
-        const { data: ld } = await sb.from("leads").select("*").in("id", Array.from(ids));
-        if (ld) { const m = new Map<string,Lead>(); ld.forEach((l: Lead) => m.set(l.id, l)); setLeads(m); }
+
+      // Build leads map from CRM data first, then supplement with sent_emails lead_ids
+      const m = new Map<string,Lead>();
+      contactedLeads?.forEach((l: Lead) => m.set(l.id, l));
+
+      // Also load any leads referenced in sent_emails that aren't in the CRM list
+      const missingIds = new Set<string>();
+      s.data?.forEach((e: any) => { if (e.lead_id && !m.has(e.lead_id)) missingIds.add(e.lead_id); });
+      r.data?.forEach((x: any) => { if (x.lead_id && !m.has(x.lead_id)) missingIds.add(x.lead_id); });
+      if (missingIds.size > 0) {
+        const { data: extra } = await sb.from("leads").select("*").in("id", Array.from(missingIds));
+        extra?.forEach((l: Lead) => m.set(l.id, l));
       }
+      setLeads(m);
     } catch { toast.error("Failed to load data"); }
     finally { setLoading(false); }
   }, [userId, sb]);
@@ -138,27 +163,54 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
     return () => { c1.unsubscribe(); c2.unsubscribe(); };
   }, [load]);
 
-  // ── Build threads ─────────────────────────────────────────────────────────
+  // ── Build threads — only from leads that exist in CRM with a real email ───
   const threads: LeadThread[] = (() => {
     const map = new Map<string,LeadThread>();
     const sorted = [...sentEmails].sort((a,b) => new Date(a.sent_at).getTime()-new Date(b.sent_at).getTime());
     for (const e of sorted) {
-      const key = e.lead_id || (e as any).to_email || "unknown";
-      const lead = e.lead_id ? leads.get(e.lead_id) : undefined;
-      if (!map.has(key)) map.set(key,{leadId:e.lead_id||"",leadEmail:lead?.email||(e as any).to_email||"",companyName:lead?.company_name||(e as any).to_email||"Unknown",niche:lead?.niche||null,emails:[],replies:[],hasReply:false,latestStatus:e.status||"sent",followupCount:0});
-      const t=map.get(key)!; t.emails.push(e);
-      if(!["failed","bounced"].includes(e.status||"")) t.latestStatus=e.status||"sent";
+      // Only process emails that have a lead_id AND the lead exists in our map
+      if (!e.lead_id) continue;
+      const lead = leads.get(e.lead_id);
+      if (!lead) continue; // Skip if lead not in CRM
+      if (!lead.email) continue; // Skip if no email address
+
+      const key = e.lead_id;
+      if (!map.has(key)) {
+        map.set(key, {
+          leadId: e.lead_id,
+          leadEmail: lead.email,
+          companyName: lead.company_name || lead.email, // Always use CRM name
+          niche: lead.niche || null,
+          emails: [], replies: [],
+          hasReply: false,
+          latestStatus: e.status || "sent",
+          followupCount: 0,
+        });
+      }
+      const t = map.get(key)!;
+      t.emails.push(e);
+      if (!["failed","bounced"].includes(e.status||"")) t.latestStatus = e.status || "sent";
     }
-    for (const r of replies) { const key=r.lead_id||""; if(map.has(key)){map.get(key)!.replies.push(r);map.get(key)!.hasReply=true;map.get(key)!.latestStatus="replied";} }
-    const all=Array.from(map.values());
-    for(const t of all) t.followupCount=t.emails.filter((e:any)=>e.is_followup).length;
+    for (const r of replies) {
+      const key = r.lead_id || "";
+      if (map.has(key)) { map.get(key)!.replies.push(r); map.get(key)!.hasReply = true; map.get(key)!.latestStatus = "replied"; }
+    }
+    const all = Array.from(map.values());
+    for (const t of all) t.followupCount = t.emails.filter((e:any) => e.is_followup).length;
     return all.filter(t=>t.emails.some(e=>!["failed","bounced"].includes(e.status||"")))
       .sort((a,b)=>{if(a.hasReply&&!b.hasReply)return -1;if(!a.hasReply&&b.hasReply)return 1;return(b.emails[b.emails.length-1]?.sent_at||"").localeCompare(a.emails[a.emails.length-1]?.sent_at||"");});
   })();
 
   const eligibleThreads = threads.filter(t=>!t.hasReply&&!["bounced","failed"].includes(t.latestStatus));
   const availableNiches = Array.from(new Set(eligibleThreads.map(t=>t.niche||"").filter(Boolean))).sort();
-  const filteredEligible = bulkNiche==="all" ? eligibleThreads : eligibleThreads.filter(t=>(t.niche||"")===bulkNiche);
+
+  // Get all distinct FU counts that exist so we can build filter tabs
+  const fuCounts = Array.from(new Set(eligibleThreads.map(t=>t.followupCount))).sort((a,b)=>a-b);
+
+  // Apply both niche filter AND FU number filter
+  const filteredEligible = eligibleThreads
+    .filter(t => bulkNiche === "all" || (t.niche||"") === bulkNiche)
+    .filter(t => bulkFUFilter === "all" || t.followupCount === bulkFUFilter);
 
   const checkInbox = async () => {
     setChecking(true);
@@ -207,7 +259,7 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
   const toggleBulkSelect=(id:string)=>{const n=new Set(bulkSelected);n.has(id)?n.delete(id):n.add(id);setBulkSelected(n);};
   const selectAll=()=>setBulkSelected(new Set(filteredEligible.map(t=>t.leadId)));
   const clearAll=()=>setBulkSelected(new Set());
-  const setNicheFilter=(niche:string)=>{setBulkNiche(niche);setBulkSelected(new Set());};
+  const setNicheFilter=(niche:string)=>{setBulkNiche(niche);setBulkSelected(new Set());setBulkFUFilter("all");};
 
   const generateBulkPreviews = async () => {
     const targets = filteredEligible.filter(t=>bulkSelected.has(t.leadId));
@@ -294,7 +346,12 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
   };
 
   const unread = replies.filter(r=>!(r as any).ai_response_sent).length;
-  const filteredThreads = threadSearch ? threads.filter(t=>t.companyName.toLowerCase().includes(threadSearch.toLowerCase())||t.leadEmail.toLowerCase().includes(threadSearch.toLowerCase())) : threads;
+  // Dropdown threads: only sent emails (not replied/bounced), sorted so 0-FU first
+  const eligibleSingle = threads.filter(t => !t.hasReply && !["bounced","failed"].includes(t.latestStatus));
+  const filteredThreads = (threadSearch
+    ? eligibleSingle.filter(t=>t.companyName.toLowerCase().includes(threadSearch.toLowerCase())||t.leadEmail.toLowerCase().includes(threadSearch.toLowerCase()))
+    : eligibleSingle
+  ).sort((a,b) => a.followupCount - b.followupCount); // 0 FU first, then 1 FU, then 2 FU...
 
   if(loading) return <div className="flex items-center justify-center h-full bg-white"><Loader2 size={22} className="animate-spin text-blue-600"/></div>;
 
@@ -473,7 +530,9 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
                 <button onClick={()=>setThreadDropOpen(o=>!o)}
                   className="w-full flex items-center justify-between px-4 py-3 border border-gray-300 rounded-lg bg-white text-sm hover:border-blue-400 transition-colors">
                   <span className={selectedThread?"text-gray-900":"text-gray-400"}>
-                    {selectedThread?`${selectedThread.companyName} — ${selectedThread.leadEmail}`:"Select a lead to follow up with…"}
+                    {selectedThread
+                      ? `${selectedThread.companyName} — ${selectedThread.followupCount===0?"No follow-up sent yet":`${selectedThread.followupCount} follow-up${selectedThread.followupCount>1?"s":""} sent`}`
+                      : "Select a lead to follow up with…"}
                   </span>
                   <ChevronDown size={16} className="text-gray-400 shrink-0"/>
                 </button>
@@ -483,26 +542,69 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
                       <input autoFocus value={threadSearch} onChange={e=>setThreadSearch(e.target.value)} placeholder="Search leads…"
                         className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-blue-400"/>
                     </div>
-                    <div className="overflow-y-auto max-h-60">
-                      {filteredThreads.length===0
-                        ? <p className="text-center py-6 text-sm text-gray-400">No leads found</p>
-                        : filteredThreads.map(t=>{
-                          const latest=t.emails[t.emails.length-1];
-                          return(
-                            <button key={t.leadId} onClick={()=>{setSelectedThread(t);setThreadDropOpen(false);setThreadSearch("");setSingleDraft(null);setSingleSubj("");setSingleBody("");setExpandedBodyId(null);}}
-                              className={`w-full flex items-start gap-3 px-4 py-3 hover:bg-gray-50 text-left border-b border-gray-50 last:border-0 transition-colors ${selectedThread?.leadId===t.leadId?"bg-blue-50":""}`}>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-0.5">
-                                  <span className="text-sm font-semibold text-gray-900 truncate">{t.companyName}</span>
-                                  <StatusPill status={t.latestStatus} opened={!!latest?.opened_at} clicked={!!latest?.clicked_at}/>
-                                  {t.followupCount>0&&<span className="text-[10px] bg-blue-50 text-blue-600 border border-blue-100 px-1.5 py-0.5 rounded-full font-medium">{t.followupCount} FU</span>}
-                                  {t.hasReply&&<span className="text-[10px] bg-green-50 text-green-700 border border-green-100 px-1.5 py-0.5 rounded-full font-medium">Replied</span>}
+                    <div className="overflow-y-auto max-h-72">
+                      {filteredThreads.length===0 ? (
+                        <p className="text-center py-6 text-sm text-gray-400">No leads found</p>
+                      ) : (() => {
+                        const noFU = filteredThreads.filter(t => t.followupCount === 0);
+                        const hasFU = filteredThreads.filter(t => t.followupCount > 0);
+                        return (
+                          <>
+                            {noFU.length > 0 && (
+                              <>
+                                <div className="px-4 py-1.5 bg-amber-50 border-b border-amber-100">
+                                  <p className="text-[10px] font-bold text-amber-700 uppercase tracking-widest">
+                                    ● Needs First Follow-Up ({noFU.length})
+                                  </p>
                                 </div>
-                                <p className="text-xs text-gray-400 truncate">{t.leadEmail}{t.niche?` · ${t.niche}`:""}</p>
-                              </div>
-                            </button>
-                          );
-                        })}
+                                {noFU.map(t => {
+                                  const latest = t.emails[t.emails.length - 1];
+                                  return (
+                                    <button key={t.leadId} onClick={()=>{setSelectedThread(t);setThreadDropOpen(false);setThreadSearch("");setSingleDraft(null);setSingleSubj("");setSingleBody("");setExpandedBodyId(null);}}
+                                      className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-left border-b border-gray-50 transition-colors ${selectedThread?.leadId===t.leadId?"bg-blue-50":""}`}>
+                                      <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center shrink-0 text-[10px] font-bold text-amber-700">0</div>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-semibold text-gray-900 truncate">{t.companyName}</p>
+                                        <p className="text-[11px] text-gray-400 truncate">{t.leadEmail}{t.niche ? ` · ${t.niche}` : ""}</p>
+                                      </div>
+                                      <div className="shrink-0 flex items-center gap-1.5">
+                                        <StatusPill status={latest?.status} opened={!!latest?.opened_at} clicked={!!latest?.clicked_at}/>
+                                        <span className="text-[10px] text-amber-600 font-semibold">Send FU #1</span>
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </>
+                            )}
+                            {hasFU.length > 0 && (
+                              <>
+                                <div className="px-4 py-1.5 bg-blue-50 border-b border-blue-100">
+                                  <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest">
+                                    ● Has Follow-Ups — Continue Sequence ({hasFU.length})
+                                  </p>
+                                </div>
+                                {hasFU.map(t => {
+                                  const latest = t.emails[t.emails.length - 1];
+                                  return (
+                                    <button key={t.leadId} onClick={()=>{setSelectedThread(t);setThreadDropOpen(false);setThreadSearch("");setSingleDraft(null);setSingleSubj("");setSingleBody("");setExpandedBodyId(null);}}
+                                      className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-left border-b border-gray-50 transition-colors ${selectedThread?.leadId===t.leadId?"bg-blue-50":""}`}>
+                                      <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center shrink-0 text-[10px] font-bold text-blue-700">{t.followupCount}</div>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-semibold text-gray-900 truncate">{t.companyName}</p>
+                                        <p className="text-[11px] text-gray-400 truncate">{t.leadEmail}{t.niche ? ` · ${t.niche}` : ""}</p>
+                                      </div>
+                                      <div className="shrink-0 flex items-center gap-1.5">
+                                        <StatusPill status={latest?.status} opened={!!latest?.opened_at} clicked={!!latest?.clicked_at}/>
+                                        <span className="text-[10px] text-blue-600 font-semibold">Send FU #{t.followupCount + 1}</span>
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 )}
@@ -517,10 +619,12 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
                     Email Thread
                     <span className="ml-2 text-blue-600 font-bold">
                       {selectedThread.emails.filter(e=>!["failed","bounced"].includes(e.status||"")).length} sent
-                      {selectedThread.followupCount>0?` · ${selectedThread.followupCount} follow-up${selectedThread.followupCount>1?"s":""}` :""}
+                      {selectedThread.followupCount > 0 ? ` · ${selectedThread.followupCount} follow-up${selectedThread.followupCount>1?"s":""} sent` : " · No follow-ups yet"}
                     </span>
                   </p>
-                  <span className="text-[10px] text-gray-400">Click any email to see body</span>
+                  <span className="text-[11px] font-semibold text-blue-600 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded-full">
+                    Next: Follow-Up #{selectedThread.followupCount + 1}
+                  </span>
                 </div>
                 <div className="divide-y divide-gray-100">
                   {selectedThread.emails.filter(e=>!["failed","bounced"].includes(e.status||"")).map((email,idx)=>{
@@ -619,7 +723,7 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
                   <button onClick={()=>{setSingleDraft(null);setSingleSubj("");setSingleBody("");}} className="px-5 py-2.5 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>
                   <button onClick={sendSingle} disabled={singleSending||!singleBody.trim()}
                     className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
-                    {singleSending?<><Loader2 size={15} className="animate-spin"/>Sending…</>:<><Send size={15}/>Send Follow-Up to {selectedThread?.companyName}</>}
+                    {singleSending?<><Loader2 size={15} className="animate-spin"/>Sending…</>:<><Send size={15}/>Send Follow-Up #{(selectedThread?.followupCount||0)+1} to {selectedThread?.companyName}</>}
                   </button>
                 </div>
               </div>
@@ -654,7 +758,40 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"/>
             </div>
 
-            {/* Niche filter */}
+            {/* Follow-Up Stage Filter */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-2">
+                Filter by Follow-Up Stage
+                <span className="font-normal text-gray-400 ml-2">— select which stage to send next</span>
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={()=>{setBulkFUFilter("all");setBulkSelected(new Set());}}
+                  className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${bulkFUFilter==="all"?"bg-gray-900 text-white border-gray-900":"bg-white text-gray-600 border-gray-200 hover:border-gray-400"}`}>
+                  All Stages
+                  <span className="ml-1.5 opacity-70">({eligibleThreads.length})</span>
+                </button>
+                {fuCounts.map(count => {
+                  const countInStage = eligibleThreads.filter(t => t.followupCount === count).length;
+                  const isActive = bulkFUFilter === count;
+                  return (
+                    <button key={count} onClick={()=>{setBulkFUFilter(count);setBulkSelected(new Set(eligibleThreads.filter(t=>t.followupCount===count).map(t=>t.leadId)));}}
+                      className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all flex items-center gap-2 ${isActive?"bg-blue-600 text-white border-blue-600":"bg-white text-gray-700 border-gray-200 hover:border-blue-400"}`}>
+                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black ${isActive?"bg-white text-blue-600":"bg-blue-100 text-blue-700"}`}>{count}</span>
+                      {count === 0 ? "No FU yet" : `FU #${count} sent`}
+                      <span className={`text-[10px] ${isActive?"opacity-80":"text-gray-400"}`}>→ Send FU #{count+1}</span>
+                      <span className={`ml-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-black ${isActive?"bg-blue-500 text-white":"bg-gray-100 text-gray-500"}`}>{countInStage}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {bulkFUFilter !== "all" && (
+                <p className="text-xs text-blue-600 mt-2 font-medium">
+                  Showing {filteredEligible.length} lead{filteredEligible.length!==1?"s":""} at stage {bulkFUFilter} — will send Follow-Up #{Number(bulkFUFilter)+1}
+                </p>
+              )}
+            </div>
+
+            {/* Niche Filter */}
             <div>
               <label className="block text-sm font-semibold text-gray-800 mb-2">
                 Filter by Niche <span className="font-normal text-gray-400">(click to auto-select all leads in that niche)</span>
@@ -680,7 +817,11 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-sm font-semibold text-gray-800">
-                  {bulkNiche==="all"?"Unsent Leads":bulkNiche+" Leads"} ({bulkSelected.size} selected)
+                  {bulkFUFilter === "all"
+                    ? bulkNiche === "all" ? "All Leads" : bulkNiche
+                    : bulkFUFilter === 0 ? "No follow-up yet" : `Sent FU #${bulkFUFilter} — needs FU #${Number(bulkFUFilter)+1}`
+                  }
+                  <span className="ml-2 text-gray-400 font-normal text-xs">({bulkSelected.size} selected / {filteredEligible.length} total)</span>
                 </p>
                 <div className="flex gap-3">
                   <button onClick={selectAll} className="text-xs text-blue-600 hover:underline">Select all {filteredEligible.length}</button>
@@ -696,17 +837,42 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
                       const isSel=bulkSelected.has(thread.leadId);
                       return(
                         <button key={thread.leadId} onClick={()=>toggleBulkSelect(thread.leadId)}
-                          className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-left transition-colors ${isSel?"bg-blue-50/50":""}`}>
+                          className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-left transition-colors border-b border-gray-50 last:border-0 ${isSel?"bg-blue-50/60":""}`}>
+                          {/* Checkbox */}
                           <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${isSel?"border-blue-500 bg-blue-500":"border-gray-300"}`}>
                             {isSel&&<CheckCircle size={10} className="text-white"/>}
                           </div>
+
+                          {/* Follow-up count badge — the key visual */}
+                          <div className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center shrink-0 border ${
+                            thread.followupCount === 0
+                              ? "bg-amber-50 border-amber-200"
+                              : "bg-blue-50 border-blue-200"
+                          }`}>
+                            <span className={`text-lg font-black leading-none ${thread.followupCount===0?"text-amber-600":"text-blue-700"}`}>
+                              {thread.followupCount}
+                            </span>
+                            <span className={`text-[8px] font-bold uppercase leading-none ${thread.followupCount===0?"text-amber-500":"text-blue-500"}`}>
+                              {thread.followupCount===0?"FU":"sent"}
+                            </span>
+                          </div>
+
+                          {/* Lead info */}
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-gray-900 truncate">{thread.companyName}</p>
                             <p className="text-[11px] text-gray-400 truncate">{thread.leadEmail}{thread.niche?` · ${thread.niche}`:""}</p>
                           </div>
-                          <div className="shrink-0 flex items-center gap-2">
+
+                          {/* Next action label */}
+                          <div className="shrink-0 flex flex-col items-end gap-1">
                             <StatusPill status={latest?.status} opened={!!latest?.opened_at} clicked={!!latest?.clicked_at}/>
-                            {thread.followupCount>0&&<span className="text-[10px] text-blue-600">{thread.followupCount} FU</span>}
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                              thread.followupCount===0
+                                ? "bg-amber-100 text-amber-700"
+                                : "bg-blue-100 text-blue-700"
+                            }`}>
+                              → FU #{thread.followupCount+1}
+                            </span>
                           </div>
                         </button>
                       );
