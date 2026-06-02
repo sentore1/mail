@@ -211,6 +211,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
         userId,
         senderName: senderName || undefined,
         senderTitle: senderTitle || undefined,
+        senderPhone: senderPhone || undefined,
       });
       setGeneratedEmail({ subject, body, model: "AI" });
       setEditSubject(subject);
@@ -422,6 +423,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
           customPainPoint: bulkPainPoint || undefined,
           senderName: senderName || undefined,
           senderTitle: senderTitle || undefined,
+          senderPhone: senderPhone || undefined,
         }),
       });
 
@@ -989,8 +991,17 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
                       />
                     </div>
                   </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Your Phone <span className="text-gray-400 font-normal">(optional — shown in signature)</span></label>
+                    <input
+                      value={senderPhone}
+                      onChange={(e) => setSenderPhone(e.target.value)}
+                      placeholder="e.g. +256 700 123 456"
+                      className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"
+                    />
+                  </div>
                   <p className="text-[10px] text-blue-600">
-                    Signature preview: <span className="font-medium">{senderName || "Your Name"} · {senderTitle || "Executive Sales"} · Pryro</span>
+                    Signature preview: <span className="font-medium">{senderName || "Your Name"} · {senderTitle || "Executive Sales"}{senderPhone ? ` · ${senderPhone}` : ""} · Pryro</span>
                   </p>
                 </div>
 
