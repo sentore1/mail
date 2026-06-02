@@ -20,17 +20,6 @@ interface LeadThread {
   hasReply: boolean; latestStatus: string; followupCount: number;
 }
 
-const STYLES = [
-  { value: "professional",  label: "Professional",  desc: "Confident & direct" },
-  { value: "friendly",      label: "Friendly",      desc: "Warm & approachable" },
-  { value: "casual",        label: "Casual",        desc: "Relaxed & conversational" },
-  { value: "soft_reminder", label: "Soft Reminder", desc: "Gentle nudge, no pressure" },
-  { value: "value_focused", label: "Value Focused", desc: "Lead with a benefit" },
-  { value: "direct",        label: "Direct",        desc: "Crisp CTA, no fluff" },
-  { value: "final_bump",    label: "Final Bump",    desc: "Low-pressure last nudge" },
-  { value: "breakup",       label: "Breakup",       desc: "Polite last email" },
-];
-
 const TONES = [
   { value: "Direct",     label: "Direct",      desc: "Problem → Solution → CTA. No fluff." },
   { value: "Aggressive", label: "Aggressive",  desc: "High urgency, FOMO, push hard." },
@@ -64,7 +53,6 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   // Bulk follow-up state
-  const [bulkStyle, setBulkStyle] = useState("professional");
   const [bulkTone, setBulkTone] = useState("Direct");
   const [bulkNiche, setBulkNiche] = useState("all");
   const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set()); // leadIds
@@ -86,7 +74,6 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
   const [fpOpen, setFpOpen] = useState(false);
   const [fpEmail, setFpEmail] = useState<SentEmail|null>(null);
   const [fpThread, setFpThread] = useState<LeadThread|null>(null);
-  const [fpStyle, setFpStyle] = useState("professional");
   const [fpTone, setFpTone] = useState("Direct");
   const [fpGen, setFpGen] = useState(false);
   const [fpDraft, setFpDraft] = useState<FUDraft|null>(null);
@@ -180,7 +167,7 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
   };
 
   // Follow-up panel actions
-  const openFP = (email: SentEmail, thread: LeadThread) => { setFpEmail(email); setFpThread(thread); setFpDraft(null); setFpStyle("professional"); setFpTone("Direct"); setFpSubj(""); setFpBody(""); setFpOpen(true); };
+  const openFP = (email: SentEmail, thread: LeadThread) => { setFpEmail(email); setFpThread(thread); setFpDraft(null); setFpTone("Direct"); setFpSubj(""); setFpBody(""); setFpOpen(true); };
   const closeFP = () => { setFpOpen(false); setFpDraft(null); };
 
   const genFP = async () => {
@@ -188,7 +175,7 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
     setFpGen(true);
     try {
       const r = await fetch("/api/followup/generate", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sentEmailId: fpEmail.id, leadId: fpEmail.lead_id, followupNumber: (fpThread?.followupCount||0)+1, style: fpStyle, tone: fpTone }) });
+        body: JSON.stringify({ sentEmailId: fpEmail.id, leadId: fpEmail.lead_id, followupNumber: (fpThread?.followupCount||0)+1, tone: fpTone }) });
       const d = await r.json();
       if (!d.success) throw new Error(d.error);
       setFpDraft({ subject: d.subject, body: d.body, style: d.style, decisionReason: d.decisionReason, modelUsed: d.modelUsed });
@@ -295,7 +282,7 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
       try {
         const genRes = await fetch("/api/followup/generate", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sentEmailId: latestEmail.id, leadId: latestEmail.lead_id, followupNumber: thread.followupCount + 1, style: bulkStyle, tone: bulkTone }),
+          body: JSON.stringify({ sentEmailId: latestEmail.id, leadId: latestEmail.lead_id, followupNumber: thread.followupCount + 1, tone: bulkTone }),
         });
         const genData = await genRes.json();
         if (!genData.success) throw new Error(genData.error);
@@ -963,19 +950,6 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
                       className={`p-3 rounded-lg border text-left transition-all ${fpTone === t.value ? "border-blue-500 bg-blue-50 ring-1 ring-blue-300" : "border-gray-200 bg-white hover:border-gray-300"}`}>
                       <p className={`text-xs font-bold ${fpTone === t.value ? "text-blue-700" : "text-gray-800"}`}>{t.label}</p>
                       <p className="text-[11px] text-gray-500 mt-0.5 leading-tight">{t.desc}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <p className="text-sm font-bold text-gray-900 mb-2.5">Choose Style</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {STYLES.map(s => (
-                    <button key={s.value} onClick={() => { setFpStyle(s.value); setFpDraft(null); }}
-                      className={`p-3 rounded-lg border text-left transition-all ${fpStyle === s.value ? "border-blue-500 bg-blue-50 ring-1 ring-blue-300" : "border-gray-200 bg-white hover:border-gray-300"}`}>
-                      <p className={`text-xs font-bold ${fpStyle === s.value ? "text-blue-700" : "text-gray-800"}`}>{s.label}</p>
-                      <p className="text-[11px] text-gray-500 mt-0.5">{s.desc}</p>
                     </button>
                   ))}
                 </div>
