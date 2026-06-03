@@ -203,34 +203,31 @@ function resolveGreeting(): string {
 function buildUserPrompt(ctx: FollowUpContext, style: FollowUpStyle): string {
   const senderName = ctx.senderName || ctx.yourCompany || "Sales Team";
   const sentDate = new Date(ctx.sentAt).toLocaleDateString("en-US", { month: "long", day: "numeric" });
-  const greeting = resolveGreeting();
   const phoneLine = ctx.senderPhone ? `\n${ctx.senderPhone}` : "";
 
   const signatureBlock = `Best regards,\n\n${senderName}\nPryro${phoneLine}`;
 
   return `COMPANY: ${ctx.companyName}
 ORIGINAL EMAIL DATE: ${sentDate}
-SUBJECT OF ORIGINAL EMAIL: ${ctx.originalSubject}
+SUBJECT: ${ctx.originalSubject}
 FOLLOW-UP NUMBER: ${ctx.followupNumber}
-GREETING TO USE: ${greeting}
 
-TASK:
-Write a very short follow-up email (3 sentences max in the body, excluding greeting and sign-off).
+TASK: Write a short professional follow-up email.
 
-Structure:
-1. Greeting: ${greeting}
-2. Sentence 1: Reference the previous email/proposal sent on ${sentDate}.
-3. Sentence 2: One open question — have they reviewed it, any feedback or info needed to move forward?
-4. Sentence 3: Acknowledge priorities may have changed, quick update appreciated.
-5. "Thank you, and I look forward to hearing from you."
-6. Close with exactly:
+FORMAT:
+- Greeting: "Dear Sir/Madam,"
+- 2 short paragraphs maximum
+  - Para 1: Brief reference to the previous email and a single clear question
+  - Para 2 (optional, FU #1 only): Polite call to action
+- No product pitching, no long explanations
+- Sign off with exactly:
 
 ${signatureBlock}
 
-Output EXACTLY this format:
+Output EXACTLY:
 SUBJECT: [subject line]
 BODY:
-[full email starting from the greeting]`;
+[email starting from "Dear Sir/Madam,"]`;
 }
 
 // ── Template-based fallback (no AI required) ─────────────────────────────────
@@ -256,13 +253,11 @@ export function buildTemplateFollowUp(
       subject: `Re: ${originalSubject}`,
       body: `${greeting}
 
-I wanted to follow up on the ERP proposal we shared on ${sentDate}.
+I wanted to follow up on my email from ${sentDate} about Pryro, our ERP platform.
 
-Have you had a chance to review it, and is there any feedback or information you need from our side to move forward?
+Have you had a chance to review it? I would love to know if it could be a good fit for ${companyName}.
 
-If your priorities have changed or the project timeline has shifted, a quick update would be greatly appreciated.
-
-Thank you, and I look forward to hearing from you.
+Would you be open to a quick 10-minute call?
 
 ${sig}`,
     };
@@ -274,13 +269,9 @@ ${sig}`,
       subject: `Re: ${originalSubject}`,
       body: `${greeting}
 
-Just following up on the proposal I sent on ${sentDate} — I want to make sure it didn't get buried.
+Just following up once more on my previous email about Pryro.
 
-Is there anything holding you back or any questions I can answer to help move things forward?
-
-Even a quick "not the right time" works — happy to follow up later.
-
-Thank you, and I look forward to hearing from you.
+If the timing is not right, that is completely fine — is there a better time to reconnect?
 
 ${sig}`,
     };
@@ -292,11 +283,9 @@ ${sig}`,
       subject: `Re: ${originalSubject}`,
       body: `${greeting}
 
-I am following up one more time on our Pryro proposal from ${sentDate}.
+I am reaching out one last time regarding Pryro and whether it could benefit ${companyName}.
 
-Have your priorities shifted, or is there a better time to revisit this?
-
-A quick reply either way would mean a lot — thank you for your time.
+Please let me know either way — I appreciate your time.
 
 ${sig}`,
     };
@@ -308,26 +297,22 @@ ${sig}`,
       subject: `Re: ${originalSubject}`,
       body: `${greeting}
 
-This will be my last follow-up on the proposal I sent on ${sentDate}.
+This will be my last follow-up. If the timing ever becomes right, please do not hesitate to reach out.
 
-If the timing isn't right, no worries at all — feel free to reach out whenever it makes sense.
-
-Thank you for your time, and I wish ${companyName} continued success.
+Wishing ${companyName} continued success.
 
 ${sig}`,
     };
   }
 
-  // FU #5+ — breakup
+  // FU #5+ — closing the loop
   return {
     subject: `Closing the loop — ${companyName}`,
     body: `${greeting}
 
-I'll stop following up on our Pryro proposal — I don't want to crowd your inbox.
+I am closing the loop on my previous emails about Pryro.
 
-If your needs change down the road, feel free to reach out. We'd be happy to help.
-
-Wishing ${companyName} all the best.
+If your needs change in the future, feel free to get in touch — we would be happy to help.
 
 ${sig}`,
   };
