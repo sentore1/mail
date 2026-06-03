@@ -158,8 +158,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify the email address before attempting to send
-    const verification = await verifyEmail(to);
+    // Verify the email address before attempting to send (DNS check only — SMTP probe causes false rejections)
+    const verification = await verifyEmailDNS(to);
     if (!verification.valid) {
       const service = createServiceClient();
       // Log the skip to sent_emails so CRM shows it
