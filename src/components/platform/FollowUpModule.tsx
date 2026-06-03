@@ -77,6 +77,7 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
   const [bulkPainPoint, setBulkPainPoint] = useState("");
   const [bulkNiche, setBulkNiche] = useState("all");
   const [bulkFUFilter, setBulkFUFilter] = useState<number|"all">("all"); // follow-up number filter
+  const [bulkDateFilter, setBulkDateFilter] = useState<string>("all"); // filter by original sent date
   const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
   const [bulkStep, setBulkStep] = useState<"select"|"review"|"sending">("select");
   const [bulkReviewIndex, setBulkReviewIndex] = useState(-1);
@@ -207,10 +208,28 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
   // Get all distinct FU counts that exist so we can build filter tabs
   const fuCounts = Array.from(new Set(eligibleThreads.map(t=>t.followupCount))).sort((a,b)=>a-b);
 
-  // Apply both niche filter AND FU number filter
+  // Get distinct original-email sent dates (date only, no time) sorted newest first
+  const getOriginalSentDate = (t: LeadThread): string => {
+    const original = t.emails.find(e=>!(e as any).is_followup) || t.emails[0];
+    return original?.sent_at ? original.sent_at.slice(0, 10) : "";
+  };
+  const availableDates = Array.from(new Set(eligibleThreads.map(getOriginalSentDate).filter(Boolean))).sort((a,b)=>b.localeCompare(a));
+
+  // Apply niche + FU number + sent date filters
   const filteredEligible = eligibleThreads
     .filter(t => bulkNiche === "all" || (t.niche||"") === bulkNiche)
-    .filter(t => bulkFUFilter === "all" || t.followupCount === bulkFUFilter);
+    .filter(t => bulkFUFilter === "all" || t.followupCount === bulkFUFilter)
+    .filter(t => bulkDateFilter === "all" || getOriginalSentDate(t) === bulkDateFilter);
+
+  // ── Days since last email helper ──────────────────────────────────────────
+  const daysSince = (thread: LeadThread): number => {
+    const latest = thread.emails.filter(e=>!["failed","bounced"].includes(e.status||"")).slice(-1)[0];
+    if (!latest?.sent_at) return 0;
+    return Math.floor((Date.now() - new Date(latest.sent_at).getTime()) / (1000 * 60 * 60 * 24));
+  };
+
+  // Leads due for follow-up (3+ days since last email)
+  const dueLeads = filteredEligible.filter(t => daysSince(t) >= 3);
 
   const checkInbox = async () => {
     setChecking(true);
@@ -259,7 +278,7 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
   const toggleBulkSelect=(id:string)=>{const n=new Set(bulkSelected);n.has(id)?n.delete(id):n.add(id);setBulkSelected(n);};
   const selectAll=()=>setBulkSelected(new Set(filteredEligible.map(t=>t.leadId)));
   const clearAll=()=>setBulkSelected(new Set());
-  const setNicheFilter=(niche:string)=>{setBulkNiche(niche);setBulkSelected(new Set());setBulkFUFilter("all");};
+  const setNicheFilter=(niche:string)=>{setBulkNiche(niche);setBulkSelected(new Set());setBulkFUFilter("all");setBulkDateFilter("all");};
 
   const generateBulkPreviews = async () => {
     const targets = filteredEligible.filter(t=>bulkSelected.has(t.leadId));
@@ -837,38 +856,112 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"/>
             </div>
 
-            {/* Follow-Up Stage Filter */}
+            {/* Follow-Up Stage Overview */}
             <div>
               <label className="block text-sm font-semibold text-gray-800 mb-2">
-                Filter by Follow-Up Stage
-                <span className="font-normal text-gray-400 ml-2">— select which stage to send next</span>
+                Follow-Up Overview
+                <span className="font-normal text-gray-400 ml-2">— click a row to select that group</span>
               </label>
-              <div className="flex flex-wrap gap-2">
-                <button onClick={()=>{setBulkFUFilter("all");setBulkSelected(new Set());}}
-                  className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${bulkFUFilter==="all"?"bg-gray-900 text-white border-gray-900":"bg-white text-gray-600 border-gray-200 hover:border-gray-400"}`}>
-                  All Stages
-                  <span className="ml-1.5 opacity-70">({eligibleThreads.length})</span>
+              <div className="rounded-xl border border-gray-200 overflow-hidden">
+                {/* Header */}
+                <div className="grid grid-cols-4 px-4 py-2 bg-gray-50 border-b border-gray-200">
+                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Stage</span>
+                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Leads</span>
+                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Next action</span>
+                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wide text-right">Due now 🔔</span>
+                </div>
+                {/* All row */}
+                <button
+                  onClick={()=>{setBulkFUFilter("all");setBulkSelected(new Set());}}
+                  className={`w-full grid grid-cols-4 items-center px-4 py-3 border-b border-gray-100 text-left transition-colors hover:bg-gray-50 ${bulkFUFilter==="all"?"bg-blue-50":""}`}>
+                  <span className="text-sm font-bold text-gray-700">All stages</span>
+                  <span className="text-sm font-semibold text-gray-900">{eligibleThreads.length}</span>
+                  <span className="text-xs text-gray-400">—</span>
+                  <span className="text-sm font-bold text-red-500 text-right">{eligibleThreads.filter(t=>daysSince(t)>=3).length || "—"}</span>
                 </button>
+                {/* One row per stage */}
                 {fuCounts.map(count => {
-                  const countInStage = eligibleThreads.filter(t => t.followupCount === count).length;
+                  const stageLeads = eligibleThreads.filter(t => t.followupCount === count);
+                  const dueCount = stageLeads.filter(t => daysSince(t) >= 3).length;
                   const isActive = bulkFUFilter === count;
                   return (
-                    <button key={count} onClick={()=>{setBulkFUFilter(count);setBulkSelected(new Set(eligibleThreads.filter(t=>t.followupCount===count).map(t=>t.leadId)));}}
-                      className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all flex items-center gap-2 ${isActive?"bg-blue-600 text-white border-blue-600":"bg-white text-gray-700 border-gray-200 hover:border-blue-400"}`}>
-                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black ${isActive?"bg-white text-blue-600":"bg-blue-100 text-blue-700"}`}>{count}</span>
-                      {count === 0 ? "No FU yet" : `FU #${count} sent`}
-                      <span className={`text-[10px] ${isActive?"opacity-80":"text-gray-400"}`}>→ Send FU #{count+1}</span>
-                      <span className={`ml-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-black ${isActive?"bg-blue-500 text-white":"bg-gray-100 text-gray-500"}`}>{countInStage}</span>
+                    <button key={count}
+                      onClick={()=>{setBulkFUFilter(count);setBulkSelected(new Set(stageLeads.map(t=>t.leadId)));}}
+                      className={`w-full grid grid-cols-4 items-center px-4 py-3 border-b border-gray-100 last:border-0 text-left transition-colors hover:bg-blue-50 ${isActive?"bg-blue-50 border-l-2 border-l-blue-500":""}`}>
+                      {/* Stage label */}
+                      <div className="flex items-center gap-2">
+                        <span className={`w-7 h-7 rounded-lg flex items-center justify-center text-sm font-black shrink-0 ${
+                          count === 0 ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"
+                        }`}>{count}</span>
+                        <span className="text-xs font-semibold text-gray-700">
+                          {count === 0 ? "No FU" : `FU #${count} sent`}
+                        </span>
+                      </div>
+                      {/* Lead count */}
+                      <span className="text-sm font-bold text-gray-900">{stageLeads.length}</span>
+                      {/* Next action */}
+                      <span className="text-xs font-semibold text-blue-600">→ Send FU #{count+1}</span>
+                      {/* Due count */}
+                      <span className={`text-sm font-bold text-right ${dueCount > 0 ? "text-red-500" : "text-gray-300"}`}>
+                        {dueCount > 0 ? `${dueCount} 🔔` : "—"}
+                      </span>
                     </button>
                   );
                 })}
               </div>
               {bulkFUFilter !== "all" && (
                 <p className="text-xs text-blue-600 mt-2 font-medium">
-                  Showing {filteredEligible.length} lead{filteredEligible.length!==1?"s":""} at stage {bulkFUFilter} — will send Follow-Up #{Number(bulkFUFilter)+1}
+                  {filteredEligible.length} lead{filteredEligible.length!==1?"s":""} selected — will send Follow-Up #{Number(bulkFUFilter)+1}
+                  <button onClick={()=>{setBulkFUFilter("all");setBulkSelected(new Set());}} className="ml-3 text-gray-400 hover:text-gray-600 underline">Clear</button>
                 </p>
               )}
             </div>
+
+            {/* Sent Date Filter */}
+            {availableDates.length > 1 && (
+              <div>
+                <label className="block text-sm font-semibold text-gray-800 mb-2">
+                  Filter by Original Send Date
+                  <span className="font-normal text-gray-400 ml-2">— pick a date to see that batch</span>
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="date"
+                    value={bulkDateFilter === "all" ? "" : bulkDateFilter}
+                    min={availableDates[availableDates.length - 1]}
+                    max={availableDates[0]}
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (!val) { setBulkDateFilter("all"); setBulkSelected(new Set()); return; }
+                      setBulkDateFilter(val);
+                      setBulkSelected(new Set(eligibleThreads.filter(t => getOriginalSentDate(t) === val).map(t => t.leadId)));
+                    }}
+                    className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-800 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 outline-none bg-white"
+                  />
+                  {bulkDateFilter !== "all" && (
+                    <>
+                      <span className="text-sm font-semibold text-blue-700">
+                        {filteredEligible.length} lead{filteredEligible.length !== 1 ? "s" : ""} found
+                      </span>
+                      <button
+                        onClick={() => { setBulkDateFilter("all"); setBulkSelected(new Set()); }}
+                        className="text-xs text-gray-400 hover:text-gray-700 underline"
+                      >
+                        Clear
+                      </button>
+                    </>
+                  )}
+                  {bulkDateFilter === "all" && (
+                    <span className="text-xs text-gray-400">
+                      Dates range: {new Date(availableDates[availableDates.length-1]+"T00:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"})} – {new Date(availableDates[0]+"T00:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"})}
+                    </span>
+                  )}
+                </div>
+                {bulkDateFilter !== "all" && filteredEligible.length === 0 && (
+                  <p className="text-xs text-amber-600 mt-2">No leads found for this date. Try a different date.</p>
+                )}
+              </div>
+            )}
 
             {/* Niche Filter */}
             <div>
@@ -891,6 +984,29 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
                 })}
               </div>
             </div>
+
+            {/* Due for Follow-Up banner */}
+            {dueLeads.length > 0 && (
+              <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🔔</span>
+                  <div>
+                    <p className="text-sm font-bold text-amber-800">
+                      {dueLeads.length} lead{dueLeads.length !== 1 ? "s" : ""} due for follow-up
+                    </p>
+                    <p className="text-xs text-amber-600">
+                      Last email was sent 3+ days ago — time to follow up
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setBulkSelected(new Set(dueLeads.map(t => t.leadId)))}
+                  className="px-3 py-2 rounded-lg text-xs font-bold bg-amber-500 text-white hover:bg-amber-600 transition-colors shrink-0"
+                >
+                  Select All Due ({dueLeads.length})
+                </button>
+              </div>
+            )}
 
             {/* Lead list */}
             <div>
@@ -922,7 +1038,7 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
                             {isSel&&<CheckCircle size={10} className="text-white"/>}
                           </div>
 
-                          {/* Follow-up count badge — the key visual */}
+                          {/* Follow-up count badge */}
                           <div className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center shrink-0 border ${
                             thread.followupCount === 0
                               ? "bg-amber-50 border-amber-200"
@@ -940,6 +1056,25 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-gray-900 truncate">{thread.companyName}</p>
                             <p className="text-[11px] text-gray-400 truncate">{thread.leadEmail}{thread.niche?` · ${thread.niche}`:""}</p>
+                            {/* Days since last email */}
+                            {(() => {
+                              const days = daysSince(thread);
+                              if (days >= 3) return (
+                                <span className="inline-flex items-center gap-1 mt-0.5 text-[10px] font-bold text-red-600">
+                                  🔔 {days}d ago — follow up now
+                                </span>
+                              );
+                              if (days >= 1) return (
+                                <span className="inline-flex items-center gap-1 mt-0.5 text-[10px] font-semibold text-amber-600">
+                                  ⏱ {days}d ago
+                                </span>
+                              );
+                              return (
+                                <span className="inline-flex items-center gap-1 mt-0.5 text-[10px] text-gray-400">
+                                  sent today
+                                </span>
+                              );
+                            })()}
                           </div>
 
                           {/* Next action label */}

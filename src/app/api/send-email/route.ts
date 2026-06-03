@@ -158,8 +158,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify the email address before attempting to send
-    const verification = await verifyEmail(to);
+    // Verify the email address before attempting to send (DNS check only — SMTP probe causes false rejections)
+    const verification = await verifyEmailDNS(to);
     if (!verification.valid) {
       const service = createServiceClient();
       // Log the skip to sent_emails so CRM shows it
@@ -230,8 +230,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Convert plain text to HTML and inject tracking BEFORE sending
+    const trackingPixelId = randomUUID();
+    const baseUrl = (
+      process.env.NEXT_PUBLIC_APP_URL ||
+      request.headers.get("origin") ||
+      "http://localhost:3000"
+    ).replace(/\/$/, "");
+    const trackedBody = injectTracking(emailBody, trackingPixelId, baseUrl);
+
     // Send (with optional threading headers for follow-ups)
-    const result = await smtpManager.sendEmail(to, subject, emailBody, undefined, undefined);
+    const result = await smtpManager.sendEmail(to, subject, trackedBody, undefined, undefined);
 
     if (!result.success) {
       console.log(`📧 Email to ${to} FAILED: ${result.error}`);
@@ -273,21 +282,12 @@ export async function POST(request: NextRequest) {
       smtpAccountId = smtpAcc?.id ?? null;
     }
 
-    // Tracking
-    const trackingPixelId = randomUUID();
-    const baseUrl = (
-      process.env.NEXT_PUBLIC_APP_URL ||
-      request.headers.get("origin") ||
-      "http://localhost:3000"
-    ).replace(/\/$/, "");
-    const trackedBody = injectTracking(emailBody, trackingPixelId, baseUrl);
-
     // Use message ID from SMTP result or generate one
     const smtpMessageId = result.messageId ?? null;
     // Thread ID: if this is a follow-up, use the original thread_id; otherwise use the new message ID
     const threadId = smtpMessageId ?? randomUUID();
 
-    // Log sent email
+    // Log sent email (trackedBody already has HTML + tracking pixel injected before send)
     const sentId = await logEmail(service, {
       user_id: user.id,
       lead_id: lead?.id ?? null,

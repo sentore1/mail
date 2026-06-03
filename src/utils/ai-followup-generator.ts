@@ -53,7 +53,8 @@ export interface FollowUpContext {
   yourCompany: string;
   yourService: string;
   senderName?: string;
-  contactName?: string; // scraped owner/contact name or derived from email
+  senderPhone?: string;   // shown in signature
+  contactName?: string;   // scraped owner/contact name or derived from email
 
   // Override
   style?: FollowUpStyle;
@@ -194,60 +195,18 @@ function stripHtmlForAI(html: string): string {
     .trim();
 }
 
-// ── Extract a usable first name from email local part ─────────────────────────
-// e.g. john.smith@acme.com → "John"
-// e.g. info@acme.com → null (generic address)
-function nameFromEmail(email: string | null | undefined): string | null {
-  if (!email) return null;
-  const local = email.split("@")[0]?.toLowerCase() ?? "";
-
-  // Generic role addresses — no name can be inferred
-  const genericLocals = [
-    "info","contact","hello","support","help","admin","sales","office",
-    "enquiry","enquiries","bookings","team","business","mail","noreply",
-    "no-reply","reception","accounts","billing","hr","marketing","service",
-  ];
-  if (genericLocals.some(g => local === g || local.startsWith(g + ".") || local.startsWith(g + "_"))) {
-    return null;
-  }
-
-  // Named patterns: john.smith, john_smith, johnsmith, j.smith
-  const dotParts = local.split(/[._\-]/);
-  if (dotParts.length >= 2) {
-    const first = dotParts[0];
-    // Must look like a real name part (letters only, 2+ chars)
-    if (first && /^[a-z]{2,}$/.test(first)) {
-      return first.charAt(0).toUpperCase() + first.slice(1);
-    }
-  }
-
-  // Single word that looks like a name (not a role word)
-  if (/^[a-z]{3,}$/.test(local)) {
-    return local.charAt(0).toUpperCase() + local.slice(1);
-  }
-
-  return null;
-}
-
-// ── Resolve the best greeting name ───────────────────────────────────────────
-// Priority: explicit contactName > email-derived name > "Sir/Madam"
-function resolveGreeting(contactName?: string | null, leadEmail?: string | null): string {
-  if (contactName && contactName.trim().length > 1) {
-    // Use just the first word/name (avoid "John Smith CEO" etc.)
-    const firstName = contactName.trim().split(/\s+/)[0];
-    return `Hi ${firstName},`;
-  }
-  const derived = nameFromEmail(leadEmail);
-  if (derived) return `Hi ${derived},`;
+// ── Greeting — always "Dear Sir/Madam," ──────────────────────────────────────
+function resolveGreeting(): string {
   return "Dear Sir/Madam,";
 }
 
 function buildUserPrompt(ctx: FollowUpContext, style: FollowUpStyle): string {
   const senderName = ctx.senderName || ctx.yourCompany || "Sales Team";
   const sentDate = new Date(ctx.sentAt).toLocaleDateString("en-US", { month: "long", day: "numeric" });
-  const greeting = resolveGreeting(ctx.contactName, (ctx as any).leadEmail);
+  const greeting = resolveGreeting();
+  const phoneLine = ctx.senderPhone ? `\n${ctx.senderPhone}` : "";
 
-  const signatureBlock = `Best regards,\n\n${senderName}\nPryro`;
+  const signatureBlock = `Best regards,\n\n${senderName}\nPryro${phoneLine}`;
 
   return `COMPANY: ${ctx.companyName}
 ORIGINAL EMAIL DATE: ${sentDate}
@@ -280,15 +239,16 @@ export function buildTemplateFollowUp(
   ctx: FollowUpContext,
   style: FollowUpStyle
 ): { subject: string; body: string } {
-  const { companyName, followupNumber, originalSubject, yourCompany, senderName } = ctx;
+  const { companyName, followupNumber, originalSubject, yourCompany, senderName, senderPhone } = ctx;
   const sender = senderName || yourCompany || "Sales Team";
-  const sig = `Best regards,\n\n${sender}\nPryro`;
+  const phoneLine = senderPhone ? `\n${senderPhone}` : "";
+  const sig = `Best regards,\n\n${sender}\nPryro${phoneLine}`;
 
   const sentDate = ctx.sentAt
     ? new Date(ctx.sentAt).toLocaleDateString("en-US", { month: "long", day: "numeric" })
     : "recently";
 
-  const greeting = resolveGreeting(ctx.contactName, (ctx as any).leadEmail);
+  const greeting = resolveGreeting();
 
   // FU #1
   if (followupNumber === 1) {
@@ -598,8 +558,8 @@ export async function generateFollowUp(
     const fallbackSubject = `Re: ${ctx.originalSubject}`;
     const { subject, body } = parseAIFollowUp(aiResult.text, fallbackSubject);
 
-    // Basic sanity check
-    if (subject && body && body.length > 20) {
+    // Sanity check — body must be more than just a greeting line
+    if (subject && body && body.length > 80) {
       return {
         subject,
         body,

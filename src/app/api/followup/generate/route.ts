@@ -114,6 +114,7 @@ export async function POST(req: NextRequest) {
       yourCompany: settings?.your_company || overrideContext?.yourCompany || "",
       yourService: settings?.your_service || overrideContext?.yourService || "",
       senderName: overrideContext?.senderName || settings?.your_company || "",
+      senderPhone: overrideContext?.senderPhone || undefined,
       contactName: lead?.contact_name || lead?.owner_name || undefined,
       style: style as FollowUpStyle | undefined,
       tone: tone as FollowUpTone | undefined,
