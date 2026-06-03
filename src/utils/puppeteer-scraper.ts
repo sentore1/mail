@@ -223,16 +223,19 @@ async function deepScrapeWebsite(
 
   // Extract real business name from HTML
   const extractBusinessName = (html: string, pageUrl: string): string | null => {
+    // URL junk guard — rejects "https", "http", "www" etc.
+    const isUrlJunk = (s: string) => /^(https?|ftp|www)$/i.test(s.trim()) || /^https?:\/\//i.test(s.trim());
+
     // Try og:site_name meta tag (most reliable)
     const ogSite = html.match(/<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']{3,80})["']/i)?.[1]
                 ?? html.match(/<meta[^>]+content=["']([^"']{3,80})["'][^>]+property=["']og:site_name["']/i)?.[1];
-    if (ogSite) return decodeHtmlEntitiesSimple(ogSite.trim());
+    if (ogSite && !isUrlJunk(ogSite)) return decodeHtmlEntitiesSimple(ogSite.trim());
 
     // Try <title> tag — take the part before | or - separator
     const titleMatch = html.match(/<title[^>]*>([^<]{3,100})<\/title>/i)?.[1];
     if (titleMatch) {
       const cleaned = titleMatch.replace(/\s*[-|–|—|·|»]\s*.+$/, '').trim();
-      if (cleaned.length >= 3 && cleaned.length <= 80 && !BAD_TITLE_PATTERNS.some(p => p.test(cleaned))) {
+      if (cleaned.length >= 3 && cleaned.length <= 80 && !isUrlJunk(cleaned) && !BAD_TITLE_PATTERNS.some(p => p.test(cleaned))) {
         return decodeHtmlEntitiesSimple(cleaned);
       }
     }
@@ -241,7 +244,7 @@ async function deepScrapeWebsite(
     const h1Match = html.match(/<h1[^>]*>([^<]{3,80})<\/h1>/i)?.[1];
     if (h1Match) {
       const cleaned = h1Match.replace(/<[^>]+>/g, '').trim();
-      if (cleaned.length >= 3 && cleaned.length <= 60 && !BAD_TITLE_PATTERNS.some(p => p.test(cleaned))) {
+      if (cleaned.length >= 3 && cleaned.length <= 60 && !isUrlJunk(cleaned) && !BAD_TITLE_PATTERNS.some(p => p.test(cleaned))) {
         return decodeHtmlEntitiesSimple(cleaned);
       }
     }
@@ -1001,12 +1004,23 @@ const BAD_NAME_PREFIXES = [
  * Falls back to deriving the name from the domain if the title is generic.
  */
 function extractCompanyName(title: string, url: string): string | null {
+  // Reject raw URL fragments immediately — these are never valid company names
+  const URL_JUNK = /^(https?|ftp|www|http)$/i;
+  if (URL_JUNK.test(title.trim())) return null;
+
+  // Reject if the raw title looks like a full URL or starts with a protocol
+  if (/^https?:\/\//i.test(title.trim())) return null;
+
   // Clean the title — remove everything after a separator
   let name = title
     .replace(/\s*[-|–|·|—|»|›|:]\s*.+$/, '')
     .replace(/\s*\|\s*.+$/, '')
     .replace(/\s*,\s*.+$/, '')
     .trim();
+
+  // Reject if cleaned name is still a URL token
+  if (URL_JUNK.test(name)) return null;
+  if (/^https?:\/\//i.test(name)) return null;
 
   // Decode HTML entities
   name = name
@@ -1029,7 +1043,14 @@ function extractCompanyName(title: string, url: string): string | null {
   if (isBad) {
     // Fall back to domain name — convert "strandbooks.com" → "Strand Books"
     try {
-      const domain = new URL(url).hostname.replace(/^www\./, '').replace(/\.(com|org|net|co\.\w+|io|biz|ae|uk|au|ca|in|sg)$/, '');
+      const parsed = new URL(url);
+      const domain = parsed.hostname
+        .replace(/^www\./, '')
+        .replace(/\.(com|org|net|co\.\w+|io|biz|ae|uk|au|ca|in|sg|us|nz)$/i, '');
+
+      // Skip if domain itself is a generic/junk value
+      if (!domain || domain.length < 3 || /^(https?|ftp|localhost)$/i.test(domain)) return null;
+
       const fromDomain = domain
         .replace(/[-_]/g, ' ')
         .replace(/([a-z])([A-Z])/g, '$1 $2')

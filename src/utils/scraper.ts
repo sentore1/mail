@@ -25,11 +25,20 @@ export function extractEmails(text: string): string[] {
   return matches ? Array.from(new Set(matches)) : [];
 }
 
-/** Clean up a raw company name scraped from a page title. */
-function cleanCompanyName(raw: string): string {
-  return raw
+/** Clean up a raw company name scraped from a page title. Returns null if it looks like a URL or junk. */
+function cleanCompanyName(raw: string): string | null {
+  // Reject URL tokens immediately
+  if (/^https?:\/\//i.test(raw.trim())) return null;
+  if (/^(https?|ftp|www)$/i.test(raw.trim())) return null;
+
+  const cleaned = raw
     .replace(/\s*[-|].*$/, '') // strip everything after – or |
     .trim();
+
+  if (!cleaned || cleaned.length < 3) return null;
+  if (/^(https?|ftp|www)$/i.test(cleaned)) return null;
+
+  return cleaned;
 }
 
 // ─── Google Custom Search ────────────────────────────────────────────────────
@@ -72,7 +81,7 @@ export async function scrapeWithGoogleSearch(
         if (emails.length === 0) continue;
 
         leads.push({
-          company_name: cleanCompanyName(item.title ?? 'Unknown Company'),
+          company_name: cleanCompanyName(item.title ?? '') ?? 'Unknown Company',
           email: emails[0],
           niche,
           location,
