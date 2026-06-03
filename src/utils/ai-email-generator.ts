@@ -15,6 +15,7 @@ interface EmailGenerationParams {
   senderName?: string;
   senderEmail?: string;
   senderTitle?: string;
+  senderPhone?: string;
 }
 
 // ── System message ────────────────────────────────────────────────────────────

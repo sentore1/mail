@@ -361,6 +361,8 @@ async function deepScrapeWebsite(
 
   // AI prediction — last resort when no email found anywhere on the site.
   // Marked isReal: false so the UI shows it as AI-predicted, not scraped.
+  // We REJECT generic role addresses (info@, contact@, hello@, etc.) since
+  // the AI always guesses these and they rarely reach a real person.
   if (aiProvider) {
     const predicted = await aiPredict(companyName, domain, niche, location, aiProvider);
     if (predicted) {
@@ -369,12 +371,30 @@ async function deepScrapeWebsite(
       const isBlockedPrediction = Array.from(BLOCKED_DOMAINS).some(d =>
         predictedDomain === d || predictedDomain.endsWith('.' + d)
       );
-      if (!isBlockedPrediction) {
-        console.log(`    🤖 AI predicted: ${predicted}`);
-        return { email: predicted, isReal: false };
-      } else {
+      if (isBlockedPrediction) {
         console.log(`    ⏭  AI predicted blocked domain: ${predicted} — skipped`);
+        return null;
       }
+
+      // Reject generic role-based prefixes — AI always guesses these, they're useless
+      const localPart = predicted.split('@')[0]?.toLowerCase() ?? '';
+      const GENERIC_PREFIXES = [
+        'info', 'contact', 'hello', 'support', 'admin', 'office',
+        'enquiry', 'enquiries', 'team', 'mail', 'help', 'sales',
+        'reception', 'general', 'webmaster', 'noreply', 'no-reply',
+        'feedback', 'service', 'hr', 'marketing', 'accounts', 'billing',
+        'press', 'media', 'pr', 'news', 'shop', 'store',
+      ];
+      const isGeneric = GENERIC_PREFIXES.some(p =>
+        localPart === p || localPart.startsWith(p + '.') || localPart.startsWith(p + '_')
+      );
+      if (isGeneric) {
+        console.log(`    ⏭  AI predicted generic email: ${predicted} — skipped (not saved)`);
+        return null;
+      }
+
+      console.log(`    🤖 AI predicted specific email: ${predicted}`);
+      return { email: predicted, isReal: false };
     }
   }
 

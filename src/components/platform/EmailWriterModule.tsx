@@ -378,9 +378,13 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
   };
 
   const selectAll = () => {
-    const allSelected = unsentLeads.every((l) => selectedLeadIds.has(l.id));
+    // Only select leads with real/verified emails — skip AI-predicted ones
+    const selectableLeads = unsentLeads.filter(l =>
+      (l as any).email_verified || ((l as any).confidence_score ?? 90) >= 70
+    );
+    const allSelected = selectableLeads.every((l) => selectedLeadIds.has(l.id));
     const n = new Set(selectedLeadIds);
-    unsentLeads.forEach((l) => allSelected ? n.delete(l.id) : n.add(l.id));
+    selectableLeads.forEach((l) => allSelected ? n.delete(l.id) : n.add(l.id));
     setSelectedLeadIds(n);
   };
 
@@ -1047,8 +1051,12 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
                         return (
                           <button key={cat} onClick={() => {
                             setNicheFilter(cat);
-                            // Auto-select ONLY unsent leads in this niche
-                            setSelectedLeadIds(new Set(catUnsent.map(l => l.id)));
+                            // Auto-select ONLY unsent leads in this niche with real emails
+                            setSelectedLeadIds(new Set(
+                              catUnsent
+                                .filter(l => (l as any).email_verified || ((l as any).confidence_score ?? 90) >= 70)
+                                .map(l => l.id)
+                            ));
                           }}
                             className={`px-3 py-1.5 rounded-lg text-xs font-medium border-2 transition-all ${nicheFilter === cat ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200 hover:border-blue-400"}`}>
                             {cat}
@@ -1071,6 +1079,27 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
                       {unsentLeads.every((l) => selectedLeadIds.has(l.id)) ? "Deselect all" : "Select all unsent"}
                     </button>
                   </div>
+
+                  {/* AI-predicted email warning banner */}
+                  {(() => {
+                    const aiPredicted = unsentLeads.filter(l =>
+                      !(l as any).email_verified && ((l as any).confidence_score ?? 90) < 70
+                    );
+                    return aiPredicted.length > 0 ? (
+                      <div className="mb-2 flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                        <span className="text-amber-500 shrink-0">⚠️</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-amber-800">
+                            {aiPredicted.length} lead{aiPredicted.length > 1 ? "s have" : " has"} an AI-guessed email
+                          </p>
+                          <p className="text-[11px] text-amber-700 mt-0.5">
+                            These emails were predicted by AI and are likely to bounce. They are unchecked by default — the system will skip them automatically when you send.
+                          </p>
+                        </div>
+                      </div>
+                    ) : null;
+                  })()}
+
                   <div className="border border-gray-200 rounded-lg overflow-hidden max-h-72 overflow-y-auto">
                     {unsentLeads.length === 0 && alreadySent.length === 0 && (
                       <p className="text-xs text-gray-400 text-center py-6">No leads found</p>
@@ -1084,19 +1113,34 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
                       </div>
                     )}
 
-                    {unsentLeads.map((lead, i) => (
-                      <div key={lead.id}
-                        onClick={() => toggleLead(lead.id)}
-                        className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${i !== 0 || alreadySent.length > 0 ? "border-t border-gray-100" : ""} ${selectedLeadIds.has(lead.id) ? "bg-blue-50" : "hover:bg-gray-50"}`}>
-                        {selectedLeadIds.has(lead.id)
-                          ? <CheckSquare size={15} className="text-blue-600 flex-shrink-0" />
-                          : <Square size={15} className="text-gray-300 flex-shrink-0" />}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-800 truncate">{lead.company_name}</p>
-                          <p className="text-xs text-gray-400 truncate">{lead.email || "no email"}{lead.niche ? " · " + lead.niche : ""}</p>
+                    {unsentLeads.map((lead, i) => {
+                      const isAIPredicted = !(lead as any).email_verified && ((lead as any).confidence_score ?? 90) < 70;
+                      return (
+                        <div key={lead.id}
+                          onClick={() => !isAIPredicted && toggleLead(lead.id)}
+                          className={`flex items-center gap-3 px-4 py-3 transition-colors ${i !== 0 || alreadySent.length > 0 ? "border-t border-gray-100" : ""} ${
+                            isAIPredicted
+                              ? "opacity-50 cursor-not-allowed bg-gray-50"
+                              : selectedLeadIds.has(lead.id)
+                              ? "bg-blue-50 cursor-pointer"
+                              : "hover:bg-gray-50 cursor-pointer"
+                          }`}>
+                          {isAIPredicted
+                            ? <span className="text-[10px] text-amber-500 shrink-0" title="AI-predicted email — will be skipped">⚠</span>
+                            : selectedLeadIds.has(lead.id)
+                            ? <CheckSquare size={15} className="text-blue-600 flex-shrink-0" />
+                            : <Square size={15} className="text-gray-300 flex-shrink-0" />
+                          }
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-800 truncate">{lead.company_name}</p>
+                            <p className="text-xs text-gray-400 truncate">
+                              {lead.email || "no email"}{lead.niche ? " · " + lead.niche : ""}
+                              {isAIPredicted && <span className="ml-1 text-amber-500 font-semibold">· AI guess — skipped</span>}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
 
                     {/* Already sent — greyed out, non-selectable, collapsed */}
                     {alreadySent.length > 0 && (

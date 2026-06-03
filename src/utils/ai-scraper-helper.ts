@@ -298,7 +298,11 @@ What is the single most likely contact email for this business?`;
 
     return email;
   } catch (err) {
-    console.warn('[AI Scraper] predictEmailPattern failed:', err);
+    // Only log the message, not the full stack trace — rate limit errors are expected
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes('rate limit')) {
+      console.warn('[AI Scraper] predictEmailPattern failed:', msg);
+    }
     return null;
   }
 }

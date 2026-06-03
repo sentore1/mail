@@ -48,6 +48,7 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
   const [showCSVImport, setShowCSVImport] = useState(false);
   const [showCleanModal, setShowCleanModal] = useState(false);
   const [deletingNiche, setDeletingNiche] = useState<string | null>(null);
+  const [deletingUnsent, setDeletingUnsent] = useState(false);
 
   const supabase = createClient();
 
@@ -169,6 +170,26 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
     }
   };
 
+  const deleteUnsent = async () => {
+    setDeletingUnsent(true);
+    try {
+      const { error } = await supabase
+        .from("leads")
+        .delete()
+        .eq("user_id", userId)
+        .eq("status", "new");
+      if (error) throw error;
+      const remaining = leads.filter((l) => normalizeStatus(l.status) !== "new");
+      setLeads(remaining);
+      if (drawerLead && normalizeStatus(drawerLead.status) === "new") setDrawerLead(null);
+      toast.success("All unsent leads deleted");
+    } catch {
+      toast.error("Failed to delete unsent leads");
+    } finally {
+      setDeletingUnsent(false);
+    }
+  };
+
   // Drag & Drop
   const handleDragStart = (e: React.DragEvent, leadId: string) => {
     e.dataTransfer.setData("leadId", leadId);
@@ -254,7 +275,7 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
         </button>
 
         {/* Clean CRM by niche */}
-        {categories.length > 0 && (
+        {leads.length > 0 && (
           <button
             onClick={() => setShowCleanModal(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors flex-shrink-0"
@@ -615,50 +636,107 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
               <div>
-                <h2 className="text-sm font-bold text-gray-900">Clean CRM by Niche</h2>
-                <p className="text-xs text-gray-500 mt-0.5">Delete all leads from a specific niche at once</p>
+                <h2 className="text-sm font-bold text-gray-900">Clean CRM</h2>
+                <p className="text-xs text-gray-500 mt-0.5">Delete leads by status or niche</p>
               </div>
               <button onClick={() => setShowCleanModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100">
                 <X size={15} className="text-gray-500" />
               </button>
             </div>
 
-            {/* Niche list */}
-            <div className="p-4 flex flex-col gap-2 max-h-80 overflow-y-auto">
-              {categories.map((niche) => {
-                const count = leads.filter((l) => (l as any).niche === niche).length;
-                const isDeleting = deletingNiche === niche;
-                return (
-                  <div
-                    key={niche}
-                    className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-gray-200 bg-gray-50"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-gray-800 truncate">{niche}</p>
-                      <p className="text-[11px] text-gray-400">{count} lead{count !== 1 ? "s" : ""}</p>
+            <div className="p-4 flex flex-col gap-4 max-h-[70vh] overflow-y-auto">
+
+              {/* Unsent leads section */}
+              {(() => {
+                const unsentCount = leads.filter((l) => normalizeStatus(l.status) === "new").length;
+                return unsentCount > 0 ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-amber-800">
+                          {unsentCount} Unsent Lead{unsentCount !== 1 ? "s" : ""}
+                        </p>
+                        <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+                          These leads were scraped but never emailed. This happens when:
+                        </p>
+                        <ul className="text-xs text-amber-700 mt-1.5 space-y-0.5 list-disc list-inside">
+                          <li>You stopped the Email Writer before finishing</li>
+                          <li>Your daily SMTP limit was reached mid-send</li>
+                          <li>You scraped leads but haven't sent yet</li>
+                          <li>An error interrupted the bulk send</li>
+                        </ul>
+                        <p className="text-xs text-amber-600 mt-2 font-medium">
+                          💡 Go to Email Writer to send them, or delete them here to clean up.
+                        </p>
+                      </div>
                     </div>
                     <button
-                      disabled={isDeleting}
+                      disabled={deletingUnsent}
                       onClick={() => {
-                        if (confirm(`Delete all ${count} "${niche}" leads? This cannot be undone.`)) {
-                          deleteByNiche(niche);
+                        if (confirm(`Delete all ${unsentCount} unsent leads? This cannot be undone.`)) {
+                          deleteUnsent();
                         }
                       }}
-                      className="flex items-center gap-1.5 ml-3 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 disabled:opacity-50 transition-colors flex-shrink-0"
+                      className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition-colors"
                     >
-                      {isDeleting ? (
-                        <Loader2 size={11} className="animate-spin" />
+                      {deletingUnsent ? (
+                        <><Loader2 size={12} className="animate-spin" />Deleting…</>
                       ) : (
-                        <Trash2 size={11} />
+                        <><Trash2 size={12} />Delete {unsentCount} unsent lead{unsentCount !== 1 ? "s" : ""}</>
                       )}
-                      {isDeleting ? "Deleting…" : `Delete all`}
                     </button>
                   </div>
+                ) : (
+                  <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3">
+                    <p className="text-xs font-semibold text-green-700">✓ No unsent leads — all scraped leads have been emailed</p>
+                  </div>
                 );
-              })}
-              {categories.length === 0 && (
-                <p className="text-sm text-gray-400 text-center py-6">No niches found</p>
-              )}
+              })()}
+
+              {/* Divider */}
+              <div className="flex items-center gap-2">
+                <div className="flex-1 h-px bg-gray-200"/>
+                <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide">Delete by Niche</span>
+                <div className="flex-1 h-px bg-gray-200"/>
+              </div>
+
+              {/* Niche list */}
+              <div className="flex flex-col gap-2">
+                {categories.map((niche) => {
+                  const count = leads.filter((l) => (l as any).niche === niche).length;
+                  const isDeleting = deletingNiche === niche;
+                  return (
+                    <div
+                      key={niche}
+                      className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-gray-200 bg-gray-50"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-gray-800 truncate">{niche}</p>
+                        <p className="text-[11px] text-gray-400">{count} lead{count !== 1 ? "s" : ""}</p>
+                      </div>
+                      <button
+                        disabled={isDeleting}
+                        onClick={() => {
+                          if (confirm(`Delete all ${count} "${niche}" leads? This cannot be undone.`)) {
+                            deleteByNiche(niche);
+                          }
+                        }}
+                        className="flex items-center gap-1.5 ml-3 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 disabled:opacity-50 transition-colors flex-shrink-0"
+                      >
+                        {isDeleting ? (
+                          <Loader2 size={11} className="animate-spin" />
+                        ) : (
+                          <Trash2 size={11} />
+                        )}
+                        {isDeleting ? "Deleting…" : "Delete all"}
+                      </button>
+                    </div>
+                  );
+                })}
+                {categories.length === 0 && (
+                  <p className="text-sm text-gray-400 text-center py-4">No niches found</p>
+                )}
+              </div>
             </div>
 
             {/* Footer */}
