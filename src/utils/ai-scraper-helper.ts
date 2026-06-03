@@ -43,7 +43,7 @@ export async function getActiveAIProvider(userId: string): Promise<AIProviderCon
 // and retry on 429 with exponential backoff.
 
 let lastAICallTime = 0;
-const AI_MIN_INTERVAL_MS = 4_000; // 4 seconds between calls = max 15/min (well under Groq's 30/min limit)
+const AI_MIN_INTERVAL_MS = 6_000; // 6 seconds between calls = max 10/min (well under Groq's limit)
 let aiRateLimitedUntil = 0; // timestamp — skip all AI calls until this time
 
 async function callAI(

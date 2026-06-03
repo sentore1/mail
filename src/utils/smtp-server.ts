@@ -144,14 +144,20 @@ export class SMTPManager {
   }
 
   /**
-   * Send email using available SMTP account
+   * Send email using available SMTP account.
+   * Supports RFC-compliant threading headers: In-Reply-To, References, Message-ID.
    */
   async sendEmail(
     to: string,
     subject: string,
     html: string,
-    text?: string
-  ): Promise<{ success: boolean; accountUsed?: string; error?: string }> {
+    text?: string,
+    threadingOptions?: {
+      inReplyTo?: string;      // Message-ID of the original email
+      references?: string;     // Space-separated chain of Message-IDs
+      messageId?: string;      // Override the generated Message-ID
+    }
+  ): Promise<{ success: boolean; accountUsed?: string; messageId?: string; error?: string }> {
     const account = this.getNextAccount();
     
     if (!account) {
@@ -163,14 +169,30 @@ export class SMTPManager {
 
     try {
       const transporter = this.createTransporter(account);
-      
-      await transporter.sendMail({
+
+      // Build RFC-compliant Message-ID
+      const domain = account.email.split('@')[1] || 'mail.local';
+      const generatedMessageId = threadingOptions?.messageId
+        || `<${Date.now()}.${Math.random().toString(36).slice(2)}@${domain}>`;
+
+      const mailOptions: nodemailer.SendMailOptions = {
         from: `"${account.sender_name || account.email.split('@')[0]}" <${account.email}>`,
         to,
         subject,
         html,
         text: text || html.replace(/<[^>]*>/g, ''),
-      });
+        messageId: generatedMessageId,
+      };
+
+      // Add threading headers for follow-ups
+      if (threadingOptions?.inReplyTo) {
+        mailOptions.inReplyTo = threadingOptions.inReplyTo;
+        mailOptions.references = threadingOptions.references
+          ? `${threadingOptions.references} ${threadingOptions.inReplyTo}`
+          : threadingOptions.inReplyTo;
+      }
+
+      await transporter.sendMail(mailOptions);
 
       // Update sent count
       const supabase = createServiceClient();
@@ -185,7 +207,8 @@ export class SMTPManager {
 
       return {
         success: true,
-        accountUsed: account.email
+        accountUsed: account.email,
+        messageId: generatedMessageId,
       };
     } catch (error) {
       console.error(`Error sending email with account ${account.email}:`, error);

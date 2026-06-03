@@ -82,6 +82,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
   // ── Sender name — editable per user ──────────────────────────────────────
   const [senderName, setSenderName] = useState("");
   const [senderTitle, setSenderTitle] = useState("Executive Sales");
+  const [senderPhone, setSenderPhone] = useState("");
 
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(() => { fetchLeads(); loadSenderProfile(); }, []);
@@ -160,11 +161,17 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
     : leads;
 
   // ── Shared send helper ────────────────────────────────────────────────────
-  const callSendEmail = async (to: string, subject: string, body: string, leadId?: string) => {
+  const callSendEmail = async (to: string, subject: string, body: string, leadId?: string, campaignId?: string) => {
     const res = await fetch("/api/send-email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to, subject, body, ...(leadId ? { leadId } : {}) }),
+      body: JSON.stringify({
+        to,
+        subject,
+        body,
+        ...(leadId ? { leadId } : {}),
+        ...(campaignId ? { campaignId, scheduleFollowups: true } : { scheduleFollowups: false }),
+      }),
     });
     return { res, data: await res.json() };
   };
@@ -204,6 +211,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
         userId,
         senderName: senderName || undefined,
         senderTitle: senderTitle || undefined,
+        senderPhone: senderPhone || undefined,
       });
       setGeneratedEmail({ subject, body, model: "AI" });
       setEditSubject(subject);
@@ -415,6 +423,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
           customPainPoint: bulkPainPoint || undefined,
           senderName: senderName || undefined,
           senderTitle: senderTitle || undefined,
+          senderPhone: senderPhone || undefined,
         }),
       });
 
@@ -515,6 +524,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
           })),
           delayMs: 3000,
           verifyEmails: true,
+          scheduleFollowups: true,
         }),
       });
 
@@ -522,12 +532,14 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
       toast.dismiss(sendToastId);
 
       if (data.success) {
-        const { sent, failed, errors } = data.results;
+        const { sent, failed, errors, followupsScheduled } = data.results;
         const nextOffset = offset + BATCH_SIZE;
         const remaining = allEmails.length - nextOffset;
 
-        if (sent > 0) toast.success(`Batch sent: ${sent} delivered${failed > 0 ? `, ${failed} skipped` : ''}`);
-        else if (errors?.[0]) toast.error(`Batch failed: ${errors[0].slice(0, 100)}`);
+        if (sent > 0) {
+          const followupMsg = followupsScheduled > 0 ? ` · ${followupsScheduled} follow-ups scheduled` : '';
+          toast.success(`Batch sent: ${sent} delivered${failed > 0 ? `, ${failed} skipped` : ''}${followupMsg}`);
+        } else if (errors?.[0]) toast.error(`Batch failed: ${errors[0].slice(0, 100)}`);
 
         fetchLeads();
 
@@ -799,8 +811,17 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
                   />
                 </div>
               </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Your Phone <span className="text-gray-400 font-normal">(optional — shown in signature)</span></label>
+                <input
+                  value={senderPhone}
+                  onChange={(e) => setSenderPhone(e.target.value)}
+                  placeholder="e.g. +256 700 123 456"
+                  className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"
+                />
+              </div>
               <p className="text-[10px] text-blue-600">
-                Signature preview: <span className="font-medium">{senderName || "Your Name"} · {senderTitle || "Executive Sales"} · Pryro</span>
+                Signature preview: <span className="font-medium">{senderName || "Your Name"} · {senderTitle || "Executive Sales"}{senderPhone ? ` · ${senderPhone}` : ""} · Pryro</span>
               </p>
             </div>
 
@@ -970,8 +991,17 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
                       />
                     </div>
                   </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Your Phone <span className="text-gray-400 font-normal">(optional — shown in signature)</span></label>
+                    <input
+                      value={senderPhone}
+                      onChange={(e) => setSenderPhone(e.target.value)}
+                      placeholder="e.g. +256 700 123 456"
+                      className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"
+                    />
+                  </div>
                   <p className="text-[10px] text-blue-600">
-                    Signature preview: <span className="font-medium">{senderName || "Your Name"} · {senderTitle || "Executive Sales"} · Pryro</span>
+                    Signature preview: <span className="font-medium">{senderName || "Your Name"} · {senderTitle || "Executive Sales"}{senderPhone ? ` · ${senderPhone}` : ""} · Pryro</span>
                   </p>
                 </div>
 

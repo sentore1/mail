@@ -211,12 +211,15 @@ function buildDirectEmail(
   niche: string | null,
   senderName: string,
   senderTitle: string,
-  idx: number
+  idx: number,
+  senderPhone?: string
 ): { subject: string; body: string } {
   const company = decodeHtmlEntities(companyName);
   const { sectorName, painPoint, pryroValue } = getNicheContent(niche);
   const patternFn = SUBJECT_PATTERNS[idx % SUBJECT_PATTERNS.length]!;
   const subject = patternFn(company, sectorName);
+
+  const phoneLine = senderPhone ? `\n${senderPhone}` : "";
 
   const body =
 `Dear Sir/Madam,
@@ -229,7 +232,7 @@ Would you be open to a 10-minute call to see if it is relevant?
 
 Best regards,
 ${senderName}
-${senderTitle}
+${senderTitle}${phoneLine}
 Pryro`;
 
   return { subject, body };
@@ -250,7 +253,7 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const { leads, yourCompany, yourService, tone, customPainPoint, senderName: bodySenderName, senderTitle: bodySenderTitle } =
+  const { leads, yourCompany, yourService, tone, customPainPoint, senderName: bodySenderName, senderTitle: bodySenderTitle, senderPhone: bodySenderPhone } =
     (await request.json()) as {
       leads: LeadInput[];
       yourCompany: string;
@@ -259,6 +262,7 @@ export async function POST(request: NextRequest) {
       customPainPoint?: string;
       senderName?: string;
       senderTitle?: string;
+      senderPhone?: string;
     };
 
   if (!leads?.length) {
@@ -273,6 +277,7 @@ export async function POST(request: NextRequest) {
   // Load sender name — use provided name first, fall back to SMTP account
   let senderName = bodySenderName || "Sales Team";
   const senderTitle = bodySenderTitle || "Executive Sales";
+  const senderPhone = bodySenderPhone || "";
   if (!bodySenderName) {
     try {
       const { data: smtpAccount } = await serviceSupabase
@@ -323,7 +328,7 @@ export async function POST(request: NextRequest) {
         }
 
         const cleanedName = cleanCompanyName(lead.company_name);
-        const { subject, body } = buildDirectEmail(cleanedName, lead.niche, senderName, senderTitle, idx);
+        const { subject, body } = buildDirectEmail(cleanedName, lead.niche, senderName, senderTitle, idx, senderPhone);
 
         done++;
         send("email", {

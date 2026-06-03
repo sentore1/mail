@@ -63,12 +63,15 @@ export async function generateEmailsBatch(
 ): Promise<BatchEmailResult[]> {
   const { leads, yourCompany, yourService, tone, customPainPoint, userId } = params;
 
-  // Fetch AI provider once
-  const providerRes = await fetch(`/api/ai-provider?userId=${userId}`);
+  // Fetch ALL configured providers — try each one in order
+  const providerRes = await fetch(`/api/ai-provider?userId=${userId}&all=true`);
   if (!providerRes.ok) {
     throw new Error('No active AI provider configured. Please set up AI in Settings.');
   }
-  const aiProvider = await providerRes.json();
+  const allProviders: any[] = await providerRes.json();
+  if (!allProviders || allProviders.length === 0) {
+    throw new Error('No AI providers configured. Please set up AI in Settings.');
+  }
 
   const toneGuide = TONE_INSTRUCTIONS[tone]
     .replace(/\$\{['"]?yourService['"]?\}/g, yourService);
@@ -110,95 +113,119 @@ Return a JSON array with exactly ${leads.length} objects:
   ...
 ]`;
 
-  let rawResponse = '';
+  const systemMsg = 'You are a B2B cold email copywriter. Always respond with valid JSON only — no markdown, no explanation, no code fences.';
+  const maxTokens = Math.min(8000, 200 * leads.length);
 
-  try {
-    if (aiProvider.provider === 'openai') {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${aiProvider.api_key}`,
-        },
-        body: JSON.stringify({
-          model: aiProvider.active_model || 'gpt-4o-mini',
-          messages: [
-            {
-              role: 'system',
-              content: 'You are a B2B cold email copywriter. Always respond with valid JSON only — no markdown, no explanation.',
-            },
-            { role: 'user', content: prompt },
-          ],
-          temperature: 0.75,
-          max_tokens: 200 * leads.length, // ~200 tokens per email
-        }),
-      });
-      if (!res.ok) throw new Error(`OpenAI error: ${res.statusText}`);
-      const data = await res.json();
-      rawResponse = data.choices[0].message.content;
+  // Try each provider in order, auto-fallback on 429 / errors
+  for (const aiProvider of allProviders) {
+    let rawResponse = '';
+    try {
+      if (aiProvider.provider === 'openai') {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${aiProvider.api_key}` },
+          body: JSON.stringify({
+            model: aiProvider.active_model || 'gpt-4o-mini',
+            messages: [{ role: 'system', content: systemMsg }, { role: 'user', content: prompt }],
+            temperature: 0.75,
+            max_tokens: maxTokens,
+          }),
+        });
+        if (!res.ok) { const t = await res.text().catch(() => ''); throw Object.assign(new Error(`OpenAI ${res.status}`), { status: res.status, body: t }); }
+        rawResponse = (await res.json()).choices[0].message.content;
 
-    } else if (aiProvider.provider === 'anthropic') {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': aiProvider.api_key,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: aiProvider.active_model || 'claude-3-5-sonnet-20241022',
-          max_tokens: 200 * leads.length,
-          system: 'You are a B2B cold email copywriter. Always respond with valid JSON only — no markdown, no explanation.',
-          messages: [{ role: 'user', content: prompt }],
-        }),
-      });
-      if (!res.ok) throw new Error(`Anthropic error: ${res.statusText}`);
-      const data = await res.json();
-      rawResponse = data.content[0].text;
+      } else if (aiProvider.provider === 'anthropic') {
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': aiProvider.api_key, 'anthropic-version': '2023-06-01' },
+          body: JSON.stringify({
+            model: aiProvider.active_model || 'claude-3-5-haiku-20241022',
+            max_tokens: maxTokens,
+            system: systemMsg,
+            messages: [{ role: 'user', content: prompt }],
+          }),
+        });
+        if (!res.ok) { const t = await res.text().catch(() => ''); throw Object.assign(new Error(`Anthropic ${res.status}`), { status: res.status, body: t }); }
+        rawResponse = (await res.json()).content[0].text;
 
-    } else if (aiProvider.provider === 'groq') {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${aiProvider.api_key}`,
-        },
-        body: JSON.stringify({
-          model: aiProvider.active_model || 'llama-3.3-70b-versatile',
-          messages: [
-            {
-              role: 'system',
-              content: 'You are a B2B cold email copywriter. Always respond with valid JSON only — no markdown, no explanation, no code fences.',
-            },
-            { role: 'user', content: prompt },
-          ],
-          temperature: 0.75,
-          max_tokens: Math.min(8000, 150 * leads.length), // Groq has token limits
-        }),
-      });
+      } else if (aiProvider.provider === 'groq') {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${aiProvider.api_key}` },
+          body: JSON.stringify({
+            model: aiProvider.active_model || 'llama-3.3-70b-versatile',
+            messages: [{ role: 'system', content: systemMsg }, { role: 'user', content: prompt }],
+            temperature: 0.75,
+            max_tokens: Math.min(8000, 150 * leads.length),
+          }),
+        });
+        if (!res.ok) { const t = await res.text().catch(() => ''); throw Object.assign(new Error(`Groq ${res.status}`), { status: res.status, body: t }); }
+        rawResponse = (await res.json()).choices[0].message.content;
 
-      if (!res.ok) {
-        const errText = await res.text().catch(() => res.statusText);
-        if (res.status === 429) throw new Error('rate_limit');
-        throw new Error(`Groq error (${res.status}): ${errText.slice(0, 200)}`);
+      } else if (aiProvider.provider === 'gemini') {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${aiProvider.active_model || 'gemini-1.5-flash'}:generateContent?key=${aiProvider.api_key}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: systemMsg + '\n\n' + prompt }] }],
+              generationConfig: { temperature: 0.75, maxOutputTokens: maxTokens },
+            }),
+          }
+        );
+        if (!res.ok) { const t = await res.text().catch(() => ''); throw Object.assign(new Error(`Gemini ${res.status}`), { status: res.status, body: t }); }
+        rawResponse = (await res.json()).candidates[0].content.parts[0].text;
+
+      } else if (aiProvider.provider === 'mistral') {
+        const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${aiProvider.api_key}` },
+          body: JSON.stringify({
+            model: aiProvider.active_model || 'mistral-small',
+            messages: [{ role: 'system', content: systemMsg }, { role: 'user', content: prompt }],
+            temperature: 0.75,
+            max_tokens: maxTokens,
+          }),
+        });
+        if (!res.ok) { const t = await res.text().catch(() => ''); throw Object.assign(new Error(`Mistral ${res.status}`), { status: res.status, body: t }); }
+        rawResponse = (await res.json()).choices[0].message.content;
+
+      } else {
+        console.warn(`[batch-gen] Unknown provider "${aiProvider.provider}", skipping`);
+        continue;
       }
-      const data = await res.json();
-      rawResponse = data.choices[0].message.content;
 
-    } else {
-      throw new Error(`Unsupported AI provider: ${aiProvider.provider}`);
+      // Success — parse and return
+      console.log(`[batch-gen] Used provider: ${aiProvider.provider}`);
+      return parseEmailBatch(rawResponse, leads);
+
+    } catch (err: any) {
+      const status = err.status as number | undefined;
+      const isRateLimit = status === 429;
+      const isServerErr = status && status >= 500;
+      const isAuthErr   = status === 401 || status === 403;
+
+      if (isRateLimit) {
+        console.warn(`[batch-gen] ${aiProvider.provider} rate-limited (429) — trying next provider`);
+        continue;
+      }
+      if (isAuthErr) {
+        console.warn(`[batch-gen] ${aiProvider.provider} auth error (${status}) — trying next provider`);
+        continue;
+      }
+      if (isServerErr) {
+        console.warn(`[batch-gen] ${aiProvider.provider} server error (${status}) — trying next provider`);
+        continue;
+      }
+      // Other errors (parse error, bad JSON, etc.) — log and try next
+      console.error(`[batch-gen] ${aiProvider.provider} error: ${err.message} — trying next provider`);
+      continue;
     }
-
-    // Parse JSON response
-    const parsed = parseEmailBatch(rawResponse, leads);
-    return parsed;
-
-  } catch (err: any) {
-    if (err.message === 'rate_limit') throw err; // Let caller handle
-    console.error('Batch generation error:', err);
-    throw err;
   }
-}
+
+  // All providers failed
+  throw new Error(`All ${allProviders.length} AI provider(s) failed or are rate-limited. Please add another provider or wait a moment.`);
 
 /**
  * Parse the AI's JSON response into structured results.

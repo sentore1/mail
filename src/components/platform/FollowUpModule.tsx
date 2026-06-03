@@ -1,644 +1,1059 @@
-﻿"use client";
-
+"use client";
 import { useState, useEffect, useCallback } from "react";
 import { Lead, EmailReply, AIReply, SentEmail } from "@/types/platform";
 import {
-  Mail, Send, Loader2, X,
+  Mail, Send, Loader2, X, ChevronDown, ChevronRight, ChevronLeft,
   MessageSquare, Sparkles, RefreshCw, ThumbsUp, ThumbsDown,
-  Inbox, Bot, Trash2,
+  Inbox, Reply, CheckCircle, AlertCircle, Eye, MousePointer,
+  RotateCcw, Plus, Bot, Edit3, Users, PenLine, AtSign,
 } from "lucide-react";
 import { createClient } from "../../../supabase/client";
 import { toast } from "sonner";
 import InboxConfigPanel from "./InboxConfigPanel";
 
-interface FollowUpModuleProps {
-  userId: string;
+interface FollowUpModuleProps { userId: string; }
+interface AIDraft { subject: string; body: string; }
+interface FUDraft { subject: string; body: string; decisionReason: string; modelUsed: string; }
+interface LeadThread {
+  leadId: string; leadEmail: string; companyName: string; niche: string | null;
+  emails: SentEmail[]; replies: EmailReply[];
+  hasReply: boolean; latestStatus: string; followupCount: number;
 }
 
-interface AIDraft {
-  subject: string;
-  body: string;
+const TONES = [
+  { value: "Direct",     label: "Direct",      desc: "Hard direct. No politeness. Problem → Solution → CTA" },
+  { value: "Aggressive", label: "Aggressive",  desc: "High urgency, creates FOMO, pushes action hard" },
+  { value: "Surgical",   label: "Surgical",    desc: "Hyper-personalized, proves you did your homework" },
+];
+
+function StatusPill({ status, opened, clicked }: { status?: string|null; opened: boolean; clicked: boolean }) {
+  const s = status || "sent";
+  if (s === "replied") return <span className="px-2 py-0.5 bg-green-50 text-green-700 text-xs font-medium rounded-full border border-green-100">Replied</span>;
+  if (s === "bounced") return <span className="px-2 py-0.5 bg-red-50 text-red-600 text-xs font-medium rounded-full border border-red-100">Bounced</span>;
+  if (s === "failed")  return <span className="px-2 py-0.5 bg-red-50 text-red-600 text-xs font-medium rounded-full border border-red-100">Failed</span>;
+  if (clicked) return <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-xs font-medium rounded-full border border-blue-100">Clicked</span>;
+  if (opened)  return <span className="px-2 py-0.5 bg-amber-50 text-amber-700 text-xs font-medium rounded-full border border-amber-100">Opened</span>;
+  return <span className="px-2 py-0.5 bg-gray-50 text-gray-600 text-xs font-medium rounded-full border border-gray-200">Sent</span>;
+}
+
+function fdate(d: string) {
+  if (!d) return "";
+  return new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    + " " + new Date(d).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 export default function FollowUpModule({ userId }: FollowUpModuleProps) {
-  const [activeTab, setActiveTab] = useState<"sent" | "replies" | "ai-responses" | "inbox">("sent");
+  // ── Mode ──────────────────────────────────────────────────────────────────
+  const [mode, setMode] = useState<"single"|"bulk"|"manual">("single");
+
+  // ── Data ──────────────────────────────────────────────────────────────────
   const [sentEmails, setSentEmails] = useState<SentEmail[]>([]);
-  const [emailReplies, setEmailReplies] = useState<EmailReply[]>([]);
-  const [aiReplies, setAIReplies] = useState<AIReply[]>([]);
-  const [leads, setLeads] = useState<Map<string, Lead>>(new Map());
+  const [replies, setReplies] = useState<EmailReply[]>([]);
+  const [aiReplies, setAiReplies] = useState<AIReply[]>([]);
+  const [leads, setLeads] = useState<Map<string,Lead>>(new Map());
   const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState<string | null>(null);
-  const [selectedReply, setSelectedReply] = useState<EmailReply | null>(null);
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [aiDraft, setAIDraft] = useState<AIDraft | null>(null);
-  const [checkingReplies, setCheckingReplies] = useState(false);
-  const [deletingAllSent, setDeletingAllSent] = useState(false);
+  const [checking, setChecking] = useState(false);
 
-  const supabase = createClient();
+  // ── Sender signature ──────────────────────────────────────────────────────
+  const [senderName, setSenderName] = useState("");
+  const [senderTitle, setSenderTitle] = useState("Executive Sales");
+  const [senderPhone, setSenderPhone] = useState("");
 
-  const fetchData = useCallback(async () => {
+  // ── Single follow-up ──────────────────────────────────────────────────────
+  const [singleTone, setSingleTone] = useState("Direct");
+  const [singlePainPoint, setSinglePainPoint] = useState("");
+  const [selectedThread, setSelectedThread] = useState<LeadThread|null>(null);
+  const [threadDropOpen, setThreadDropOpen] = useState(false);
+  const [threadSearch, setThreadSearch] = useState("");
+  const [expandedBodyId, setExpandedBodyId] = useState<string|null>(null);
+  const [singleGenerating, setSingleGenerating] = useState(false);
+  const [singleDraft, setSingleDraft] = useState<FUDraft|null>(null);
+  const [singleSubj, setSingleSubj] = useState("");
+  const [singleBody, setSingleBody] = useState("");
+  const [singleSending, setSingleSending] = useState(false);
+
+  // ── Bulk follow-up ────────────────────────────────────────────────────────
+  const [bulkTone, setBulkTone] = useState("Direct");
+  const [bulkPainPoint, setBulkPainPoint] = useState("");
+  const [bulkNiche, setBulkNiche] = useState("all");
+  const [bulkFUFilter, setBulkFUFilter] = useState<number|"all">("all"); // follow-up number filter
+  const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
+  const [bulkStep, setBulkStep] = useState<"select"|"review"|"sending">("select");
+  const [bulkReviewIndex, setBulkReviewIndex] = useState(-1);
+  const [bulkGenerating, setBulkGenerating] = useState(false);
+  const [bulkSending, setBulkSending] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0, errors: 0 });
+  const [bulkPreviews, setBulkPreviews] = useState<Array<{
+    leadId: string; companyName: string; leadEmail: string;
+    subject: string; body: string; latestEmailId: string; campaignId: string;
+    skipped: boolean; skipReason?: string;
+  }>>([]);
+
+  // ── Manual compose ────────────────────────────────────────────────────────
+  const [manualTo, setManualTo] = useState("");
+  const [manualSubject, setManualSubject] = useState("");
+  const [manualBody, setManualBody] = useState("");
+  const [manualSending, setManualSending] = useState(false);
+
+  // ── Reply panel ───────────────────────────────────────────────────────────
+  const [rpOpen, setRpOpen] = useState(false);
+  const [rpReply, setRpReply] = useState<EmailReply|null>(null);
+  const [rpDraft, setRpDraft] = useState<AIDraft|null>(null);
+  const [rpGen, setRpGen] = useState(false);
+  const [rpSubj, setRpSubj] = useState("");
+  const [rpBody, setRpBody] = useState("");
+  const [rpSend, setRpSend] = useState(false);
+
+  const sb = createClient();
+
+  // ── Load data ─────────────────────────────────────────────────────────────
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [sentRes, repliesRes, aiRes] = await Promise.all([
-        supabase
-          .from("sent_emails")
+      // 1. Load contacted leads from CRM (the source of truth)
+      const { data: contactedLeads } = await sb
+        .from("leads")
+        .select("*")
+        .eq("user_id", userId)
+        .in("status", ["contacted", "Email Sent", "opened", "clicked", "Replied", "replied", "Interested"])
+        .order("last_contacted_at", { ascending: false })
+        .limit(500);
+
+      // 2. Load sent emails — only those with a lead_id and status not failed/bounced
+      const [s, r, a] = await Promise.all([
+        sb.from("sent_emails")
           .select("*")
           .eq("user_id", userId)
+          .not("lead_id", "is", null)
+          .not("status", "in", '("failed","bounced","invalid_email")')
           .order("sent_at", { ascending: false })
-          .limit(200),
-        supabase
-          .from("email_replies")
-          .select("*")
-          .eq("user_id", userId)
-          .order("received_at", { ascending: false }),
-        supabase
-          .from("ai_replies")
-          .select("*")
-          .eq("user_id", userId)
-          .order("created_at", { ascending: false }),
+          .limit(500),
+        sb.from("email_replies").select("*").eq("user_id", userId).order("received_at", { ascending: false }),
+        sb.from("ai_replies").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
       ]);
 
-      if (sentRes.error) console.error("sent_emails fetch error:", sentRes.error);
-      if (repliesRes.error) console.error("email_replies fetch error:", repliesRes.error);
-      if (aiRes.error) console.error("ai_replies fetch error:", aiRes.error);
+      if (s.data) setSentEmails(s.data as SentEmail[]);
+      if (r.data) setReplies(r.data as EmailReply[]);
+      if (a.data) setAiReplies(a.data as AIReply[]);
 
-      if (sentRes.data) setSentEmails(sentRes.data as SentEmail[]);
-      if (repliesRes.data) setEmailReplies(repliesRes.data as EmailReply[]);
-      if (aiRes.data) setAIReplies(aiRes.data as AIReply[]);
+      // Build leads map from CRM data first, then supplement with sent_emails lead_ids
+      const m = new Map<string,Lead>();
+      contactedLeads?.forEach((l: Lead) => m.set(l.id, l));
 
-      // Load leads for any lead_id that appears in sent emails or replies
-      const leadIds = new Set<string>();
-      sentRes.data?.forEach((e: any) => { if (e.lead_id) leadIds.add(e.lead_id); });
-      repliesRes.data?.forEach((r: any) => { if (r.lead_id) leadIds.add(r.lead_id); });
-
-      if (leadIds.size > 0) {
-        const { data: leadsData } = await supabase
-          .from("leads")
-          .select("*")
-          .in("id", Array.from(leadIds));
-        if (leadsData) {
-          const map = new Map<string, Lead>();
-          leadsData.forEach((l: Lead) => map.set(l.id, l));
-          setLeads(map);
-        }
+      // Also load any leads referenced in sent_emails that aren't in the CRM list
+      const missingIds = new Set<string>();
+      s.data?.forEach((e: any) => { if (e.lead_id && !m.has(e.lead_id)) missingIds.add(e.lead_id); });
+      r.data?.forEach((x: any) => { if (x.lead_id && !m.has(x.lead_id)) missingIds.add(x.lead_id); });
+      if (missingIds.size > 0) {
+        const { data: extra } = await sb.from("leads").select("*").in("id", Array.from(missingIds));
+        extra?.forEach((l: Lead) => m.set(l.id, l));
       }
-    } catch (error) {
-      console.error("Error fetching follow-up data:", error);
-      toast.error("Failed to load follow-up data");
-    } finally {
-      setLoading(false);
-    }
-  }, [userId, supabase]);
+      setLeads(m);
+    } catch { toast.error("Failed to load data"); }
+    finally { setLoading(false); }
+  }, [userId, sb]);
 
   useEffect(() => {
-    fetchData();
-    
-    const repliesChannel = supabase
-      .channel("email_replies_changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "email_replies" }, () => fetchData())
-      .subscribe();
-    
-    // Subscribe to sent_emails changes to track bounces and failures
-    const sentEmailsChannel = supabase
-      .channel("sent_emails_changes")
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "sent_emails" }, (payload) => {
-        console.log("Sent email status changed:", payload);
-        fetchData(); // Refresh all data when email status changes
-      })
-      .subscribe();
-    
-    return () => { 
-      repliesChannel.unsubscribe();
-      sentEmailsChannel.unsubscribe();
-    };
-  }, [fetchData, supabase]);
+    load();
+    // Load sender name from SMTP
+    sb.from("smtp_accounts").select("sender_name,email").eq("user_id", userId).eq("status","active").order("sent_today",{ascending:true}).limit(1).single()
+      .then(({data}) => { if (data) setSenderName(data.sender_name || data.email.split("@")[0].replace(/[._-]/g," ").replace(/\b\w/g,(c:string)=>c.toUpperCase())); });
+    const c1 = sb.channel("fu_r").on("postgres_changes",{event:"*",schema:"public",table:"email_replies"},load).subscribe();
+    const c2 = sb.channel("fu_s").on("postgres_changes",{event:"UPDATE",schema:"public",table:"sent_emails"},load).subscribe();
+    return () => { c1.unsubscribe(); c2.unsubscribe(); };
+  }, [load]);
 
-  const checkReplies = async () => {
-    setCheckingReplies(true);
-    try {
-      const res = await fetch("/api/inbox/check", { method: "POST" });
-      const data = await res.json();
-      if (data.success) {
-        if (data.totalNewReplies > 0) {
-          toast.success(`Found ${data.totalNewReplies} new reply${data.totalNewReplies > 1 ? "ies" : ""}!`);
-          fetchData();
-        } else {
-          toast.info("No new replies found");
-        }
-      } else {
-        toast.error(data.error || "Check failed");
+  // ── Build threads — only from leads that exist in CRM with a real email ───
+  const threads: LeadThread[] = (() => {
+    const map = new Map<string,LeadThread>();
+    const sorted = [...sentEmails].sort((a,b) => new Date(a.sent_at).getTime()-new Date(b.sent_at).getTime());
+    for (const e of sorted) {
+      // Only process emails that have a lead_id AND the lead exists in our map
+      if (!e.lead_id) continue;
+      const lead = leads.get(e.lead_id);
+      if (!lead) continue; // Skip if lead not in CRM
+      if (!lead.email) continue; // Skip if no email address
+
+      const key = e.lead_id;
+      if (!map.has(key)) {
+        map.set(key, {
+          leadId: e.lead_id,
+          leadEmail: lead.email,
+          companyName: lead.company_name || lead.email, // Always use CRM name
+          niche: lead.niche || null,
+          emails: [], replies: [],
+          hasReply: false,
+          latestStatus: e.status || "sent",
+          followupCount: 0,
+        });
       }
-    } catch (error) {
-      console.error("Error checking replies:", error);
-      toast.error("Could not reach inbox check endpoint");
-    } finally {
-      setCheckingReplies(false);
+      const t = map.get(key)!;
+      t.emails.push(e);
+      if (!["failed","bounced"].includes(e.status||"")) t.latestStatus = e.status || "sent";
     }
-  };
-
-  const deleteAllSent = async () => {
-    if (!confirm(`Delete all ${sentEmails.length} sent email records? This only removes the log — it does not unsend any emails.`)) return;
-    setDeletingAllSent(true);
-    try {
-      const { error } = await supabase
-        .from("sent_emails")
-        .delete()
-        .eq("user_id", userId);
-      if (error) throw error;
-      setSentEmails([]);
-      toast.success("All sent email records deleted");
-    } catch {
-      toast.error("Failed to delete sent emails");
-    } finally {
-      setDeletingAllSent(false);
+    for (const r of replies) {
+      const key = r.lead_id || "";
+      if (map.has(key)) { map.get(key)!.replies.push(r); map.get(key)!.hasReply = true; map.get(key)!.latestStatus = "replied"; }
     }
-  };
+    const all = Array.from(map.values());
+    for (const t of all) t.followupCount = t.emails.filter((e:any) => e.is_followup).length;
+    return all.filter(t=>t.emails.some(e=>!["failed","bounced"].includes(e.status||"")))
+      .sort((a,b)=>{if(a.hasReply&&!b.hasReply)return -1;if(!a.hasReply&&b.hasReply)return 1;return(b.emails[b.emails.length-1]?.sent_at||"").localeCompare(a.emails[a.emails.length-1]?.sent_at||"");});
+  })();
 
-  const generateAIResponse = async (reply: EmailReply) => {
-    setGenerating(reply.id);
-    setSelectedReply(reply);
+  const eligibleThreads = threads.filter(t=>!t.hasReply&&!["bounced","failed"].includes(t.latestStatus));
+  const availableNiches = Array.from(new Set(eligibleThreads.map(t=>t.niche||"").filter(Boolean))).sort();
+
+  // Get all distinct FU counts that exist so we can build filter tabs
+  const fuCounts = Array.from(new Set(eligibleThreads.map(t=>t.followupCount))).sort((a,b)=>a-b);
+
+  // Apply both niche filter AND FU number filter
+  const filteredEligible = eligibleThreads
+    .filter(t => bulkNiche === "all" || (t.niche||"") === bulkNiche)
+    .filter(t => bulkFUFilter === "all" || t.followupCount === bulkFUFilter);
+
+  const checkInbox = async () => {
+    setChecking(true);
     try {
-      const lead = leads.get(reply.lead_id);
-      if (!lead) throw new Error("Lead not found");
-      
-      // Call AI API to generate response
-      const res = await fetch("/api/ai/generate-reply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          replyBody: reply.body,
-          replySubject: reply.subject,
-          leadName: lead.company_name,
-          leadNiche: lead.niche,
-          fromEmail: reply.from_email,
-        }),
-      });
-      
+      const res = await fetch("/api/inbox/check",{method:"POST"});
       const data = await res.json();
-      if (!data.success) throw new Error(data.error || "Failed to generate AI response");
-      
-      const aiResponse: AIDraft = {
-        subject: data.subject || `Re: ${reply.subject}`,
-        body: data.body,
-      };
-      
-      const { error } = await supabase.from("ai_replies").insert({
-        user_id: userId, 
-        reply_id: reply.id, 
-        lead_id: reply.lead_id,
-        subject: aiResponse.subject, 
-        body: aiResponse.body,
-        tone: "professional", 
-        model_used: data.model || "ai", 
-        status: "draft",
-      }).select().single();
-      
-      if (error) throw error;
-      
-      await supabase.from("email_replies").update({ ai_response_generated: true }).eq("id", reply.id);
-      
-      setAIDraft(aiResponse);
-      setShowAIModal(true);
-      toast.success("AI response generated!");
-      fetchData();
-    } catch (err) {
-      console.error("Error generating AI response:", err);
-      toast.error(err instanceof Error ? err.message : "Failed to generate AI response");
-    } finally {
-      setGenerating(null);
-    }
+      if(data.success&&data.totalNewReplies>0){toast.success(`Found ${data.totalNewReplies} new reply!`);load();}
+      else toast.info("No new replies");
+    } catch { toast.error("Inbox check failed"); } finally { setChecking(false); }
   };
 
-  const sendAIReply = async (aiReplyId: string) => {
+  // ── Single follow-up actions ───────────────────────────────────────────────
+  const generateSingle = async () => {
+    if (!selectedThread) return;
+    setSingleGenerating(true); setSingleDraft(null);
     try {
-      const aiReply = aiReplies.find((r) => r.id === aiReplyId);
-      if (!aiReply) { toast.error("AI reply not found"); return; }
-      
-      // Get recipient email — from lead if linked, otherwise from the original reply
-      const lead = aiReply.lead_id ? leads.get(aiReply.lead_id) : undefined;
-      const originalReply = emailReplies.find((r) => r.id === aiReply.reply_id);
-      const recipientEmail = lead?.email || originalReply?.from_email;
-
-      if (!recipientEmail) { 
-        toast.error("Cannot find recipient email address"); 
-        return; 
-      }
-      
-      const res = await fetch("/api/send-email", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          leadId: aiReply.lead_id ?? undefined, 
-          to: recipientEmail, 
-          subject: aiReply.subject, 
-          body: aiReply.body 
-        }),
-      });
-      
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      
-      await supabase.from("ai_replies").update({ 
-        status: "sent", 
-        sent_at: new Date().toISOString() 
-      }).eq("id", aiReplyId);
-      
-      await supabase.from("email_replies").update({ 
-        ai_response_sent: true 
-      }).eq("id", aiReply.reply_id);
-      
-      toast.success("Reply sent!");
-      setShowAIModal(false);
-      setAIDraft(null);
-      fetchData();
-    } catch (err) {
-      console.error("Error sending AI reply:", err);
-      toast.error(err instanceof Error ? err.message : "Failed to send reply");
-    }
+      const latestEmail = selectedThread.emails.filter(e=>!["failed","bounced"].includes(e.status||"")).slice(-1)[0];
+      if (!latestEmail) throw new Error("No valid sent email found");
+      const r = await fetch("/api/followup/generate",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({sentEmailId:latestEmail.id,leadId:latestEmail.lead_id,followupNumber:selectedThread.followupCount+1,tone:singleTone,
+          overrideContext:{senderPhone:senderPhone||undefined,senderName:senderName||undefined}})});
+      const d = await r.json();
+      if(!d.success) throw new Error(d.error);
+      setSingleDraft({subject:d.subject,body:d.body,decisionReason:d.decisionReason,modelUsed:d.modelUsed});
+      setSingleSubj(d.subject); setSingleBody(d.body);
+      toast.success("Follow-up generated!");
+    } catch(e:any){toast.error(e.message||"Failed to generate");}
+    finally{setSingleGenerating(false);}
   };
 
-  const handleRejectAIReply = async (aiReplyId: string) => {
+  const sendSingle = async () => {
+    if(!selectedThread||!singleBody.trim()) return;
+    setSingleSending(true);
     try {
-      await supabase.from("ai_replies").update({ status: "rejected" }).eq("id", aiReplyId);
-      toast.success("Rejected");
-      fetchData();
-    } catch (error) {
-      console.error("Error rejecting AI reply:", error);
-      toast.error("Failed to reject reply");
+      const r = await fetch("/api/send-email",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({to:selectedThread.leadEmail,subject:singleSubj,body:singleBody,leadId:selectedThread.leadId,scheduleFollowups:false})});
+      const d = await r.json();
+      if(!d.success) throw new Error(d.error);
+      toast.success(`Follow-up sent to ${selectedThread.companyName}!`);
+      setSingleDraft(null); setSingleSubj(""); setSingleBody(""); setSelectedThread(null); load();
+    } catch(e:any){toast.error(e.message||"Send failed");}
+    finally{setSingleSending(false);}
+  };
+
+  // ── Bulk follow-up actions ────────────────────────────────────────────────
+  const toggleBulkSelect=(id:string)=>{const n=new Set(bulkSelected);n.has(id)?n.delete(id):n.add(id);setBulkSelected(n);};
+  const selectAll=()=>setBulkSelected(new Set(filteredEligible.map(t=>t.leadId)));
+  const clearAll=()=>setBulkSelected(new Set());
+  const setNicheFilter=(niche:string)=>{setBulkNiche(niche);setBulkSelected(new Set());setBulkFUFilter("all");};
+
+  const generateBulkPreviews = async () => {
+    const targets = filteredEligible.filter(t=>bulkSelected.has(t.leadId));
+    if(!targets.length) return;
+    setBulkGenerating(true); setBulkProgress({done:0,total:targets.length,errors:0});
+    const previews: typeof bulkPreviews = []; let errors=0;
+    for(let i=0;i<targets.length;i++){
+      const thread=targets[i];
+      const latestEmail=thread.emails.filter(e=>!["failed","bounced"].includes(e.status||"")).slice(-1)[0];
+      if(!latestEmail){previews.push({leadId:thread.leadId,companyName:thread.companyName,leadEmail:thread.leadEmail,subject:"",body:"",latestEmailId:"",campaignId:"",skipped:true,skipReason:"No valid sent email"});errors++;setBulkProgress({done:i+1,total:targets.length,errors});continue;}
+      try{
+        const genRes=await fetch("/api/followup/generate",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({sentEmailId:latestEmail.id,leadId:latestEmail.lead_id,followupNumber:thread.followupCount+1,tone:bulkTone,
+            overrideContext:{senderPhone:senderPhone||undefined,senderName:senderName||undefined}})});
+        const genData=await genRes.json();
+        if(!genData.success) throw new Error(genData.error);
+        previews.push({leadId:thread.leadId,companyName:thread.companyName,leadEmail:thread.leadEmail,subject:genData.subject,body:genData.body,latestEmailId:latestEmail.id,campaignId:(latestEmail as any).campaign_id||"",skipped:false});
+      }catch(e:any){errors++;previews.push({leadId:thread.leadId,companyName:thread.companyName,leadEmail:thread.leadEmail,subject:"",body:"",latestEmailId:latestEmail.id,campaignId:"",skipped:true,skipReason:e.message});}
+      setBulkProgress(prev=>({...prev,done:i+1,errors}));
     }
+    setBulkPreviews(previews); setBulkGenerating(false); setBulkReviewIndex(0); setBulkStep("review");
   };
 
-  const stats = {
-    totalSent: sentEmails.filter(e => ['sent','opened','clicked','replied','delivered'].includes(e.status ?? '')).length,
-    totalFailed: sentEmails.filter(e => ['failed','bounced'].includes(e.status ?? '')).length,
-    totalAll: sentEmails.length,
-    replied: emailReplies.length,
-    positiveReplies: emailReplies.filter((r) => r.is_positive).length,
-    aiGenerated: aiReplies.length,
-    aiSent: aiReplies.filter((r) => r.status === "sent").length,
+  const sendBulkPreviews = async () => {
+    const toSend=bulkPreviews.filter(p=>!p.skipped&&p.body.trim());
+    if(!toSend.length) return;
+    setBulkStep("sending"); setBulkSending(true); setBulkProgress({done:0,total:toSend.length,errors:0});
+    let errors=0;
+    for(let i=0;i<toSend.length;i++){
+      const p=toSend[i];
+      try{
+        const res=await fetch("/api/send-email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({to:p.leadEmail,subject:p.subject,body:p.body,leadId:p.leadId,campaignId:p.campaignId||undefined,scheduleFollowups:false})});
+        const d=await res.json(); if(!d.success) throw new Error(d.error);
+        setBulkProgress(prev=>({...prev,done:i+1}));
+      }catch(e:any){errors++;setBulkProgress(prev=>({...prev,done:i+1,errors:prev.errors+1}));}
+      if(i<toSend.length-1) await new Promise(r=>setTimeout(r,2000));
+    }
+    setBulkSending(false);
+    const sent=toSend.length-errors;
+    if(sent>0) toast.success(`Bulk follow-up: ${sent} sent${errors>0?`, ${errors} failed`:""}!`);
+    else toast.error("All follow-ups failed.");
+    setBulkSelected(new Set()); setBulkPreviews([]); setBulkStep("select"); load();
   };
 
-  const tabs = [
-    { id: "sent" as const, label: "Sent Emails", count: sentEmails.length },
-    { id: "replies" as const, label: "Replies", count: stats.replied },
-    { id: "ai-responses" as const, label: "AI Responses", count: stats.aiGenerated },
-    { id: "inbox" as const, label: "Inbox Setup", count: null },
-  ];
+  const updatePreview=(leadId:string,field:"subject"|"body",value:string)=>setBulkPreviews(prev=>prev.map(p=>p.leadId===leadId?{...p,[field]:value}:p));
+  const skipPreview=(leadId:string)=>setBulkPreviews(prev=>prev.map(p=>p.leadId===leadId?{...p,skipped:!p.skipped}:p));
 
-  if (loading) {
+  // ── Manual compose actions ────────────────────────────────────────────────
+  const sendManual = async () => {
+    if(!manualTo||!manualSubject||!manualBody.trim()) return;
+    setManualSending(true);
+    try{
+      const r=await fetch("/api/send-email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({to:manualTo,subject:manualSubject,body:manualBody,scheduleFollowups:false})});
+      const d=await r.json(); if(!d.success) throw new Error(d.error);
+      toast.success("Sent to "+manualTo+" via "+d.accountUsed);
+      setManualTo(""); setManualSubject(""); setManualBody("");
+    }catch(e:any){toast.error(e.message||"Send failed");}
+    finally{setManualSending(false);}
+  };
+
+  // ── Reply panel actions ───────────────────────────────────────────────────
+  const openRP=(reply:EmailReply)=>{setRpReply(reply);setRpDraft(null);setRpSubj(`Re: ${reply.subject}`);setRpBody("");setRpOpen(true);};
+  const closeRP=()=>{setRpOpen(false);setRpReply(null);setRpDraft(null);};
+  const genRP=async()=>{
+    if(!rpReply) return; setRpGen(true);
+    try{
+      const lead=rpReply.lead_id?leads.get(rpReply.lead_id):undefined;
+      const r=await fetch("/api/ai/generate-reply",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({replyBody:rpReply.body,replySubject:rpReply.subject,leadName:lead?.company_name,leadNiche:lead?.niche,fromEmail:rpReply.from_email})});
+      const d=await r.json(); if(!d.success) throw new Error(d.error);
+      setRpDraft({subject:d.subject||`Re: ${rpReply.subject}`,body:d.body});setRpSubj(d.subject||`Re: ${rpReply.subject}`);setRpBody(d.body);
+      toast.success("AI reply generated!");
+    }catch(e:any){toast.error(e.message||"Failed");}finally{setRpGen(false);}
+  };
+  const sendRP=async()=>{
+    if(!rpReply||!rpBody.trim()) return; setRpSend(true);
+    try{
+      const lead=rpReply.lead_id?leads.get(rpReply.lead_id):undefined;
+      const to=rpReply.from_email||lead?.email; if(!to) throw new Error("No recipient");
+      const r=await fetch("/api/send-email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({to,subject:rpSubj,body:rpBody,leadId:rpReply.lead_id,scheduleFollowups:false})});
+      const d=await r.json(); if(!d.success) throw new Error(d.error);
+      if(rpDraft){await sb.from("ai_replies").insert({user_id:userId,reply_id:rpReply.id,lead_id:rpReply.lead_id,subject:rpSubj,body:rpBody,status:"sent",sent_at:new Date().toISOString()});await sb.from("email_replies").update({ai_response_generated:true,ai_response_sent:true}).eq("id",rpReply.id);}
+      toast.success("Reply sent!"); closeRP(); load();
+    }catch(e:any){toast.error(e.message||"Failed");}finally{setRpSend(false);}
+  };
+
+  const unread = replies.filter(r=>!(r as any).ai_response_sent).length;
+  // Dropdown threads: only sent emails (not replied/bounced), sorted so 0-FU first
+  const eligibleSingle = threads.filter(t => !t.hasReply && !["bounced","failed"].includes(t.latestStatus));
+  const filteredThreads = (threadSearch
+    ? eligibleSingle.filter(t=>t.companyName.toLowerCase().includes(threadSearch.toLowerCase())||t.leadEmail.toLowerCase().includes(threadSearch.toLowerCase()))
+    : eligibleSingle
+  ).sort((a,b) => a.followupCount - b.followupCount); // 0 FU first, then 1 FU, then 2 FU...
+
+  if(loading) return <div className="flex items-center justify-center h-full bg-white"><Loader2 size={22} className="animate-spin text-blue-600"/></div>;
+
+  // ── Bulk review full-screen ───────────────────────────────────────────────
+  if (bulkStep === "review") {
+    const readyCount = bulkPreviews.filter(p=>!p.skipped&&p.body.trim()).length;
     return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 size={24} className="animate-spin text-blue-600" />
+      <div className="fixed inset-0 z-50 bg-white flex flex-col">
+        <div className="flex items-center justify-between px-8 py-4 border-b border-gray-200 shrink-0">
+          <div className="flex items-center gap-3">
+            <p className="text-sm font-bold text-gray-900">{readyCount} follow-up{readyCount!==1?"s":""} ready to send</p>
+            <span className="text-xs text-gray-500">Review and edit before sending</span>
+          </div>
+          <button onClick={()=>{setBulkStep("select");setBulkPreviews([]);setBulkReviewIndex(-1);}} className="text-xs text-gray-500 hover:text-gray-700 border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-50">← Back</button>
+        </div>
+        <div className="flex-1 overflow-hidden px-8 pt-4 pb-0 min-h-0 flex flex-col">
+          <div className="border border-gray-200 rounded-lg overflow-hidden flex-1 min-h-0">
+            <div className="overflow-auto h-full">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-gray-50 border-b border-gray-200 z-10">
+                  <tr>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 w-44">Company</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 w-52">Email</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600">Subject</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 w-24">Status</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 w-20">Edit</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {bulkPreviews.map((p,idx)=>(
+                    <tr key={p.leadId} className={`hover:bg-gray-50 ${p.skipped?"opacity-40":""}`}>
+                      <td className="px-4 py-3"><p className="text-xs font-semibold text-gray-900 truncate max-w-[160px]">{p.companyName}</p></td>
+                      <td className="px-4 py-3"><p className="text-xs text-gray-500 truncate max-w-[200px]">{p.leadEmail||"—"}</p></td>
+                      <td className="px-4 py-3"><p className="text-xs text-gray-800 truncate max-w-sm">{p.subject||"—"}</p></td>
+                      <td className="px-4 py-3">
+                        {p.skipped?<span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200 font-medium">Skipped</span>
+                          :<span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-medium">AI</span>}
+                      </td>
+                      <td className="px-4 py-3">
+                        <button onClick={()=>setBulkReviewIndex(idx)} className="p-1.5 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors"><Edit3 size={13}/></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="flex gap-3 py-4 shrink-0">
+            <button onClick={sendBulkPreviews} disabled={readyCount===0} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
+              <Send size={15}/>Send {readyCount} Follow-Up{readyCount!==1?"s":""}
+            </button>
+          </div>
+        </div>
+        {/* Edit modal */}
+        {bulkReviewIndex>=0&&bulkPreviews[bulkReviewIndex]&&(()=>{
+          const cur=bulkPreviews[bulkReviewIndex];
+          return(
+            <div className="fixed inset-0 z-[60] flex items-center justify-center" onClick={()=>setBulkReviewIndex(-1)}>
+              <div className="absolute inset-0 bg-black/30"/>
+              <div className="relative bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden mx-4" onClick={e=>e.stopPropagation()}>
+                <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+                  <div><p className="text-sm font-bold text-gray-900">{cur.companyName}</p><p className="text-xs text-gray-500">{cur.leadEmail}</p></div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={()=>skipPreview(cur.leadId)} className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${cur.skipped?"border-blue-200 bg-blue-50 text-blue-700":"border-gray-200 text-gray-500 hover:bg-gray-50"}`}>{cur.skipped?"Undo Skip":"Skip"}</button>
+                    <span className="text-xs text-gray-400 ml-1">{bulkReviewIndex+1}/{bulkPreviews.length}</span>
+                    <button onClick={()=>setBulkReviewIndex(i=>Math.max(0,i-1))} disabled={bulkReviewIndex===0} className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-30"><ChevronLeft size={15}/></button>
+                    <button onClick={()=>setBulkReviewIndex(i=>Math.min(bulkPreviews.length-1,i+1))} disabled={bulkReviewIndex===bulkPreviews.length-1} className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-30"><ChevronRight size={15}/></button>
+                    <button onClick={()=>setBulkReviewIndex(-1)} className="p-1.5 rounded hover:bg-gray-100 ml-1"><X size={16} className="text-gray-500"/></button>
+                  </div>
+                </div>
+                <div className={`flex-1 overflow-y-auto p-5 flex flex-col gap-4 ${cur.skipped?"opacity-40 pointer-events-none":""}`}>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1.5">Subject</label>
+                    <input value={cur.subject} onChange={e=>updatePreview(cur.leadId,"subject",e.target.value)} className="w-full px-3 py-2.5 rounded-lg text-sm font-semibold text-gray-900 border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"/>
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-xs font-semibold text-gray-700 mb-1.5">Body</label>
+                    {/* Email preview card */}
+                    <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100 bg-gray-50">
+                        <span className="flex items-center gap-1.5 text-xs font-medium text-gray-500"><Edit3 size={12}/> Edit below</span>
+                        <button
+                          onClick={()=>navigator.clipboard.writeText(cur.body)}
+                          title="Copy"
+                          className="p-1.5 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-700 transition-colors"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                        </button>
+                      </div>
+                      {/* Rendered paragraphs */}
+                      <div className="px-5 py-4 text-sm text-gray-800 leading-relaxed font-sans space-y-3 min-h-[100px]">
+                        {cur.body.split(/\n\n+/).map((para, pi) => (
+                          <p key={pi} className="whitespace-pre-wrap">{para}</p>
+                        ))}
+                      </div>
+                      {/* Editable textarea */}
+                      <div className="px-5 pb-4">
+                        <textarea
+                          value={cur.body}
+                          onChange={e=>updatePreview(cur.leadId,"body",e.target.value)}
+                          rows={10}
+                          className="w-full px-3 py-2.5 rounded-lg text-sm text-gray-900 border border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none resize-none font-sans leading-relaxed bg-gray-50"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="px-5 py-3 border-t border-gray-200 flex justify-end gap-2">
+                  <button onClick={()=>setBulkReviewIndex(-1)} className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50">Done</button>
+                  {bulkReviewIndex<bulkPreviews.length-1&&<button onClick={()=>setBulkReviewIndex(i=>i+1)} className="px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700">Next →</button>}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     );
   }
 
+  // ── Sending progress overlay ──────────────────────────────────────────────
+  if (bulkStep === "sending") return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/20 backdrop-blur-sm"/>
+      <div className="relative bg-white rounded-2xl shadow-2xl p-8 w-full max-w-sm mx-4 text-center">
+        <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3"><Loader2 size={22} className="animate-spin text-blue-600"/></div>
+        <h3 className="text-base font-bold text-gray-900">Sending follow-ups…</h3>
+        <p className="text-sm text-gray-500 mt-1">{bulkProgress.done} of {bulkProgress.total} sent</p>
+        <div className="w-full bg-gray-100 rounded-full h-3 mt-4 mb-2"><div className="bg-blue-600 h-3 rounded-full transition-all" style={{width:`${bulkProgress.total>0?(bulkProgress.done/bulkProgress.total)*100:0}%`}}/></div>
+        {bulkProgress.errors>0&&<p className="text-xs text-red-500">{bulkProgress.errors} failed</p>}
+        <p className="text-[11px] text-gray-400 mt-2">Sending with delay to avoid spam filters…</p>
+      </div>
+    </div>
+  );
+
+  // ── Shared signature box component ───────────────────────────────────────
+  const SignatureBox = () => (
+    <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 flex flex-col gap-3">
+      <p className="text-xs font-semibold text-blue-800 flex items-center gap-1.5">
+        <AtSign size={12}/> Your Signature — appears at the bottom of every email
+      </p>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Your Name</label>
+          <input value={senderName} onChange={e=>setSenderName(e.target.value)} placeholder="e.g. Rukundo Abkar"
+            className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"/>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Your Title</label>
+          <input value={senderTitle} onChange={e=>setSenderTitle(e.target.value)} placeholder="e.g. Executive Sales"
+            className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"/>
+        </div>
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">Your Phone <span className="text-gray-400 font-normal">(optional — shown in signature)</span></label>
+        <input value={senderPhone} onChange={e=>setSenderPhone(e.target.value)} placeholder="e.g. +256 700 123 456"
+          className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"/>
+      </div>
+      <p className="text-[10px] text-blue-600">
+        Signature preview: <span className="font-medium">{senderName||"Your Name"} · {senderTitle||"Executive Sales"}{senderPhone?` · ${senderPhone}`:""} · Pryro</span>
+      </p>
+    </div>
+  );
+
+  // ── Main render ───────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Header */}
-      <div className="border-b border-gray-200 px-8 py-6">
-        <div className="flex items-center justify-between mb-6">
+      <div className="border-b border-gray-200 px-8 py-5 shrink-0">
+        <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900">Follow-Up Manager</h1>
-            <p className="text-sm text-gray-500 mt-1">Track sent emails and manage replies</p>
+            <h1 className="text-xl font-bold text-gray-900">Follow-Up Manager</h1>
+            <p className="text-sm text-gray-500 mt-0.5">Send and manage follow-up emails to your leads</p>
           </div>
-          <button
-            onClick={checkReplies}
-            disabled={checkingReplies}
-            className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {checkingReplies ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-            Check Inbox
+          <button onClick={checkInbox} disabled={checking}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors">
+            {checking?<Loader2 size={14} className="animate-spin"/>:<RefreshCw size={14}/>}Check Inbox
+            {unread>0&&<span className="bg-white text-blue-600 text-[10px] font-bold px-1.5 rounded-full">{unread}</span>}
           </button>
         </div>
-        
-        {/* Stats */}
-        <div className="grid grid-cols-6 gap-3">
-          {[
-            { label: "Total", value: stats.totalAll, icon: Send, color: "text-gray-900" },
-            { label: "Sent", value: stats.totalSent, icon: Send, color: "text-blue-600" },
-            { label: "Failed", value: stats.totalFailed, icon: Mail, color: stats.totalFailed > 0 ? "text-red-500" : "text-gray-400" },
-            { label: "Replies", value: stats.replied, icon: MessageSquare, color: "text-gray-900" },
-            { label: "Positive", value: stats.positiveReplies, icon: ThumbsUp, color: "text-green-600" },
-            { label: "AI Generated", value: stats.aiGenerated, icon: Bot, color: "text-gray-900" },
-            { label: "AI Sent", value: stats.aiSent, icon: Sparkles, color: "text-gray-900" },
-          ].map((s) => {
-            const Icon = s.icon;
-            return (
-              <div key={s.label} className="bg-gray-50 rounded-lg px-4 py-3 border border-gray-100">
-                <div className="flex items-center gap-2 mb-1">
-                  <Icon size={14} className="text-gray-400" />
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{s.label}</p>
-                </div>
-                <p className={`text-2xl font-semibold ${s.color}`}>{s.value}</p>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="border-b border-gray-200 px-8">
-        <div className="flex gap-1">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-3 text-sm font-medium rounded-t-lg transition-colors ${
-                activeTab === tab.id 
-                  ? "bg-gray-100 text-gray-900" 
-                  : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
-              }`}
-            >
-              {tab.label}
-              {tab.count !== null && <span className="ml-2 text-xs text-gray-500">({tab.count})</span>}
-            </button>
-          ))}
+        {/* Mode tabs — identical style to Email Writer */}
+        <div className="flex gap-2">
+          <button onClick={()=>setMode("single")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${mode==="single"?"bg-blue-600 text-white":"bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+            <Sparkles size={14}/> Single Follow-Up
+          </button>
+          <button onClick={()=>setMode("bulk")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${mode==="bulk"?"bg-blue-600 text-white":"bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+            <Users size={14}/> Bulk Follow-Up
+          </button>
+          <button onClick={()=>setMode("manual")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${mode==="manual"?"bg-blue-600 text-white":"bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+            <PenLine size={14}/> Manual Compose
+          </button>
         </div>
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-8 py-6">
 
-        {/* Sent Emails */}
-        {activeTab === "sent" && (
-          <div className="space-y-2 max-w-5xl">
-            {sentEmails.length > 0 && (
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-xs text-gray-500">{sentEmails.length} record{sentEmails.length !== 1 ? "s" : ""}</p>
-                <button
-                  onClick={deleteAllSent}
-                  disabled={deletingAllSent}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-50 transition-colors"
-                >
-                  {deletingAllSent ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
-                  {deletingAllSent ? "Deleting…" : "Delete All"}
+        {/* ══ SINGLE FOLLOW-UP MODE ══ */}
+        {mode === "single" && (
+          <div className="max-w-2xl space-y-5">
+            <SignatureBox />
+
+            {/* Target Lead selector */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-2">Target Lead</label>
+              <div className="relative">
+                <button onClick={()=>setThreadDropOpen(o=>!o)}
+                  className="w-full flex items-center justify-between px-4 py-3 border border-gray-300 rounded-lg bg-white text-sm hover:border-blue-400 transition-colors">
+                  <span className={selectedThread?"text-gray-900":"text-gray-400"}>
+                    {selectedThread
+                      ? `${selectedThread.companyName} — ${selectedThread.followupCount===0?"No follow-up sent yet":`${selectedThread.followupCount} follow-up${selectedThread.followupCount>1?"s":""} sent`}`
+                      : "Select a lead to follow up with…"}
+                  </span>
+                  <ChevronDown size={16} className="text-gray-400 shrink-0"/>
                 </button>
+                {threadDropOpen && (
+                  <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+                    <div className="p-2 border-b border-gray-100">
+                      <input autoFocus value={threadSearch} onChange={e=>setThreadSearch(e.target.value)} placeholder="Search leads…"
+                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-blue-400"/>
+                    </div>
+                    <div className="overflow-y-auto max-h-72">
+                      {filteredThreads.length===0 ? (
+                        <p className="text-center py-6 text-sm text-gray-400">No leads found</p>
+                      ) : (() => {
+                        const noFU = filteredThreads.filter(t => t.followupCount === 0);
+                        const hasFU = filteredThreads.filter(t => t.followupCount > 0);
+                        return (
+                          <>
+                            {noFU.length > 0 && (
+                              <>
+                                <div className="px-4 py-1.5 bg-amber-50 border-b border-amber-100">
+                                  <p className="text-[10px] font-bold text-amber-700 uppercase tracking-widest">
+                                    ● Needs First Follow-Up ({noFU.length})
+                                  </p>
+                                </div>
+                                {noFU.map(t => {
+                                  const latest = t.emails[t.emails.length - 1];
+                                  return (
+                                    <button key={t.leadId} onClick={()=>{setSelectedThread(t);setThreadDropOpen(false);setThreadSearch("");setSingleDraft(null);setSingleSubj("");setSingleBody("");setExpandedBodyId(null);}}
+                                      className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-left border-b border-gray-50 transition-colors ${selectedThread?.leadId===t.leadId?"bg-blue-50":""}`}>
+                                      <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center shrink-0 text-[10px] font-bold text-amber-700">0</div>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-semibold text-gray-900 truncate">{t.companyName}</p>
+                                        <p className="text-[11px] text-gray-400 truncate">{t.leadEmail}{t.niche ? ` · ${t.niche}` : ""}</p>
+                                      </div>
+                                      <div className="shrink-0 flex items-center gap-1.5">
+                                        <StatusPill status={latest?.status} opened={!!latest?.opened_at} clicked={!!latest?.clicked_at}/>
+                                        <span className="text-[10px] text-amber-600 font-semibold">Send FU #1</span>
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </>
+                            )}
+                            {hasFU.length > 0 && (
+                              <>
+                                <div className="px-4 py-1.5 bg-blue-50 border-b border-blue-100">
+                                  <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest">
+                                    ● Has Follow-Ups — Continue Sequence ({hasFU.length})
+                                  </p>
+                                </div>
+                                {hasFU.map(t => {
+                                  const latest = t.emails[t.emails.length - 1];
+                                  return (
+                                    <button key={t.leadId} onClick={()=>{setSelectedThread(t);setThreadDropOpen(false);setThreadSearch("");setSingleDraft(null);setSingleSubj("");setSingleBody("");setExpandedBodyId(null);}}
+                                      className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-left border-b border-gray-50 transition-colors ${selectedThread?.leadId===t.leadId?"bg-blue-50":""}`}>
+                                      <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center shrink-0 text-[10px] font-bold text-blue-700">{t.followupCount}</div>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-semibold text-gray-900 truncate">{t.companyName}</p>
+                                        <p className="text-[11px] text-gray-400 truncate">{t.leadEmail}{t.niche ? ` · ${t.niche}` : ""}</p>
+                                      </div>
+                                      <div className="shrink-0 flex items-center gap-1.5">
+                                        <StatusPill status={latest?.status} opened={!!latest?.opened_at} clicked={!!latest?.clicked_at}/>
+                                        <span className="text-[10px] text-blue-600 font-semibold">Send FU #{t.followupCount + 1}</span>
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Thread history — shown when a lead is selected */}
+            {selectedThread && (
+              <div className="rounded-xl border border-gray-200 overflow-hidden">
+                <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                  <p className="text-xs font-semibold text-gray-700">
+                    Email Thread
+                    <span className="ml-2 text-blue-600 font-bold">
+                      {selectedThread.emails.filter(e=>!["failed","bounced"].includes(e.status||"")).length} sent
+                      {selectedThread.followupCount > 0 ? ` · ${selectedThread.followupCount} follow-up${selectedThread.followupCount>1?"s":""} sent` : " · No follow-ups yet"}
+                    </span>
+                  </p>
+                  <span className="text-[11px] font-semibold text-blue-600 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded-full">
+                    Next: Follow-Up #{selectedThread.followupCount + 1}
+                  </span>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {selectedThread.emails.filter(e=>!["failed","bounced"].includes(e.status||"")).map((email,idx)=>{
+                    const isFU=(email as any).is_followup;
+                    const fNum=(email as any).followup_number||idx;
+                    const isExp=expandedBodyId===email.id;
+                    return(
+                      <div key={email.id}>
+                        <button onClick={()=>setExpandedBodyId(isExp?null:email.id)}
+                          className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 transition-colors text-left">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${isFU?"bg-blue-100 text-blue-700":"bg-gray-200 text-gray-600"}`}>
+                              {isFU?`FU #${fNum}`:"Original"}
+                            </span>
+                            <span className="text-xs font-medium text-gray-800 truncate">{email.subject}</span>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0 ml-2">
+                            <span className="text-[10px] text-gray-400">{fdate(email.sent_at)}</span>
+                            {email.opened_at&&<Eye size={10} className="text-amber-500"/>}
+                            {email.clicked_at&&<MousePointer size={10} className="text-blue-500"/>}
+                            <ChevronDown size={12} className={`text-gray-400 transition-transform ${isExp?"rotate-180":""}`}/>
+                          </div>
+                        </button>
+                        {isExp&&(
+                          <div className="px-4 pb-3">
+                            <div className="bg-gray-50 rounded-lg border border-gray-200 p-3 max-h-40 overflow-y-auto">
+                              <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">
+                                {(email.body||"").replace(/<[^>]+>/g,"").replace(/&nbsp;/g," ").replace(/&amp;/g,"&").trim()||"(No body)"}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
-            {sentEmails.length === 0 ? (
-              <div className="text-center py-16">
-                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Mail size={28} className="text-gray-400" />
-                </div>
-                <p className="text-gray-900 font-medium text-base">No emails sent yet</p>
-                <p className="text-gray-500 text-sm mt-1">Sent emails will appear here</p>
-              </div>
-            ) : sentEmails.map((email) => {
-              const lead = email.lead_id ? leads.get(email.lead_id) : undefined;
-              const displayName = lead?.company_name || email.to_email || "Unknown recipient";
-              const displayEmail = lead?.email || email.to_email || "";
-              const hasReply = emailReplies.some((r) => r.sent_email_id === email.id);
-              const isFailed = email.status === 'failed' || email.status === 'bounced';
-              const isOpened = email.status === 'opened' || !!email.opened_at;
-              const isClicked = email.status === 'clicked' || !!email.clicked_at;
-              return (
-                <div key={email.id} className={`bg-white rounded-lg p-4 border transition-colors ${isFailed ? 'border-red-200 hover:border-red-300' : 'border-gray-200 hover:border-gray-300'}`}>
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2 flex-wrap">
-                        <h3 className="text-sm font-semibold text-gray-900">{displayName}</h3>
-                        {hasReply && (
-                          <span className="px-2 py-0.5 bg-green-50 text-green-700 text-xs font-medium rounded">Replied</span>
-                        )}
-                        <span className={`px-2 py-0.5 text-xs font-medium rounded ${
-                          email.status === "replied"  ? "bg-green-50 text-green-700" :
-                          isOpened                    ? "bg-yellow-50 text-yellow-700" :
-                          isClicked                   ? "bg-purple-50 text-purple-700" :
-                          isFailed                    ? "bg-red-50 text-red-700" :
-                          "bg-blue-50 text-blue-700"
-                        }`}>
-                          {isOpened && !['replied','clicked'].includes(email.status ?? '') ? 'OPENED' :
-                           isClicked ? 'CLICKED' :
-                           (email.status ?? 'sent').toUpperCase()}
-                        </span>
-                      </div>
-                      <p className="text-sm text-gray-700 mb-1 font-medium">{email.subject}</p>
-                      <p className="text-xs text-gray-500">
-                        {displayEmail
-                          ? <>{displayEmail} • </>
-                          : <span className="text-orange-500">⚠ No recipient email — lead had no email address • </span>
-                        }
-                        {new Date(email.sent_at).toLocaleDateString()} at {new Date(email.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                      {isFailed && email.bounce_reason && (
-                        <p className="text-xs text-red-600 mt-1">⚠ {email.bounce_reason}</p>
-                      )}
-                      {isOpened && email.opened_at && (
-                        <p className="text-xs text-yellow-600 mt-1">
-                          👁 Opened {new Date(email.opened_at).toLocaleDateString()} at {new Date(email.opened_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                      )}
-                      {isClicked && email.clicked_at && (
-                        <p className="text-xs text-purple-600 mt-1">
-                          🖱 Clicked {new Date(email.clicked_at).toLocaleDateString()} at {new Date(email.clicked_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
 
-        {/* Replies */}
-        {activeTab === "replies" && (
-          <div className="space-y-3 max-w-5xl">
-            {emailReplies.length === 0 ? (
-              <div className="text-center py-16">
-                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Inbox size={28} className="text-gray-400" />
-                </div>
-                <p className="text-gray-900 font-medium text-base">No replies yet</p>
-                <p className="text-gray-500 text-sm mt-1">Click "Check Inbox" to scan for new replies</p>
+            {/* Tone */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-2">Tone</label>
+              <div className="grid grid-cols-3 gap-3">
+                {TONES.map(t=>(
+                  <button key={t.value} onClick={()=>{setSingleTone(t.value);setSingleDraft(null);}}
+                    className={`p-3.5 rounded-xl border text-left transition-all ${singleTone===t.value?"border-blue-500 bg-blue-50 ring-2 ring-blue-200":"border-gray-200 bg-white hover:border-gray-300"}`}>
+                    <p className={`text-sm font-bold ${singleTone===t.value?"text-blue-700":"text-gray-900"}`}>{t.label}</p>
+                    <p className="text-[11px] text-gray-500 mt-1 leading-tight">{t.desc}</p>
+                  </button>
+                ))}
               </div>
-            ) : emailReplies.map((reply) => {
-              const lead = reply.lead_id ? leads.get(reply.lead_id) : undefined;
-              const hasAI = aiReplies.some((a) => a.reply_id === reply.id);
-              return (
-                <div key={reply.id} className="bg-white rounded-lg p-5 border border-gray-200 hover:border-gray-300 transition-colors">
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <h3 className="text-sm font-semibold text-gray-900">{lead?.company_name || "Unknown"}</h3>
-                        {reply.sentiment && (
-                          <span className={`px-2 py-0.5 text-xs font-medium rounded flex items-center gap-1 ${
-                            reply.is_positive ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
-                          }`}>
-                            {reply.is_positive ? <ThumbsUp size={12} /> : <ThumbsDown size={12} />}
-                            {reply.sentiment}
-                          </span>
-                        )}
-                        {hasAI && (
-                          <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-xs font-medium rounded flex items-center gap-1">
-                            <Bot size={12} />AI Ready
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-sm text-gray-700 font-medium mb-1">{reply.subject}</p>
-                      <p className="text-xs text-gray-500 mb-3">
-                        From {reply.from_email} • {new Date(reply.received_at).toLocaleDateString()} at {new Date(reply.received_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="bg-gray-50 rounded-lg p-4 mb-3 border border-gray-100">
-                    <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{reply.body}</p>
-                  </div>
-                  {!reply.ai_response_generated && (
+            </div>
+
+            {/* Pain point */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+                Specific Pain Point <span className="font-normal text-gray-400">(optional — makes follow-up sharper)</span>
+              </label>
+              <input value={singlePainPoint} onChange={e=>setSinglePainPoint(e.target.value)}
+                placeholder="e.g. losing leads due to slow follow-up, high customer churn, manual reporting…"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"/>
+            </div>
+
+            {/* Generate button */}
+            {!singleDraft && (
+              <button onClick={generateSingle} disabled={singleGenerating||!selectedThread}
+                className="w-full py-3.5 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors">
+                {singleGenerating?<><Loader2 size={16} className="animate-spin"/>Generating…</>:<><Sparkles size={16}/>Generate Follow-Up</>}
+              </button>
+            )}
+
+            {/* Generated draft */}
+            {singleDraft && (
+              <div className="space-y-4">
+                {singleDraft.decisionReason&&<p className="text-[11px] text-gray-500 italic bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">💡 {singleDraft.decisionReason}</p>}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">Subject</label>
+                  <input value={singleSubj} onChange={e=>setSingleSubj(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-lg text-sm font-semibold text-gray-900 border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"/>
+                </div>
+
+                {/* Email preview card — matches the screenshot format */}
+                <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                  {/* Card toolbar */}
+                  <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 bg-gray-50">
                     <button
-                      onClick={() => generateAIResponse(reply)}
-                      disabled={generating === reply.id}
-                      className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      onClick={()=>{
+                        const el=document.getElementById("single-body-edit");
+                        if(el) el.focus();
+                      }}
+                      className="flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-900"
                     >
-                      {generating === reply.id ? (
-                        <>
-                          <Loader2 size={16} className="animate-spin" />
-                          Generating...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles size={16} />
-                          Generate AI Response
-                        </>
-                      )}
+                      <Edit3 size={13}/> Edit
                     </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={()=>navigator.clipboard.writeText(singleBody)}
+                        title="Copy body"
+                        className="p-1.5 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-700 transition-colors"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                      </button>
+                      <button
+                        onClick={sendSingle}
+                        disabled={singleSending||!singleBody.trim()}
+                        title="Send"
+                        className="p-1.5 rounded hover:bg-blue-100 text-gray-400 hover:text-blue-600 disabled:opacity-40 transition-colors"
+                      >
+                        {singleSending
+                          ? <Loader2 size={15} className="animate-spin text-blue-600"/>
+                          : <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+                        }
+                      </button>
+                    </div>
+                  </div>
 
-        {/* AI Responses */}
-        {activeTab === "ai-responses" && (
-          <div className="space-y-3 max-w-5xl">
-            {aiReplies.length === 0 ? (
-              <div className="text-center py-16">
-                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Bot size={28} className="text-gray-400" />
+                  {/* Rendered email body — displayed as formatted text */}
+                  <div className="px-6 py-5 text-sm text-gray-800 leading-relaxed font-sans space-y-3 min-h-[160px]">
+                    {singleBody.split(/\n\n+/).map((para, i) => (
+                      <p key={i} className="whitespace-pre-wrap">{para}</p>
+                    ))}
+                  </div>
+
+                  {/* Hidden textarea for editing — revealed when Edit is clicked */}
+                  <div className="px-6 pb-5">
+                    <textarea
+                      id="single-body-edit"
+                      value={singleBody}
+                      onChange={e=>setSingleBody(e.target.value)}
+                      rows={10}
+                      className="w-full px-3 py-2.5 rounded-lg text-sm text-gray-900 border border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none resize-none font-sans leading-relaxed bg-gray-50"
+                      placeholder="Edit email body…"
+                    />
+                  </div>
                 </div>
-                <p className="text-gray-900 font-medium text-base">No AI responses yet</p>
-                <p className="text-gray-500 text-sm mt-1">Generate responses from the Replies tab</p>
+
+                <div className="flex gap-3">
+                  <button onClick={generateSingle} disabled={singleGenerating}
+                    className="flex items-center gap-1.5 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 disabled:opacity-50">
+                    {singleGenerating?<Loader2 size={13} className="animate-spin"/>:<RotateCcw size={13}/>}Regenerate
+                  </button>
+                  <button onClick={()=>{setSingleDraft(null);setSingleSubj("");setSingleBody("");}} className="px-4 py-2.5 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>
+                  <button onClick={sendSingle} disabled={singleSending||!singleBody.trim()}
+                    className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                    {singleSending?<><Loader2 size={15} className="animate-spin"/>Sending…</>:<><Send size={15}/>Send Follow-Up #{(selectedThread?.followupCount||0)+1} to {selectedThread?.companyName}</>}
+                  </button>
+                </div>
               </div>
-            ) : aiReplies.map((aiReply) => {
-              const lead = aiReply.lead_id ? leads.get(aiReply.lead_id) : undefined;
-              const original = emailReplies.find((r) => r.id === aiReply.reply_id);
-              return (
-                <div key={aiReply.id} className="bg-white rounded-lg p-5 border border-gray-200 hover:border-gray-300 transition-colors">
-                  <div className="flex items-center gap-2 mb-4">
-                    <h3 className="text-sm font-semibold text-gray-900">{lead?.company_name || "Unknown"}</h3>
-                    <span className={`px-2 py-0.5 text-xs font-medium rounded ${
-                      aiReply.status === "sent" ? "bg-green-50 text-green-700" :
-                      aiReply.status === "rejected" ? "bg-red-50 text-red-700" :
-                      "bg-gray-100 text-gray-700"
-                    }`}>
-                      {aiReply.status?.toUpperCase()}
-                    </span>
-                  </div>
-                  
-                  {original && (
-                    <div className="bg-gray-50 rounded-lg p-4 mb-3 border-l-2 border-gray-300">
-                      <p className="text-xs font-medium text-gray-500 mb-2">ORIGINAL REPLY</p>
-                      <p className="text-sm text-gray-700 line-clamp-3">{original.body}</p>
-                    </div>
-                  )}
-                  
-                  <div className="bg-blue-50 rounded-lg p-4 mb-3 border-l-2 border-blue-500">
-                    <div className="flex items-center gap-1 mb-2">
-                      <Bot size={14} className="text-blue-600" />
-                      <p className="text-xs font-medium text-blue-600">AI GENERATED RESPONSE</p>
-                    </div>
-                    <p className="text-sm font-medium text-gray-900 mb-2">{aiReply.subject}</p>
-                    <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{aiReply.body}</p>
-                  </div>
-                  
-                  <p className="text-xs text-gray-500 mb-3">
-                    Generated {new Date(aiReply.created_at).toLocaleDateString()} at {new Date(aiReply.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </p>
-                  
-                  {aiReply.status === "draft" && (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => sendAIReply(aiReply.id)}
-                        className="flex-1 py-2.5 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
-                      >
-                        <Send size={16} />
-                        Send Reply
-                      </button>
-                      <button
-                        onClick={() => handleRejectAIReply(aiReply.id)}
-                        className="px-5 py-2.5 bg-red-50 text-red-700 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors"
-                      >
-                        Reject
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            )}
           </div>
         )}
 
-        {/* Inbox Setup */}
-        {activeTab === "inbox" && (
-          <div className="max-w-3xl">
-            <InboxConfigPanel onRepliesFound={() => { fetchData(); }} />
+        {/* ══ BULK FOLLOW-UP MODE ══ */}
+        {mode === "bulk" && (
+          <div className="space-y-5">
+            <SignatureBox />
+
+            {/* Tone */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-2">Tone</label>
+              <div className="grid grid-cols-3 gap-3">
+                {TONES.map(t=>(
+                  <button key={t.value} onClick={()=>setBulkTone(t.value)}
+                    className={`p-3.5 rounded-xl border text-left transition-all ${bulkTone===t.value?"border-blue-500 bg-blue-50 ring-2 ring-blue-200":"border-gray-200 bg-white hover:border-gray-300"}`}>
+                    <p className={`text-sm font-bold ${bulkTone===t.value?"text-blue-700":"text-gray-900"}`}>{t.label}</p>
+                    <p className="text-[11px] text-gray-500 mt-1 leading-tight">{t.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Pain point */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">Pain Point <span className="font-normal text-gray-400">(optional)</span></label>
+              <input value={bulkPainPoint} onChange={e=>setBulkPainPoint(e.target.value)}
+                placeholder="e.g. slow follow-up, high churn…"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"/>
+            </div>
+
+            {/* Follow-Up Stage Filter */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-2">
+                Filter by Follow-Up Stage
+                <span className="font-normal text-gray-400 ml-2">— select which stage to send next</span>
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={()=>{setBulkFUFilter("all");setBulkSelected(new Set());}}
+                  className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${bulkFUFilter==="all"?"bg-gray-900 text-white border-gray-900":"bg-white text-gray-600 border-gray-200 hover:border-gray-400"}`}>
+                  All Stages
+                  <span className="ml-1.5 opacity-70">({eligibleThreads.length})</span>
+                </button>
+                {fuCounts.map(count => {
+                  const countInStage = eligibleThreads.filter(t => t.followupCount === count).length;
+                  const isActive = bulkFUFilter === count;
+                  return (
+                    <button key={count} onClick={()=>{setBulkFUFilter(count);setBulkSelected(new Set(eligibleThreads.filter(t=>t.followupCount===count).map(t=>t.leadId)));}}
+                      className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all flex items-center gap-2 ${isActive?"bg-blue-600 text-white border-blue-600":"bg-white text-gray-700 border-gray-200 hover:border-blue-400"}`}>
+                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black ${isActive?"bg-white text-blue-600":"bg-blue-100 text-blue-700"}`}>{count}</span>
+                      {count === 0 ? "No FU yet" : `FU #${count} sent`}
+                      <span className={`text-[10px] ${isActive?"opacity-80":"text-gray-400"}`}>→ Send FU #{count+1}</span>
+                      <span className={`ml-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-black ${isActive?"bg-blue-500 text-white":"bg-gray-100 text-gray-500"}`}>{countInStage}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {bulkFUFilter !== "all" && (
+                <p className="text-xs text-blue-600 mt-2 font-medium">
+                  Showing {filteredEligible.length} lead{filteredEligible.length!==1?"s":""} at stage {bulkFUFilter} — will send Follow-Up #{Number(bulkFUFilter)+1}
+                </p>
+              )}
+            </div>
+
+            {/* Niche Filter */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-2">
+                Filter by Niche <span className="font-normal text-gray-400">(click to auto-select all leads in that niche)</span>
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={()=>setNicheFilter("all")}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${bulkNiche==="all"?"bg-blue-600 text-white border-blue-600":"bg-white text-gray-600 border-gray-200 hover:border-gray-400"}`}>
+                  All ({eligibleThreads.length} unsent)
+                </button>
+                {availableNiches.map(niche=>{
+                  const count=eligibleThreads.filter(t=>(t.niche||"")===niche).length;
+                  return(
+                    <button key={niche} onClick={()=>{setNicheFilter(niche);setBulkSelected(new Set(eligibleThreads.filter(t=>(t.niche||"")===niche).map(t=>t.leadId)));}}
+                      className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${bulkNiche===niche?"bg-blue-600 text-white border-blue-600":"bg-white text-gray-600 border-gray-200 hover:border-gray-400"}`}>
+                      {niche} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Lead list */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-semibold text-gray-800">
+                  {bulkFUFilter === "all"
+                    ? bulkNiche === "all" ? "All Leads" : bulkNiche
+                    : bulkFUFilter === 0 ? "No follow-up yet" : `Sent FU #${bulkFUFilter} — needs FU #${Number(bulkFUFilter)+1}`
+                  }
+                  <span className="ml-2 text-gray-400 font-normal text-xs">({bulkSelected.size} selected / {filteredEligible.length} total)</span>
+                </p>
+                <div className="flex gap-3">
+                  <button onClick={selectAll} className="text-xs text-blue-600 hover:underline">Select all {filteredEligible.length}</button>
+                  <button onClick={clearAll} className="text-xs text-gray-500 hover:underline">Clear</button>
+                </div>
+              </div>
+              <div className="border border-gray-200 rounded-xl overflow-hidden">
+                <div className="overflow-y-auto max-h-72 divide-y divide-gray-100">
+                  {filteredEligible.length===0
+                    ? <p className="text-center py-8 text-sm text-gray-400">No eligible leads. All have replied or bounced.</p>
+                    : filteredEligible.map(thread=>{
+                      const latest=thread.emails.filter(e=>!["failed","bounced"].includes(e.status||"")).slice(-1)[0];
+                      const isSel=bulkSelected.has(thread.leadId);
+                      return(
+                        <button key={thread.leadId} onClick={()=>toggleBulkSelect(thread.leadId)}
+                          className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-left transition-colors border-b border-gray-50 last:border-0 ${isSel?"bg-blue-50/60":""}`}>
+                          {/* Checkbox */}
+                          <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${isSel?"border-blue-500 bg-blue-500":"border-gray-300"}`}>
+                            {isSel&&<CheckCircle size={10} className="text-white"/>}
+                          </div>
+
+                          {/* Follow-up count badge — the key visual */}
+                          <div className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center shrink-0 border ${
+                            thread.followupCount === 0
+                              ? "bg-amber-50 border-amber-200"
+                              : "bg-blue-50 border-blue-200"
+                          }`}>
+                            <span className={`text-lg font-black leading-none ${thread.followupCount===0?"text-amber-600":"text-blue-700"}`}>
+                              {thread.followupCount}
+                            </span>
+                            <span className={`text-[8px] font-bold uppercase leading-none ${thread.followupCount===0?"text-amber-500":"text-blue-500"}`}>
+                              {thread.followupCount===0?"FU":"sent"}
+                            </span>
+                          </div>
+
+                          {/* Lead info */}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-900 truncate">{thread.companyName}</p>
+                            <p className="text-[11px] text-gray-400 truncate">{thread.leadEmail}{thread.niche?` · ${thread.niche}`:""}</p>
+                          </div>
+
+                          {/* Next action label */}
+                          <div className="shrink-0 flex flex-col items-end gap-1">
+                            <StatusPill status={latest?.status} opened={!!latest?.opened_at} clicked={!!latest?.clicked_at}/>
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                              thread.followupCount===0
+                                ? "bg-amber-100 text-amber-700"
+                                : "bg-blue-100 text-blue-700"
+                            }`}>
+                              → FU #{thread.followupCount+1}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
+
+            {/* Generate & review button */}
+            <button onClick={generateBulkPreviews} disabled={bulkGenerating||bulkSelected.size===0}
+              className="w-full py-3.5 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors">
+              {bulkGenerating
+                ?<><Loader2 size={16} className="animate-spin"/>Generating {bulkProgress.done}/{bulkProgress.total}…</>
+                :<><Sparkles size={16}/>Generate &amp; Review {bulkSelected.size} Follow-Up{bulkSelected.size!==1?"s":""}</>}
+            </button>
+          </div>
+        )}
+
+        {/* ══ MANUAL COMPOSE MODE ══ */}
+        {mode === "manual" && (
+          <div className="max-w-2xl space-y-5">
+            <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+              <p className="text-sm font-semibold text-blue-800">Manual Compose</p>
+              <p className="text-xs text-blue-600 mt-0.5">Write and send to any email address — no lead required. Sent via your configured SMTP account.</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">To</label>
+              <div className="relative">
+                <AtSign size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/>
+                <input value={manualTo} onChange={e=>setManualTo(e.target.value)} placeholder="recipient@company.com" type="email"
+                  className="w-full pl-9 pr-4 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"/>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">Subject</label>
+              <input value={manualSubject} onChange={e=>setManualSubject(e.target.value)} placeholder="e.g. Quick question about your business"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"/>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1.5">Body</label>
+              <textarea value={manualBody} onChange={e=>setManualBody(e.target.value)} rows={14}
+                placeholder={"Hi,\n\nWrite your email here...\n\nBest,\nYour Name"}
+                className="w-full px-4 py-3 rounded-lg text-sm text-gray-900 border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 bg-white outline-none resize-none placeholder:text-gray-400 leading-relaxed font-sans"/>
+            </div>
+
+            <button onClick={sendManual} disabled={manualSending||!manualTo||!manualSubject||!manualBody.trim()}
+              className="w-full py-3.5 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors">
+              {manualSending?<><Loader2 size={16} className="animate-spin"/>Sending…</>:<><Send size={16}/>Send Email</>}
+            </button>
           </div>
         )}
       </div>
 
-      {/* AI Modal */}
-      {showAIModal && aiDraft && selectedReply && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setShowAIModal(false)}>
-          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
-          <div className="relative bg-white rounded-xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
-                  <Sparkles className="text-blue-600" size={16} />
+      {/* ══ REPLY SLIDE PANEL ══ */}
+      {rpOpen&&rpReply&&(
+        <div className="fixed inset-0 z-50 flex" onClick={closeRP}>
+          <div className="absolute inset-0 bg-black/20 backdrop-blur-sm"/>
+          <div className="relative ml-auto w-full max-w-xl h-full bg-white shadow-2xl flex flex-col border-l border-gray-200" onClick={e=>e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 shrink-0">
+              <div>
+                <h2 className="text-base font-bold text-gray-900">Reply to Lead</h2>
+                <p className="text-xs text-gray-500 mt-0.5">{leads.get(rpReply.lead_id||"")?.company_name||rpReply.from_email}</p>
+              </div>
+              <button onClick={closeRP} className="p-1.5 hover:bg-gray-100 rounded-lg"><X size={17} className="text-gray-500"/></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
+              <div className="rounded-lg border border-green-200 bg-green-50 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <p className="text-[10px] font-bold text-green-700 uppercase tracking-widest">Their Reply</p>
+                  {rpReply.is_positive&&<ThumbsUp size={11} className="text-green-600"/>}
+                  {rpReply.sentiment&&<span className="text-[11px] text-gray-500 capitalize">{rpReply.sentiment}</span>}
                 </div>
-                <h2 className="text-lg font-semibold text-gray-900">AI Generated Response</h2>
+                <p className="text-sm font-semibold text-gray-900 mb-0.5">{rpReply.subject}</p>
+                <p className="text-xs text-gray-400 mb-2">From {rpReply.from_email} · {fdate(rpReply.received_at)}</p>
+                <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{rpReply.body}</p>
               </div>
-              <button 
-                onClick={() => setShowAIModal(false)}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            
-            <div className="bg-gray-50 rounded-lg p-4 mb-4 border-l-2 border-gray-300">
-              <p className="text-xs font-medium text-gray-500 mb-2">ORIGINAL REPLY</p>
-              <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{selectedReply.body}</p>
-            </div>
-            
-            <div className="bg-blue-50 rounded-lg p-4 mb-5 border-l-2 border-blue-500">
-              <div className="flex items-center gap-1 mb-3">
-                <Bot size={14} className="text-blue-600" />
-                <p className="text-xs font-medium text-blue-600">AI RESPONSE</p>
+              <div className="flex gap-2">
+                <button onClick={genRP} disabled={rpGen}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                  {rpGen?<><Loader2 size={13} className="animate-spin"/>Generating…</>:<><Sparkles size={13}/>Generate AI Reply</>}
+                </button>
+                {rpBody&&<button onClick={genRP} disabled={rpGen} className="flex items-center gap-1 px-3 py-2 border border-gray-200 text-gray-600 text-sm rounded-lg hover:bg-gray-50"><RotateCcw size={12}/>Regenerate</button>}
               </div>
-              <p className="text-sm font-medium text-gray-900 mb-3">{aiDraft.subject}</p>
-              <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{aiDraft.body}</p>
-            </div>
-            
-            <div className="flex gap-3">
-              <button 
-                onClick={() => setShowAIModal(false)} 
-                className="flex-1 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
-              >
-                Close
-              </button>
-              <button
-                onClick={() => {
-                  const latest = aiReplies.find((r) => r.reply_id === selectedReply.id && r.status === "draft");
-                  if (latest) sendAIReply(latest.id);
-                }}
-                className="flex-1 py-2.5 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
-              >
-                <Send size={16} />
-                Send Reply
-              </button>
+              <div>
+                <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1 block">Subject</label>
+                <input value={rpSubj} onChange={e=>setRpSubj(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1 block">Your Reply {rpDraft&&<span className="text-gray-400 normal-case font-normal ml-1">AI generated — edit freely</span>}</label>
+                <textarea value={rpBody} onChange={e=>setRpBody(e.target.value)} rows={9} placeholder="Type your reply, or click Generate AI Reply above…"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"/>
+              </div>
+              <div className="flex gap-3">
+                <button onClick={closeRP} className="flex-1 py-2.5 border border-gray-200 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50">Cancel</button>
+                <button onClick={sendRP} disabled={rpSend||!rpBody.trim()}
+                  className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                  {rpSend?<><Loader2 size={15} className="animate-spin"/>Sending…</>:<><Send size={15}/>Send Reply</>}
+                </button>
+              </div>
             </div>
           </div>
         </div>
