@@ -154,16 +154,18 @@ function decodeHtmlEntities(text: string): string {
     .trim();
 }
 
-// ── Subject line patterns — pain point first + [Company Name] ────────────────
+// ── Subject line patterns ─────────────────────────────────────────────────────
 const SUBJECT_PATTERNS = [
-  (company: string, sector: string) => `Still managing ${sector} manually? ${company}`,
-  (company: string, _sector: string) => `Too many tools slowing your team? ${company}`,
-  (company: string, sector: string) => `Is ${sector} admin costing you hours? ${company}`,
-  (company: string, _sector: string) => `Fragmented tools slowing growth? ${company}`,
-  (company: string, sector: string) => `${sector} teams losing hours to this, ${company}`,
-  (company: string, _sector: string) => `What if one system replaced them all? ${company}`,
-  (company: string, sector: string) => `The ${sector} back-office problem, ${company}`,
-  (company: string, _sector: string) => `Could your team save 10 hours a week? ${company}`,
+  (_company: string, _sector: string) => `Strategic Partnership Opportunity`,
+  (_company: string, _sector: string) => `Exploring Strategic Collaboration`,
+  (_company: string, _sector: string) => `Potential Partnership Discussion`,
+  (_company: string, _sector: string) => `Business Collaboration Opportunity`,
+  (_company: string, _sector: string) => `Referral Partnership Opportunity`,
+  (_company: string, _sector: string) => `Pryro Partnership Proposal`,
+  (_company: string, _sector: string) => `ERP Partnership Opportunity`,
+  (_company: string, _sector: string) => `Mutual Growth Opportunity`,
+  (_company: string, _sector: string) => `Joint Business Opportunity`,
+  (_company: string, _sector: string) => `Technology Partnership Opportunity`,
 ];
 
 // ── Direct email builder — no AI, no hallucination ───────────────────────────
