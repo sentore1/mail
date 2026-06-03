@@ -53,6 +53,7 @@ export interface FollowUpContext {
   yourCompany: string;
   yourService: string;
   senderName?: string;
+  contactName?: string; // scraped owner/contact name or derived from email
 
   // Override
   style?: FollowUpStyle;
@@ -154,54 +155,26 @@ export function decideFollowUpStyle(ctx: FollowUpContext): {
 // ── Style-specific prompt builders ────────────────────────────────────────────
 
 function buildSystemPrompt(style: FollowUpStyle, senderName: string, tone?: FollowUpTone): string {
-  // ── Tone-level instructions (override style writing rules) ────────────────
-  const toneInstructions: Record<NonNullable<FollowUpTone>, string> = {
-    Direct: `WRITING RULES — DIRECT TONE:
-- Hard direct. No politeness. No "I hope", no "reaching out", no fluff.
-- Structure: Problem → Solution → CTA
-- Start body immediately with the problem, no greeting
-- 60-90 words max
-- CTA must be a single direct question
-- NEVER use: "I wanted to", "just following up", "hope this finds you"`,
+  return `You are ${senderName}, a sales executive at Pryro writing a short follow-up email.
 
-    Aggressive: `WRITING RULES — AGGRESSIVE TONE:
-- High urgency. Create FOMO. Push hard for action.
-- Open with a cost/loss the lead is experiencing right now
-- Quantify the pain (time wasted, revenue lost, competitors winning)
-- Show the solution creates urgency: "others in ${"{niche}"} are already using this"
-- CTA: binary choice — "Are you open to a 20-minute call this week — yes or no?"
-- 100-140 words. No soft language.`,
+FORMAT RULES (follow exactly):
+1. Greeting: "Hi [Recipient Name]," or "Dear Sir/Madam,"
+2. Exactly 3 short sentences — no more
+3. End with: "Best regards,"
+4. Then the signature block:
+   [Sender Name]
+   Pryro
 
-    Surgical: `WRITING RULES — SURGICAL TONE:
-- Hyper-personalized. Prove you did your homework on this specific company.
-- Reference something real: their industry, location, company context, or what was in the original email
-- Connect their specific situation to the exact problem you solve
-- Sound like a consultant, not a salesperson
-- CTA feels like a natural next step, not a pitch
-- 120-160 words. Every sentence is specific to THEM.`,
-  };
+CONTENT RULES:
+- Sentence 1: One-line reference to the previous email (e.g. "I wanted to follow up on the ERP proposal we shared on [date].")
+- Sentence 2: One short, open question (e.g. "Have you had a chance to review it, and is there any feedback or information you need from our side to move forward?")
+- Sentence 3: One polite fallback (e.g. "If your priorities have changed or the project timeline has shifted, a quick update would be greatly appreciated.")
+- Close: "Thank you, and I look forward to hearing from you."
+- DO NOT explain the product, DO NOT describe the demo, DO NOT add paragraphs
+- DO NOT use: "I hope this email finds you well", "just checking in", "circling back", "touching base"
+- DO NOT include HTML, bullet points, or markdown
 
-  const toneBlock = tone ? `\n\n${toneInstructions[tone]}` : "";
-
-  const base = `You are ${senderName}, a professional sales rep writing a cold email follow-up.
-Write ONLY the email body (no subject line in the body). Keep it under 120 words.
-Sound completely human — no corporate buzzwords, no hollow phrases.
-Do NOT start with "I hope this email finds you well" or similar.
-NEVER use: leverage, synergy, innovative, game-changing, cutting-edge, reach out, circle back.
-Format: plain text, short paragraphs, conversational.${toneBlock}`;
-
-  const styleInstructions: Record<FollowUpStyle, string> = {
-    professional: `${base}\nTone: Professional, confident, direct. Reference the previous email naturally.`,
-    casual: `${base}\nTone: Conversational and relaxed. Like bumping into someone at a coffee shop. Short sentences.`,
-    friendly: `${base}\nTone: Warm and approachable. Show genuine interest in their business.`,
-    soft_reminder: `${base}\nTone: Very gentle bump. Acknowledge they're busy. No pressure at all.`,
-    value_focused: `${base}\nTone: Lead with a specific value or benefit. One concrete result or metric if possible.`,
-    direct: `${base}\nTone: Crisp and direct. Get straight to the point. Clear CTA for a call or demo.`,
-    final_bump: `${base}\nTone: Low pressure final nudge. Make it easy to say yes OR no. No guilt.`,
-    breakup: `${base}\nTone: Polite "breakup" email. Let them know this is your last email. This paradoxically gets the highest reply rates. Keep it short — 2-3 sentences max.`,
-  };
-
-  return styleInstructions[style] ?? styleInstructions.professional;
+IMPORTANT: Write ONLY the email body starting from the greeting. Keep it under 6 lines total.`;
 }
 
 // ── Strip HTML to clean plain text for AI ─────────────────────────────────
@@ -221,46 +194,84 @@ function stripHtmlForAI(html: string): string {
     .trim();
 }
 
+// ── Extract a usable first name from email local part ─────────────────────────
+// e.g. john.smith@acme.com → "John"
+// e.g. info@acme.com → null (generic address)
+function nameFromEmail(email: string | null | undefined): string | null {
+  if (!email) return null;
+  const local = email.split("@")[0]?.toLowerCase() ?? "";
+
+  // Generic role addresses — no name can be inferred
+  const genericLocals = [
+    "info","contact","hello","support","help","admin","sales","office",
+    "enquiry","enquiries","bookings","team","business","mail","noreply",
+    "no-reply","reception","accounts","billing","hr","marketing","service",
+  ];
+  if (genericLocals.some(g => local === g || local.startsWith(g + ".") || local.startsWith(g + "_"))) {
+    return null;
+  }
+
+  // Named patterns: john.smith, john_smith, johnsmith, j.smith
+  const dotParts = local.split(/[._\-]/);
+  if (dotParts.length >= 2) {
+    const first = dotParts[0];
+    // Must look like a real name part (letters only, 2+ chars)
+    if (first && /^[a-z]{2,}$/.test(first)) {
+      return first.charAt(0).toUpperCase() + first.slice(1);
+    }
+  }
+
+  // Single word that looks like a name (not a role word)
+  if (/^[a-z]{3,}$/.test(local)) {
+    return local.charAt(0).toUpperCase() + local.slice(1);
+  }
+
+  return null;
+}
+
+// ── Resolve the best greeting name ───────────────────────────────────────────
+// Priority: explicit contactName > email-derived name > "Sir/Madam"
+function resolveGreeting(contactName?: string | null, leadEmail?: string | null): string {
+  if (contactName && contactName.trim().length > 1) {
+    // Use just the first word/name (avoid "John Smith CEO" etc.)
+    const firstName = contactName.trim().split(/\s+/)[0];
+    return `Hi ${firstName},`;
+  }
+  const derived = nameFromEmail(leadEmail);
+  if (derived) return `Hi ${derived},`;
+  return "Dear Sir/Madam,";
+}
+
 function buildUserPrompt(ctx: FollowUpContext, style: FollowUpStyle): string {
-  // Clean HTML from all email bodies before passing to AI
-  const cleanOriginalBody = stripHtmlForAI(ctx.originalBody).slice(0, 500);
+  const senderName = ctx.senderName || ctx.yourCompany || "Sales Team";
+  const sentDate = new Date(ctx.sentAt).toLocaleDateString("en-US", { month: "long", day: "numeric" });
+  const greeting = resolveGreeting(ctx.contactName, (ctx as any).leadEmail);
 
-  const prevHistory = ctx.previousFollowups?.length
-    ? ctx.previousFollowups
-        .map((f, i) => `Follow-up #${i + 1} (${new Date(f.sentAt).toLocaleDateString()}):\nSubject: ${f.subject}\n${stripHtmlForAI(f.body).slice(0, 200)}`)
-        .join("\n\n")
-    : "None";
-
-  const engagementNotes = [
-    ctx.openCount > 0 ? `Opened ${ctx.openCount} time(s)` : "Never opened",
-    ctx.clickCount > 0 ? `Clicked ${ctx.clickCount} link(s)` : "No clicks",
-  ].join(", ");
+  const signatureBlock = `Best regards,\n\n${senderName}\nPryro`;
 
   return `COMPANY: ${ctx.companyName}
-INDUSTRY: ${ctx.niche ?? "Unknown"}
-LOCATION: ${ctx.location ?? "Unknown"}
-ENGAGEMENT: ${engagementNotes}
+ORIGINAL EMAIL DATE: ${sentDate}
+SUBJECT OF ORIGINAL EMAIL: ${ctx.originalSubject}
+FOLLOW-UP NUMBER: ${ctx.followupNumber}
+GREETING TO USE: ${greeting}
 
-ORIGINAL EMAIL (sent ${new Date(ctx.sentAt).toLocaleDateString()}):
-Subject: ${ctx.originalSubject}
-${cleanOriginalBody}
+TASK:
+Write a very short follow-up email (3 sentences max in the body, excluding greeting and sign-off).
 
-PREVIOUS FOLLOW-UPS:
-${prevHistory}
+Structure:
+1. Greeting: ${greeting}
+2. Sentence 1: Reference the previous email/proposal sent on ${sentDate}.
+3. Sentence 2: One open question — have they reviewed it, any feedback or info needed to move forward?
+4. Sentence 3: Acknowledge priorities may have changed, quick update appreciated.
+5. "Thank you, and I look forward to hearing from you."
+6. Close with exactly:
 
-YOUR COMPANY: ${ctx.yourCompany}
-YOUR SERVICE: ${ctx.yourService}
+${signatureBlock}
 
-TASK: Write Follow-Up #${ctx.followupNumber} that:
-- Clearly references the original email above (mention the subject or a key point)
-- Does NOT repeat exactly what was said before
-- Feels like a natural continuation of the conversation
-- Uses the "${style}" style
-
-Output EXACTLY this format (no extra text):
-SUBJECT: [subject line here]
+Output EXACTLY this format:
+SUBJECT: [subject line]
 BODY:
-[email body here]`;
+[full email starting from the greeting]`;
 }
 
 // ── Template-based fallback (no AI required) ─────────────────────────────────
@@ -269,105 +280,97 @@ export function buildTemplateFollowUp(
   ctx: FollowUpContext,
   style: FollowUpStyle
 ): { subject: string; body: string } {
-  const { companyName, followupNumber, originalSubject, yourCompany, yourService, senderName } = ctx;
-  const sender = senderName ?? yourCompany;
+  const { companyName, followupNumber, originalSubject, yourCompany, senderName } = ctx;
+  const sender = senderName || yourCompany || "Sales Team";
+  const sig = `Best regards,\n\n${sender}\nPryro`;
 
-  const templates: Record<FollowUpStyle, { subject: string; body: string }> = {
-    professional: {
+  const sentDate = ctx.sentAt
+    ? new Date(ctx.sentAt).toLocaleDateString("en-US", { month: "long", day: "numeric" })
+    : "recently";
+
+  const greeting = resolveGreeting(ctx.contactName, (ctx as any).leadEmail);
+
+  // FU #1
+  if (followupNumber === 1) {
+    return {
       subject: `Re: ${originalSubject}`,
-      body: `Hi ${companyName} team,
+      body: `${greeting}
 
-Following up on my previous email about ${yourService}.
+I wanted to follow up on the ERP proposal we shared on ${sentDate}.
 
-I genuinely think there's a fit here given what ${companyName} does. Would a 10-minute call this week make sense to explore?
+Have you had a chance to review it, and is there any feedback or information you need from our side to move forward?
 
-Best,
-${sender}`,
-    },
+If your priorities have changed or the project timeline has shifted, a quick update would be greatly appreciated.
 
-    casual: {
+Thank you, and I look forward to hearing from you.
+
+${sig}`,
+    };
+  }
+
+  // FU #2
+  if (followupNumber === 2) {
+    return {
       subject: `Re: ${originalSubject}`,
-      body: `Hey,
+      body: `${greeting}
 
-Just bumping this up in case it got buried.
+Just following up on the proposal I sent on ${sentDate} — I want to make sure it didn't get buried.
 
-Still think ${yourService} could be useful for ${companyName} — happy to keep it to 10 minutes if you're curious.
+Is there anything holding you back or any questions I can answer to help move things forward?
 
-${sender}`,
-    },
+Even a quick "not the right time" works — happy to follow up later.
 
-    friendly: {
-      subject: `Quick follow-up — ${companyName}`,
-      body: `Hi there,
+Thank you, and I look forward to hearing from you.
 
-I wanted to check back after my last email. Running a business in ${ctx.niche ?? "your space"} comes with a lot of moving parts, and that's exactly what ${yourService} is built to simplify.
+${sig}`,
+    };
+  }
 
-Would you be open to a quick chat to see if it's relevant?
-
-${sender}`,
-    },
-
-    soft_reminder: {
+  // FU #3
+  if (followupNumber === 3) {
+    return {
       subject: `Re: ${originalSubject}`,
-      body: `Hi ${companyName},
+      body: `${greeting}
 
-I know things get busy — just a gentle follow-up in case my earlier note slipped through.
+I am following up one more time on our Pryro proposal from ${sentDate}.
 
-No pressure at all. If the timing isn't right, totally understand.
+Have your priorities shifted, or is there a better time to revisit this?
 
-${sender}`,
-    },
+A quick reply either way would mean a lot — thank you for your time.
 
-    value_focused: {
-      subject: `What ${companyName} could save with ${yourCompany}`,
-      body: `Hi ${companyName} team,
+${sig}`,
+    };
+  }
 
-Businesses in ${ctx.niche ?? "your sector"} typically save 8-12 hours per week after switching to ${yourService} — mostly from eliminating manual reconciliation and duplicate data entry.
+  // FU #4 — final bump
+  if (followupNumber === 4) {
+    return {
+      subject: `Re: ${originalSubject}`,
+      body: `${greeting}
 
-Worth a 10-minute look to see if the numbers make sense for ${companyName}?
+This will be my last follow-up on the proposal I sent on ${sentDate}.
 
-${sender}`,
-    },
+If the timing isn't right, no worries at all — feel free to reach out whenever it makes sense.
 
-    direct: {
-      subject: `${companyName} — quick question`,
-      body: `Hi,
+Thank you for your time, and I wish ${companyName} continued success.
 
-One question: is ${ctx.niche ?? "operational efficiency"} on your radar right now?
+${sig}`,
+    };
+  }
 
-If yes, I'd love to show you exactly how ${yourService} works in 10 minutes. If not, no worries — just let me know.
+  // FU #5+ — breakup
+  return {
+    subject: `Closing the loop — ${companyName}`,
+    body: `${greeting}
 
-${sender}`,
-    },
+I'll stop following up on our Pryro proposal — I don't want to crowd your inbox.
 
-    final_bump: {
-      subject: `Last one — ${companyName}`,
-      body: `Hi ${companyName},
+If your needs change down the road, feel free to reach out. We'd be happy to help.
 
-One last note before I stop following up.
+Wishing ${companyName} all the best.
 
-If ${yourService} isn't relevant right now, no problem at all. But if there's even a small chance it could help, I'd love a quick 10-minute call.
-
-Either way — no hard feelings.
-
-${sender}`,
-    },
-
-    breakup: {
-      subject: `Closing the loop — ${companyName}`,
-      body: `Hi,
-
-I've sent a few emails and haven't heard back, so I'll assume the timing isn't right.
-
-I'll stop reaching out — but if things change down the road, feel free to reply to this thread.
-
-Wishing ${companyName} the best.
-
-${sender}`,
-    },
+${sig}`,
   };
-
-  return templates[style] ?? templates.professional;
 }
 
 // ── AI generation via configured provider ─────────────────────────────────────

@@ -103,9 +103,9 @@ export async function POST(req: NextRequest) {
       niche: lead?.niche,
       location: lead?.location,
       companyContext: lead?.company_context,
-      originalSubject: sentEmail.subject || "",
-      originalBody: sentEmail.body || "",
-      sentAt: sentEmail.sent_at,
+      originalSubject: (originalEmail as any).subject || sentEmail.subject || "",
+      originalBody: (originalEmail as any).body || sentEmail.body || "",
+      sentAt: (originalEmail as any).sent_at || sentEmail.sent_at,
       followupNumber,
       previousFollowups: prevFollowups || [],
       openCount: lead?.open_count || 0,
@@ -113,10 +113,14 @@ export async function POST(req: NextRequest) {
       hasReplied: false,
       yourCompany: settings?.your_company || overrideContext?.yourCompany || "",
       yourService: settings?.your_service || overrideContext?.yourService || "",
+      senderName: overrideContext?.senderName || settings?.your_company || "",
+      contactName: lead?.contact_name || lead?.owner_name || undefined,
       style: style as FollowUpStyle | undefined,
       tone: tone as FollowUpTone | undefined,
       ...overrideContext,
-    };
+      // Ensure leadEmail is always available for name derivation
+      leadEmail: lead?.email || undefined,
+    } as FollowUpContext & { leadEmail?: string };
 
     // Get decision engine recommendation
     const decision = decideFollowUpStyle(context);

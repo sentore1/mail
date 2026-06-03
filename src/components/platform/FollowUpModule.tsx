@@ -423,8 +423,41 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
                   </div>
                 </div>
                 <div className={`flex-1 overflow-y-auto p-5 flex flex-col gap-4 ${cur.skipped?"opacity-40 pointer-events-none":""}`}>
-                  <div><label className="block text-xs font-semibold text-gray-700 mb-1.5">Subject</label><input value={cur.subject} onChange={e=>updatePreview(cur.leadId,"subject",e.target.value)} className="w-full px-3 py-2.5 rounded-lg text-sm font-semibold text-gray-900 border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"/></div>
-                  <div className="flex-1"><label className="block text-xs font-semibold text-gray-700 mb-1.5">Body</label><textarea value={cur.body} onChange={e=>updatePreview(cur.leadId,"body",e.target.value)} rows={16} className="w-full px-3 py-2.5 rounded-lg text-sm text-gray-900 border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none resize-none font-sans leading-relaxed"/></div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1.5">Subject</label>
+                    <input value={cur.subject} onChange={e=>updatePreview(cur.leadId,"subject",e.target.value)} className="w-full px-3 py-2.5 rounded-lg text-sm font-semibold text-gray-900 border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"/>
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-xs font-semibold text-gray-700 mb-1.5">Body</label>
+                    {/* Email preview card */}
+                    <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100 bg-gray-50">
+                        <span className="flex items-center gap-1.5 text-xs font-medium text-gray-500"><Edit3 size={12}/> Edit below</span>
+                        <button
+                          onClick={()=>navigator.clipboard.writeText(cur.body)}
+                          title="Copy"
+                          className="p-1.5 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-700 transition-colors"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                        </button>
+                      </div>
+                      {/* Rendered paragraphs */}
+                      <div className="px-5 py-4 text-sm text-gray-800 leading-relaxed font-sans space-y-3 min-h-[100px]">
+                        {cur.body.split(/\n\n+/).map((para, pi) => (
+                          <p key={pi} className="whitespace-pre-wrap">{para}</p>
+                        ))}
+                      </div>
+                      {/* Editable textarea */}
+                      <div className="px-5 pb-4">
+                        <textarea
+                          value={cur.body}
+                          onChange={e=>updatePreview(cur.leadId,"body",e.target.value)}
+                          rows={10}
+                          className="w-full px-3 py-2.5 rounded-lg text-sm text-gray-900 border border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none resize-none font-sans leading-relaxed bg-gray-50"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
                 <div className="px-5 py-3 border-t border-gray-200 flex justify-end gap-2">
                   <button onClick={()=>setBulkReviewIndex(-1)} className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50">Done</button>
@@ -699,28 +732,74 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
             {/* Generated draft */}
             {singleDraft && (
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-bold text-gray-900">Generated Follow-Up</p>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{singleDraft.modelUsed==="template"?"Template":"AI"}</span>
-                    <button onClick={generateSingle} disabled={singleGenerating} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800">
-                      {singleGenerating?<Loader2 size={11} className="animate-spin"/>:<RotateCcw size={11}/>}Regenerate
-                    </button>
-                  </div>
-                </div>
                 {singleDraft.decisionReason&&<p className="text-[11px] text-gray-500 italic bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">💡 {singleDraft.decisionReason}</p>}
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1.5">Subject</label>
                   <input value={singleSubj} onChange={e=>setSingleSubj(e.target.value)}
                     className="w-full px-3 py-2.5 rounded-lg text-sm font-semibold text-gray-900 border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"/>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">Body</label>
-                  <textarea value={singleBody} onChange={e=>setSingleBody(e.target.value)} rows={12}
-                    className="w-full px-3 py-2.5 rounded-lg text-sm text-gray-900 border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none resize-none font-sans leading-relaxed"/>
+
+                {/* Email preview card — matches the screenshot format */}
+                <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                  {/* Card toolbar */}
+                  <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+                    <button
+                      onClick={()=>{
+                        const el=document.getElementById("single-body-edit");
+                        if(el) el.focus();
+                      }}
+                      className="flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-900"
+                    >
+                      <Edit3 size={13}/> Edit
+                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={()=>navigator.clipboard.writeText(singleBody)}
+                        title="Copy body"
+                        className="p-1.5 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-700 transition-colors"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                      </button>
+                      <button
+                        onClick={sendSingle}
+                        disabled={singleSending||!singleBody.trim()}
+                        title="Send"
+                        className="p-1.5 rounded hover:bg-blue-100 text-gray-400 hover:text-blue-600 disabled:opacity-40 transition-colors"
+                      >
+                        {singleSending
+                          ? <Loader2 size={15} className="animate-spin text-blue-600"/>
+                          : <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+                        }
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Rendered email body — displayed as formatted text */}
+                  <div className="px-6 py-5 text-sm text-gray-800 leading-relaxed font-sans space-y-3 min-h-[160px]">
+                    {singleBody.split(/\n\n+/).map((para, i) => (
+                      <p key={i} className="whitespace-pre-wrap">{para}</p>
+                    ))}
+                  </div>
+
+                  {/* Hidden textarea for editing — revealed when Edit is clicked */}
+                  <div className="px-6 pb-5">
+                    <textarea
+                      id="single-body-edit"
+                      value={singleBody}
+                      onChange={e=>setSingleBody(e.target.value)}
+                      rows={10}
+                      className="w-full px-3 py-2.5 rounded-lg text-sm text-gray-900 border border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none resize-none font-sans leading-relaxed bg-gray-50"
+                      placeholder="Edit email body…"
+                    />
+                  </div>
                 </div>
+
                 <div className="flex gap-3">
-                  <button onClick={()=>{setSingleDraft(null);setSingleSubj("");setSingleBody("");}} className="px-5 py-2.5 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>
+                  <button onClick={generateSingle} disabled={singleGenerating}
+                    className="flex items-center gap-1.5 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 disabled:opacity-50">
+                    {singleGenerating?<Loader2 size={13} className="animate-spin"/>:<RotateCcw size={13}/>}Regenerate
+                  </button>
+                  <button onClick={()=>{setSingleDraft(null);setSingleSubj("");setSingleBody("");}} className="px-4 py-2.5 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>
                   <button onClick={sendSingle} disabled={singleSending||!singleBody.trim()}
                     className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
                     {singleSending?<><Loader2 size={15} className="animate-spin"/>Sending…</>:<><Send size={15}/>Send Follow-Up #{(selectedThread?.followupCount||0)+1} to {selectedThread?.companyName}</>}
