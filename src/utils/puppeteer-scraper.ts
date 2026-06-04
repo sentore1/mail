@@ -1353,6 +1353,62 @@ async function scrapeGoogleCustomSearch(
   return leads;
 }
 
+// ─── Niche relevance check ────────────────────────────────────────────────────
+// Rejects leads whose company name or context clearly contradicts the target niche.
+// E.g. a job platform scraped when searching for "agriculture" should be rejected.
+
+const NICHE_BLOCKLIST: Record<string, RegExp[]> = {
+  // Social networks, job boards, and tech platforms are never a target niche
+  _global: [
+    /\b(social network|job (platform|board|site)|hiring platform|recruitment (site|platform)|freelance (platform|marketplace))\b/i,
+    /\b(bebee|linkedin|indeed|glassdoor|monster|ziprecruiter|upwork|fiverr|freelancer\.com)\b/i,
+    /\b(news(paper)?|media outlet|press release|broadcasting|tv (channel|station)|radio station)\b/i,
+    /\b(government (agency|portal)|ministry of|municipal|city council|county government)\b/i,
+    /\b(political party|campaign (office|headquarters)|embassy|consulate)\b/i,
+  ],
+};
+
+// Keywords that MUST appear (at least one) in company name or context for the niche to be relevant
+const NICHE_REQUIRED: Record<string, RegExp[]> = {
+  agriculture: [/\b(farm|agri|crop|seed|soil|harvest|grain|livestock|dairy|poultry|horticulture|irrigation|fertilizer|tractor|plantation|orchard)\b/i],
+  pharmacy: [/\b(pharma|drug|medicine|medication|dispensary|chemist|prescription|health (store|shop))\b/i],
+  clinic: [/\b(clinic|hospital|medical|health|dental|doctor|physician|therapy|care (center|centre))\b/i],
+  restaurant: [/\b(restaurant|food|cafe|cafeteria|bistro|eatery|dining|bakery|catering|takeaway|takeout)\b/i],
+  hotel: [/\b(hotel|lodge|motel|inn|resort|hospitality|accommodation|bed and breakfast|b&b)\b/i],
+  retail: [/\b(shop|store|retail|supermarket|market|boutique|outlet|merchandise|commerce)\b/i],
+  school: [/\b(school|college|university|academy|institute|education|training|learning|tutoring|nursery)\b/i],
+  logistics: [/\b(logistics|transport|freight|shipping|courier|delivery|fleet|trucking|cargo|warehouse|supply chain)\b/i],
+  construction: [/\b(construct|build|contractor|architect|engineering|infrastructure|renovation|real estate develop)\b/i],
+  manufacturing: [/\b(manufactur|factory|production|processing|assembly|packaging|industrial)\b/i],
+};
+
+function isNicheRelevant(lead: ScrapedLead, targetNiche: string): boolean {
+  const text = `${lead.company_name} ${lead.company_context ?? ''}`.toLowerCase();
+  const nLower = targetNiche.toLowerCase();
+
+  // Always reject globally blocked patterns (job boards, social networks, etc.)
+  const globalBlockers = NICHE_BLOCKLIST['_global'] ?? [];
+  if (globalBlockers.some(re => re.test(text))) {
+    console.log(`    ⛔ Rejected (not a business): ${lead.company_name}`);
+    return false;
+  }
+
+  // Check if a specific required-keyword list exists for this niche
+  for (const [nicheKey, patterns] of Object.entries(NICHE_REQUIRED)) {
+    if (nLower.includes(nicheKey)) {
+      // Niche is known — require at least one keyword to match
+      if (!patterns.some(re => re.test(text))) {
+        console.log(`    ⛔ Rejected (wrong niche): ${lead.company_name} — doesn't match "${targetNiche}"`);
+        return false;
+      }
+      return true;
+    }
+  }
+
+  // Unknown niche — allow through (can't validate without rules)
+  return true;
+}
+
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
 export async function scrapeWithoutAPI(
@@ -1371,6 +1427,8 @@ export async function scrapeWithoutAPI(
   const seen = new Set<string>();
 
   const emit = (lead: ScrapedLead) => {
+    // Reject leads that don't match the target niche
+    if (!isNicheRelevant(lead, niche)) return;
     all.push(lead);
     onLead?.(lead);
   };

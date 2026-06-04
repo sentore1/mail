@@ -59,6 +59,13 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
   const [senderTitle, setSenderTitle] = useState("Executive Sales");
   const [senderPhone, setSenderPhone] = useState("");
 
+  // Persist sender profile to localStorage so it survives page reloads
+  const STORAGE_KEY = `pryro_fu_sender_${userId}`;
+
+  const saveSenderProfile = (name: string, title: string, phone: string) => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ name, title, phone })); } catch {}
+  };
+
   // ── Single follow-up ──────────────────────────────────────────────────────
   const [singleTone, setSingleTone] = useState("Direct");
   const [singlePainPoint, setSinglePainPoint] = useState("");
@@ -156,7 +163,18 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
 
   useEffect(() => {
     load();
-    // Load sender name from SMTP
+    // Load sender profile — localStorage first, then fall back to SMTP account name
+    try {
+      const stored = localStorage.getItem(`pryro_fu_sender_${userId}`);
+      if (stored) {
+        const { name, title, phone } = JSON.parse(stored);
+        if (name) setSenderName(name);
+        if (title) setSenderTitle(title);
+        if (phone) setSenderPhone(phone);
+        return; // don't overwrite with SMTP name if we have saved profile
+      }
+    } catch {}
+    // No saved profile — load name from active SMTP account
     sb.from("smtp_accounts").select("sender_name,email").eq("user_id", userId).eq("status","active").order("sent_today",{ascending:true}).limit(1).single()
       .then(({data}) => { if (data) setSenderName(data.sender_name || data.email.split("@")[0].replace(/[._-]/g," ").replace(/\b\w/g,(c:string)=>c.toUpperCase())); });
     const c1 = sb.channel("fu_r").on("postgres_changes",{event:"*",schema:"public",table:"email_replies"},load).subscribe();
@@ -514,18 +532,18 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">Your Name</label>
-          <input value={senderName} onChange={e=>setSenderName(e.target.value)} placeholder="e.g. Rukundo Abkar"
+          <input value={senderName} onChange={e=>{setSenderName(e.target.value);saveSenderProfile(e.target.value,senderTitle,senderPhone);}} placeholder="e.g. Rukundo Abkar"
             className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"/>
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">Your Title</label>
-          <input value={senderTitle} onChange={e=>setSenderTitle(e.target.value)} placeholder="e.g. Executive Sales"
+          <input value={senderTitle} onChange={e=>{setSenderTitle(e.target.value);saveSenderProfile(senderName,e.target.value,senderPhone);}} placeholder="e.g. Executive Sales"
             className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"/>
         </div>
       </div>
       <div>
         <label className="block text-xs font-medium text-gray-700 mb-1">Your Phone <span className="text-gray-400 font-normal">(optional — shown in signature)</span></label>
-        <input value={senderPhone} onChange={e=>setSenderPhone(e.target.value)} placeholder="e.g. +256 700 123 456"
+        <input value={senderPhone} onChange={e=>{setSenderPhone(e.target.value);saveSenderProfile(senderName,senderTitle,e.target.value);}} placeholder="e.g. +256 700 123 456"
           className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"/>
       </div>
       <p className="text-[10px] text-blue-600">
