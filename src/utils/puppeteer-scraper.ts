@@ -92,13 +92,27 @@ function isBlockedDomain(url: string): boolean {
   try {
     const parsed = new URL(url);
     const h = parsed.hostname.replace(/^www\./, '');
+
     // Check blocked domain list
     if (BLOCKED_DOMAINS.has(h) || Array.from(BLOCKED_DOMAINS).some(d => h.endsWith('.' + d))) return true;
-    // Block news article URLs by path pattern
+
+    // Block known news / media / broadcast sites by domain suffix patterns
+    const NEWS_DOMAINS = /\b(cbc|bbc|cnn|fox|nbc|abc|msnbc|npr|reuters|apnews|aljazeera|sky|itv|channel4|sbs|abc\.net|smh|theage|herald|guardian|telegraph|times|post|tribune|gazette|chronicle|daily|mirror|express|independent|newsweek|usatoday|huffpost|buzzfeed|vox|vice|salon|slate|politico|theatlantic|newyorker|wired|techcrunch|theverge|arstechnica|engadget|gizmodo|mashable|businessinsider|forbes|fortune|bloomberg|cnbc|marketwatch|wsj|ft|economist)\.(com|ca|co\.uk|au|nz|org|net|ie|in)$/i;
+    if (NEWS_DOMAINS.test(h)) return true;
+
+    // Block news/media article URLs by path pattern
     const path = parsed.pathname.toLowerCase();
-    if (/\/(news|article|articles|blog|blogs|story|stories|post|posts|press|media|editorial)\//i.test(path)) return true;
+    if (/\/(news|article|articles|blog|blogs|story|stories|post|posts|press|media|editorial|video|videos|player|watch|podcast|podcasts|radio|tv|programme|show|episode|clip)\//i.test(path)) return true;
+
+    // Block video/player pages specifically
+    if (/\/(player|play|watch|video)\//i.test(path)) return true;
+
+    // Block Wikipedia, dictionaries, encyclopedias
+    if (/^(en|fr|de|es|pt|ar|zh)\.(wikipedia|wiktionary|wikivoyage|wikibooks)\./i.test(h)) return true;
+
     // Block URLs with very long paths (usually articles, not business homepages)
     if (path.split('/').length > 6) return true;
+
     return false;
   } catch { return false; }
 }
@@ -223,8 +237,11 @@ async function deepScrapeWebsite(
 
   // Extract real business name from HTML
   const extractBusinessName = (html: string, pageUrl: string): string | null => {
-    // URL junk guard — rejects "https", "http", "www" etc.
-    const isUrlJunk = (s: string) => /^(https?|ftp|www)$/i.test(s.trim()) || /^https?:\/\//i.test(s.trim());
+    // URL junk guard — rejects "https", "http", "www", bare domains etc.
+    const isUrlJunk = (s: string) =>
+      /^(https?|ftp|www)$/i.test(s.trim()) ||
+      /^https?:\/\//i.test(s.trim()) ||
+      /^[a-z0-9]([a-z0-9\-]*\.)+[a-z]{2,6}$/i.test(s.trim()); // bare domain like "old.smapse.com"
 
     // Try og:site_name meta tag (most reliable)
     const ogSite = html.match(/<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']{3,80})["']/i)?.[1]
@@ -1030,6 +1047,9 @@ function extractCompanyName(title: string, url: string): string | null {
 
   // Reject if the raw title looks like a full URL or starts with a protocol
   if (/^https?:\/\//i.test(title.trim())) return null;
+
+  // Reject if title looks like a bare domain name (e.g. "old.smapse.com", "example.co.ke")
+  if (/^[a-z0-9]([a-z0-9\-]*\.)+[a-z]{2,6}$/i.test(title.trim())) return null;
 
   // Clean the title — remove everything after a separator
   let name = title

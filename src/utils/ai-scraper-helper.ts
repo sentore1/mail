@@ -194,7 +194,10 @@ Rules:
       .slice(0, 6);
     return queries;
   } catch (err) {
-    console.warn('[AI Scraper] generateSearchQueries failed:', err);
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes('rate limit')) {
+      console.warn('[AI Scraper] generateSearchQueries failed:', msg);
+    }
     return [];
   }
 }
@@ -246,7 +249,11 @@ Find the contact email address that is explicitly written in the content above. 
 
     return email;
   } catch (err) {
-    console.warn('[AI Scraper] extractEmailFromContent failed:', err);
+    // Only log non-rate-limit errors with full detail
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes('rate limit')) {
+      console.warn('[AI Scraper] extractEmailFromContent failed:', msg);
+    }
     return null;
   }
 }
