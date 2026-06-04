@@ -92,13 +92,27 @@ function isBlockedDomain(url: string): boolean {
   try {
     const parsed = new URL(url);
     const h = parsed.hostname.replace(/^www\./, '');
+
     // Check blocked domain list
     if (BLOCKED_DOMAINS.has(h) || Array.from(BLOCKED_DOMAINS).some(d => h.endsWith('.' + d))) return true;
-    // Block news article URLs by path pattern
+
+    // Block known news / media / broadcast sites by domain suffix patterns
+    const NEWS_DOMAINS = /\b(cbc|bbc|cnn|fox|nbc|abc|msnbc|npr|reuters|apnews|aljazeera|sky|itv|channel4|sbs|abc\.net|smh|theage|herald|guardian|telegraph|times|post|tribune|gazette|chronicle|daily|mirror|express|independent|newsweek|usatoday|huffpost|buzzfeed|vox|vice|salon|slate|politico|theatlantic|newyorker|wired|techcrunch|theverge|arstechnica|engadget|gizmodo|mashable|businessinsider|forbes|fortune|bloomberg|cnbc|marketwatch|wsj|ft|economist)\.(com|ca|co\.uk|au|nz|org|net|ie|in)$/i;
+    if (NEWS_DOMAINS.test(h)) return true;
+
+    // Block news/media article URLs by path pattern
     const path = parsed.pathname.toLowerCase();
-    if (/\/(news|article|articles|blog|blogs|story|stories|post|posts|press|media|editorial)\//i.test(path)) return true;
+    if (/\/(news|article|articles|blog|blogs|story|stories|post|posts|press|media|editorial|video|videos|player|watch|podcast|podcasts|radio|tv|programme|show|episode|clip)\//i.test(path)) return true;
+
+    // Block video/player pages specifically
+    if (/\/(player|play|watch|video)\//i.test(path)) return true;
+
+    // Block Wikipedia, dictionaries, encyclopedias
+    if (/^(en|fr|de|es|pt|ar|zh)\.(wikipedia|wiktionary|wikivoyage|wikibooks)\./i.test(h)) return true;
+
     // Block URLs with very long paths (usually articles, not business homepages)
     if (path.split('/').length > 6) return true;
+
     return false;
   } catch { return false; }
 }
@@ -223,8 +237,11 @@ async function deepScrapeWebsite(
 
   // Extract real business name from HTML
   const extractBusinessName = (html: string, pageUrl: string): string | null => {
-    // URL junk guard — rejects "https", "http", "www" etc.
-    const isUrlJunk = (s: string) => /^(https?|ftp|www)$/i.test(s.trim()) || /^https?:\/\//i.test(s.trim());
+    // URL junk guard — rejects "https", "http", "www", bare domains etc.
+    const isUrlJunk = (s: string) =>
+      /^(https?|ftp|www)$/i.test(s.trim()) ||
+      /^https?:\/\//i.test(s.trim()) ||
+      /^[a-z0-9]([a-z0-9\-]*\.)+[a-z]{2,6}$/i.test(s.trim()); // bare domain like "old.smapse.com"
 
     // Try og:site_name meta tag (most reliable)
     const ogSite = html.match(/<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']{3,80})["']/i)?.[1]
@@ -361,6 +378,8 @@ async function deepScrapeWebsite(
 
   // AI prediction — last resort when no email found anywhere on the site.
   // Marked isReal: false so the UI shows it as AI-predicted, not scraped.
+  // We REJECT generic role addresses (info@, contact@, hello@, etc.) since
+  // the AI always guesses these and they rarely reach a real person.
   if (aiProvider) {
     const predicted = await aiPredict(companyName, domain, niche, location, aiProvider);
     if (predicted) {
@@ -369,12 +388,30 @@ async function deepScrapeWebsite(
       const isBlockedPrediction = Array.from(BLOCKED_DOMAINS).some(d =>
         predictedDomain === d || predictedDomain.endsWith('.' + d)
       );
-      if (!isBlockedPrediction) {
-        console.log(`    🤖 AI predicted: ${predicted}`);
-        return { email: predicted, isReal: false };
-      } else {
+      if (isBlockedPrediction) {
         console.log(`    ⏭  AI predicted blocked domain: ${predicted} — skipped`);
+        return null;
       }
+
+      // Reject generic role-based prefixes — AI always guesses these, they're useless
+      const localPart = predicted.split('@')[0]?.toLowerCase() ?? '';
+      const GENERIC_PREFIXES = [
+        'info', 'contact', 'hello', 'support', 'admin', 'office',
+        'enquiry', 'enquiries', 'team', 'mail', 'help', 'sales',
+        'reception', 'general', 'webmaster', 'noreply', 'no-reply',
+        'feedback', 'service', 'hr', 'marketing', 'accounts', 'billing',
+        'press', 'media', 'pr', 'news', 'shop', 'store',
+      ];
+      const isGeneric = GENERIC_PREFIXES.some(p =>
+        localPart === p || localPart.startsWith(p + '.') || localPart.startsWith(p + '_')
+      );
+      if (isGeneric) {
+        console.log(`    ⏭  AI predicted generic email: ${predicted} — skipped (not saved)`);
+        return null;
+      }
+
+      console.log(`    🤖 AI predicted specific email: ${predicted}`);
+      return { email: predicted, isReal: false };
     }
   }
 
@@ -1011,6 +1048,9 @@ function extractCompanyName(title: string, url: string): string | null {
   // Reject if the raw title looks like a full URL or starts with a protocol
   if (/^https?:\/\//i.test(title.trim())) return null;
 
+  // Reject if title looks like a bare domain name (e.g. "old.smapse.com", "example.co.ke")
+  if (/^[a-z0-9]([a-z0-9\-]*\.)+[a-z]{2,6}$/i.test(title.trim())) return null;
+
   // Clean the title — remove everything after a separator
   let name = title
     .replace(/\s*[-|–|·|—|»|›|:]\s*.+$/, '')
@@ -1333,6 +1373,62 @@ async function scrapeGoogleCustomSearch(
   return leads;
 }
 
+// ─── Niche relevance check ────────────────────────────────────────────────────
+// Rejects leads whose company name or context clearly contradicts the target niche.
+// E.g. a job platform scraped when searching for "agriculture" should be rejected.
+
+const NICHE_BLOCKLIST: Record<string, RegExp[]> = {
+  // Social networks, job boards, and tech platforms are never a target niche
+  _global: [
+    /\b(social network|job (platform|board|site)|hiring platform|recruitment (site|platform)|freelance (platform|marketplace))\b/i,
+    /\b(bebee|linkedin|indeed|glassdoor|monster|ziprecruiter|upwork|fiverr|freelancer\.com)\b/i,
+    /\b(news(paper)?|media outlet|press release|broadcasting|tv (channel|station)|radio station)\b/i,
+    /\b(government (agency|portal)|ministry of|municipal|city council|county government)\b/i,
+    /\b(political party|campaign (office|headquarters)|embassy|consulate)\b/i,
+  ],
+};
+
+// Keywords that MUST appear (at least one) in company name or context for the niche to be relevant
+const NICHE_REQUIRED: Record<string, RegExp[]> = {
+  agriculture: [/\b(farm|agri|crop|seed|soil|harvest|grain|livestock|dairy|poultry|horticulture|irrigation|fertilizer|tractor|plantation|orchard)\b/i],
+  pharmacy: [/\b(pharma|drug|medicine|medication|dispensary|chemist|prescription|health (store|shop))\b/i],
+  clinic: [/\b(clinic|hospital|medical|health|dental|doctor|physician|therapy|care (center|centre))\b/i],
+  restaurant: [/\b(restaurant|food|cafe|cafeteria|bistro|eatery|dining|bakery|catering|takeaway|takeout)\b/i],
+  hotel: [/\b(hotel|lodge|motel|inn|resort|hospitality|accommodation|bed and breakfast|b&b)\b/i],
+  retail: [/\b(shop|store|retail|supermarket|market|boutique|outlet|merchandise|commerce)\b/i],
+  school: [/\b(school|college|university|academy|institute|education|training|learning|tutoring|nursery)\b/i],
+  logistics: [/\b(logistics|transport|freight|shipping|courier|delivery|fleet|trucking|cargo|warehouse|supply chain)\b/i],
+  construction: [/\b(construct|build|contractor|architect|engineering|infrastructure|renovation|real estate develop)\b/i],
+  manufacturing: [/\b(manufactur|factory|production|processing|assembly|packaging|industrial)\b/i],
+};
+
+function isNicheRelevant(lead: ScrapedLead, targetNiche: string): boolean {
+  const text = `${lead.company_name} ${lead.company_context ?? ''}`.toLowerCase();
+  const nLower = targetNiche.toLowerCase();
+
+  // Always reject globally blocked patterns (job boards, social networks, etc.)
+  const globalBlockers = NICHE_BLOCKLIST['_global'] ?? [];
+  if (globalBlockers.some(re => re.test(text))) {
+    console.log(`    ⛔ Rejected (not a business): ${lead.company_name}`);
+    return false;
+  }
+
+  // Check if a specific required-keyword list exists for this niche
+  for (const [nicheKey, patterns] of Object.entries(NICHE_REQUIRED)) {
+    if (nLower.includes(nicheKey)) {
+      // Niche is known — require at least one keyword to match
+      if (!patterns.some(re => re.test(text))) {
+        console.log(`    ⛔ Rejected (wrong niche): ${lead.company_name} — doesn't match "${targetNiche}"`);
+        return false;
+      }
+      return true;
+    }
+  }
+
+  // Unknown niche — allow through (can't validate without rules)
+  return true;
+}
+
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
 export async function scrapeWithoutAPI(
@@ -1351,6 +1447,8 @@ export async function scrapeWithoutAPI(
   const seen = new Set<string>();
 
   const emit = (lead: ScrapedLead) => {
+    // Reject leads that don't match the target niche
+    if (!isNicheRelevant(lead, niche)) return;
     all.push(lead);
     onLead?.(lead);
   };

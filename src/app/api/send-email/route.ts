@@ -4,7 +4,7 @@ import { createServiceClient } from "../../../../supabase/service";
 import { SMTPManager } from "@/utils/smtp-server";
 import { randomUUID } from "crypto";
 import { classifyBounce } from "@/types/platform";
-import { verifyEmailDNS } from "@/utils/email-verifier";
+import { verifyEmail } from "@/utils/email-verifier";
 import { scheduleFollowUps } from "@/utils/followup-processor";
 
 export const runtime = "nodejs";
@@ -158,8 +158,36 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify the email address before attempting to send (DNS check only — SMTP probe causes false rejections)
-    const verification = await verifyEmailDNS(to);
+    // Block personal email providers for cold B2B outreach
+    const toDomain = to.split('@')[1]?.toLowerCase() ?? '';
+    const PERSONAL_DOMAINS = new Set([
+      'gmail.com','googlemail.com','yahoo.com','yahoo.co.uk','yahoo.fr',
+      'hotmail.com','hotmail.co.uk','outlook.com','live.com','msn.com',
+      'icloud.com','me.com','mac.com','aol.com','protonmail.com','proton.me',
+      'yandex.com','yandex.ru','mail.ru',
+    ]);
+    if (PERSONAL_DOMAINS.has(toDomain)) {
+      return NextResponse.json(
+        { success: false, error: `Email not sent — ${toDomain} is a personal email provider, not a business address` },
+        { status: 400 }
+      );
+    }
+
+    // Block placeholder/fake local parts
+    const toLocal = to.split('@')[0]?.toLowerCase() ?? '';
+    const FAKE_LOCALS = new Set([
+      'johndoe','john.doe','john_doe','janedoe','jane.doe',
+      'test','test1','testuser','example','sample','demo','dummy','fake','placeholder',
+    ]);
+    if (FAKE_LOCALS.has(toLocal)) {
+      return NextResponse.json(
+        { success: false, error: `Email not sent — placeholder email address` },
+        { status: 400 }
+      );
+    }
+
+    // Verify the email address before attempting to send (full SMTP probe — confirms mailbox exists)
+    const verification = await verifyEmail(to);
     if (!verification.valid) {
       const service = createServiceClient();
       // Log the skip to sent_emails so CRM shows it
