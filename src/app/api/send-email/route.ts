@@ -32,7 +32,7 @@ function plainTextToHtml(text: string): string {
 
 function injectTracking(body: string, pixelId: string, baseUrl: string): string {
   const base = baseUrl.replace(/\/$/, "");
-  const pixel = `<img src="${base}/api/track/open/${pixelId}" width="1" height="1" style="display:none;border:0;" alt="" />`;
+  const pixel = `<img src="${base}/api/track/open?id=${pixelId}" width="1" height="1" style="display:none;border:0;" alt="" />`;
 
   // If body is already HTML, append pixel before </body> or at end
   if (/<html[\s>]/i.test(body)) {

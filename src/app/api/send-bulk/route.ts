@@ -4,6 +4,7 @@ import { createServiceClient } from "../../../../supabase/service";
 import { SMTPManager } from "@/utils/smtp-server";
 import { verifyEmail, verifyEmailDNS } from "@/utils/email-verifier";
 import { scheduleFollowUps } from "@/utils/followup-processor";
+import { randomUUID } from "crypto";
 
 // nodemailer requires the Node.js runtime (not Edge)
 export const runtime = "nodejs";
@@ -46,37 +47,41 @@ export interface SendBulkResponse {
 }
 
 /**
- * Convert plain text email body to clean HTML.
- * - Double newlines → paragraph breaks (<p> tags)
- * - Single newlines → line breaks (<br>)
- * - Preserves the signature formatting
- * - Adds minimal inline styles for good rendering across email clients
+ * Convert plain text email body to clean HTML with tracking pixel.
  */
-function plainToHtml(text: string): string {
-  // If already HTML, return as-is
-  if (/<html[\s>]/i.test(text) || /<p[\s>]/i.test(text)) return text;
+function plainToHtml(text: string, trackingPixelId?: string, baseUrl?: string): string {
+  // If already HTML, inject pixel before </body>
+  if (/<html[\s>]/i.test(text) || /<p[\s>]/i.test(text)) {
+    if (trackingPixelId && baseUrl) {
+      const pixel = `<img src="${baseUrl}/api/track/open?id=${trackingPixelId}" width="1" height="1" style="display:none;border:0;" alt="" />`;
+      return text.includes('</body>') ? text.replace(/<\/body>/i, `${pixel}</body>`) : text + pixel;
+    }
+    return text;
+  }
 
   const escaped = text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 
-  // Split on double newlines to get paragraphs
   const paragraphs = escaped
     .trim()
     .split(/\n\n+/)
     .map(para => {
-      // Within each paragraph, single newlines become <br>
       const lines = para.trim().split('\n').map(l => l.trim()).join('<br>');
       return `<p style="margin:0 0 16px 0;line-height:1.65;color:#222222;">${lines}</p>`;
     })
     .join('\n');
 
+  const pixel = trackingPixelId && baseUrl
+    ? `\n<img src="${baseUrl}/api/track/open?id=${trackingPixelId}" width="1" height="1" style="display:none;border:0;" alt="" />`
+    : '';
+
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"></head>
 <body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222222;max-width:580px;margin:0 auto;padding:24px 20px;background:#ffffff;">
-${paragraphs}
+${paragraphs}${pixel}
 </body>
 </html>`;
 }
@@ -308,11 +313,16 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
+        // Generate tracking pixel ID and build HTML body
+        const trackingPixelId = randomUUID();
+        const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+        const htmlBody = plainToHtml(email.body, trackingPixelId, baseUrl);
+
         // Send
         const sendResult = await smtpManager.sendEmail(
           email.to,
           email.subject,
-          plainToHtml(email.body)
+          htmlBody
         );
 
         console.log(`[send-bulk] ${email.to}: ${sendResult.success ? '✅ sent' : '❌ ' + sendResult.error}`);
@@ -355,10 +365,11 @@ export async function POST(request: NextRequest) {
               campaign_id: campaignId,
               to_email: email.to,
               subject: email.subject,
-              body: email.body,
+              body: htmlBody,
               sent_at: new Date().toISOString(),
               status: "sent",
               message_id: sendResult.messageId ?? null,
+              tracking_pixel_id: trackingPixelId,
             })
             .select("id")
             .single();
