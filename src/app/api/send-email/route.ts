@@ -6,6 +6,7 @@ import { randomUUID } from "crypto";
 import { classifyBounce } from "@/types/platform";
 import { verifyEmail } from "@/utils/email-verifier";
 import { scheduleFollowUps } from "@/utils/followup-processor";
+import { dispatchWebhook } from "@/utils/webhook-dispatcher";
 
 export const runtime = "nodejs";
 
@@ -340,6 +341,14 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`✅ Email sent and recorded: ${sentId} → ${to}`);
+
+    // Fire webhook: email.sent
+    dispatchWebhook(user.id, "email.sent", {
+      sentEmailId: sentId,
+      to,
+      subject,
+      leadId: leadToUpdate?.id ?? null,
+    }).catch(() => {});
 
     // Update lead status to contacted
     const leadToUpdate = lead ?? await (async () => {

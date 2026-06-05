@@ -48,7 +48,7 @@ export function NotificationsBell({ userId }: NotificationsPanelProps) {
   useEffect(() => {
     fetchNotifications();
 
-    // Real-time subscription
+    // Real-time subscription — fires immediately when a new notification is inserted
     const channel = supabase
       .channel('notifications_' + userId)
       .on('postgres_changes', {
@@ -62,7 +62,19 @@ export function NotificationsBell({ userId }: NotificationsPanelProps) {
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    // Auto poll inbox every 5 minutes to catch new replies without user action
+    const pollInbox = async () => {
+      try {
+        await fetch('/api/inbox/check', { method: 'POST' });
+      } catch { /* silent */ }
+    };
+    pollInbox(); // check on mount
+    const pollInterval = setInterval(pollInbox, 5 * 60 * 1000); // every 5 min
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(pollInterval);
+    };
   }, [userId, fetchNotifications]);
 
   const markAllRead = async () => {

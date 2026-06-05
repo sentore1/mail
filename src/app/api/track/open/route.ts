@@ -77,6 +77,14 @@ export async function GET(request: NextRequest) {
           message: 'A recipient opened your email',
           data: { sent_email_id: sentEmail.id, lead_id: sentEmail.lead_id },
         }).catch(() => {});
+
+        // Fire webhook
+        const { dispatchWebhook } = await import('@/utils/webhook-dispatcher');
+        dispatchWebhook(sentEmail.user_id, 'email.opened', {
+          sentEmailId: sentEmail.id,
+          leadId: sentEmail.lead_id,
+          openedAt: now,
+        }).catch(() => {});
       }
     } catch (err) {
       // Non-fatal — always return the pixel

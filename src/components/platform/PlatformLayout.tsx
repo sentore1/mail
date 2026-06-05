@@ -12,6 +12,10 @@ import SMTPManager from "./SMTPManager";
 import FollowUpModule from "./FollowUpModule";
 import CampaignsModule from "./CampaignsModule";
 import EmailVerificationModule from "./EmailVerificationModule";
+import AnalyticsModule from "./AnalyticsModule";
+import WebhooksModule from "./WebhooksModule";
+import SequenceBuilderModule from "./SequenceBuilderModule";
+import ABTestingModule from "./ABTestingModule";
 import { createClient } from "../../../supabase/client";
 import { useRouter } from "next/navigation";
 
@@ -151,6 +155,18 @@ export default function PlatformLayout({ userId, userEmail }: PlatformLayoutProp
 
           <LazyModule active={activeModule === "campaigns"}>
             <CampaignsModule userId={userId} />
+          </LazyModule>
+
+          <LazyModule active={activeModule === "analytics"}>
+            <AnalyticsModule userId={userId} />
+          </LazyModule>
+
+          <LazyModule active={activeModule === "webhooks"}>
+            <WebhooksModule userId={userId} />
+          </LazyModule>
+
+          <LazyModule active={activeModule === "sequences"}>
+            <SequenceBuilderModule userId={userId} />
           </LazyModule>
         </main>
       </div>

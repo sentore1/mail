@@ -357,6 +357,9 @@ export type ActiveModule =
   | 'smtp-manager'
   | 'follow-up'
   | 'campaigns'
+  | 'analytics'
+  | 'webhooks'
+  | 'sequences'
   | 'verification';
 
 // ─── Tone Types ───────────────────────────────────────────────────────────────
