@@ -1378,13 +1378,16 @@ async function scrapeGoogleCustomSearch(
 // E.g. a job platform scraped when searching for "agriculture" should be rejected.
 
 const NICHE_BLOCKLIST: Record<string, RegExp[]> = {
-  // Social networks, job boards, and tech platforms are never a target niche
+  // Social networks, job boards, tech platforms, apps — never a target niche business
   _global: [
     /\b(social network|job (platform|board|site)|hiring platform|recruitment (site|platform)|freelance (platform|marketplace))\b/i,
     /\b(bebee|linkedin|indeed|glassdoor|monster|ziprecruiter|upwork|fiverr|freelancer\.com)\b/i,
     /\b(news(paper)?|media outlet|press release|broadcasting|tv (channel|station)|radio station)\b/i,
     /\b(government (agency|portal)|ministry of|municipal|city council|county government)\b/i,
     /\b(political party|campaign (office|headquarters)|embassy|consulate)\b/i,
+    // Software/app/platform companies that appear in niche searches but aren't real businesses in that niche
+    /\b(software (platform|company|solution)|saas|app (platform|store|marketplace)|mobile app|hr (software|platform|system)|erp (software|platform)|crm (software|platform)|payroll (software|platform)|workforce management)\b/i,
+    /\b(directory listing|business directory|review (site|platform)|listing (site|platform)|aggregator)\b/i,
   ],
 };
 
@@ -1403,7 +1406,12 @@ const NICHE_REQUIRED: Record<string, RegExp[]> = {
 };
 
 function isNicheRelevant(lead: ScrapedLead, targetNiche: string): boolean {
-  const text = `${lead.company_name} ${lead.company_context ?? ''}`.toLowerCase();
+  // Build check text from company name + REAL context only (not the auto-generated "X is a {niche} in {location}")
+  // Strip the templated context string so it can't self-validate
+  const rawContext = (lead.company_context ?? '');
+  const autoGenPattern = new RegExp(`^${lead.company_name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+is a\\s+${targetNiche}\\b`, 'i');
+  const realContext = autoGenPattern.test(rawContext.trim()) ? '' : rawContext;
+  const text = `${lead.company_name} ${realContext}`.toLowerCase();
   const nLower = targetNiche.toLowerCase();
 
   // Always reject globally blocked patterns (job boards, social networks, etc.)
@@ -1416,16 +1424,21 @@ function isNicheRelevant(lead: ScrapedLead, targetNiche: string): boolean {
   // Check if a specific required-keyword list exists for this niche
   for (const [nicheKey, patterns] of Object.entries(NICHE_REQUIRED)) {
     if (nLower.includes(nicheKey)) {
-      // Niche is known — require at least one keyword to match
-      if (!patterns.some(re => re.test(text))) {
-        console.log(`    ⛔ Rejected (wrong niche): ${lead.company_name} — doesn't match "${targetNiche}"`);
+      // Must match at least one keyword in the company name or REAL context
+      // The company name alone containing a niche word is sufficient evidence
+      const nameOnly = lead.company_name.toLowerCase();
+      const nameMatches = patterns.some(re => re.test(nameOnly));
+      const contextMatches = realContext.length > 10 && patterns.some(re => re.test(realContext.toLowerCase()));
+
+      if (!nameMatches && !contextMatches) {
+        console.log(`    ⛔ Rejected (wrong niche): ${lead.company_name} — no "${targetNiche}" evidence in name or context`);
         return false;
       }
       return true;
     }
   }
 
-  // Unknown niche — allow through (can't validate without rules)
+  // Unknown niche — allow through
   return true;
 }
 
