@@ -1,7 +1,7 @@
 "use client";
 
 import { ActiveModule } from "@/types/platform";
-import { Radio, Mail, Settings, Layout, LogOut, Server, Clock, Menu, BarChart2, FileText, Megaphone } from "lucide-react";
+import { Radio, Mail, Settings, Layout, LogOut, Server, Clock, Menu, BarChart2, FileText, Megaphone, Zap, GitBranch, ShieldCheck } from "lucide-react";
 import { NotificationsBell } from "./NotificationsPanel";
 
 interface TopBarProps {
@@ -22,6 +22,9 @@ const moduleInfo: Record<ActiveModule, { label: string; desc: string; icon: Reac
   analytics:     { label: "Analytics",        desc: "Real-time campaign performance and insights",        icon: BarChart2 },
   campaigns:     { label: "Campaigns",        desc: "Create and manage email campaigns",                  icon: Megaphone },
   templates:     { label: "Templates",        desc: "Manage reusable email templates",                    icon: FileText },
+  webhooks:      { label: "Webhooks",         desc: "Send real-time events to Zapier or your own server", icon: Zap },
+  sequences:     { label: "Sequence Builder", desc: "Configure auto follow-up delays and stop rules",     icon: GitBranch },
+  verification:  { label: "Email Verification",desc:"Verify email addresses before sending",              icon: ShieldCheck },
 };
 
 export default function TopBar({ activeModule, userEmail, userId, onLogout, onMenuToggle }: TopBarProps) {

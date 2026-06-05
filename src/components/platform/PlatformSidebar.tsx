@@ -1,7 +1,7 @@
 "use client";
 
 import { ActiveModule } from "@/types/platform";
-import { Radio, Mail, Settings, Layout, Server, Send, Megaphone, ShieldCheck } from "lucide-react";
+import { Radio, Mail, Settings, Layout, Server, Send, Megaphone, ShieldCheck, BarChart2, Zap, GitBranch } from "lucide-react";
 
 interface SidebarProps {
   activeModule: ActiveModule;
@@ -16,12 +16,14 @@ const navGroups = [
       { id: "email-writer" as ActiveModule,  label: "Email Writer", icon: Mail,         badge: null },
       { id: "campaigns" as ActiveModule,     label: "Campaigns",    icon: Megaphone,    badge: null },
       { id: "follow-up" as ActiveModule,     label: "Follow-Up",    icon: Send,         badge: null },
+      { id: "sequences" as ActiveModule,     label: "Sequences",    icon: GitBranch,    badge: null },
     ],
   },
   {
     label: "Management",
     items: [
       { id: "crm" as ActiveModule,           label: "CRM",          icon: Layout,       badge: null },
+      { id: "analytics" as ActiveModule,     label: "Analytics",    icon: BarChart2,    badge: null },
       { id: "verification" as ActiveModule,  label: "Verify Emails",icon: ShieldCheck,  badge: null },
     ],
   },
@@ -30,6 +32,7 @@ const navGroups = [
     items: [
       { id: "smtp-manager" as ActiveModule,  label: "SMTP Manager", icon: Server,       badge: null },
       { id: "ai-settings" as ActiveModule,   label: "AI Settings",  icon: Settings,     badge: null },
+      { id: "webhooks" as ActiveModule,      label: "Webhooks",     icon: Zap,          badge: null },
     ],
   },
 ];

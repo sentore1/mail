@@ -6,6 +6,7 @@ import { randomUUID } from "crypto";
 import { classifyBounce } from "@/types/platform";
 import { verifyEmail } from "@/utils/email-verifier";
 import { scheduleFollowUps } from "@/utils/followup-processor";
+import { dispatchWebhook } from "@/utils/webhook-dispatcher";
 
 export const runtime = "nodejs";
 
@@ -32,7 +33,7 @@ function plainTextToHtml(text: string): string {
 
 function injectTracking(body: string, pixelId: string, baseUrl: string): string {
   const base = baseUrl.replace(/\/$/, "");
-  const pixel = `<img src="${base}/api/track/open/${pixelId}" width="1" height="1" style="display:none;border:0;" alt="" />`;
+  const pixel = `<img src="${base}/api/track/open?id=${pixelId}" width="1" height="1" style="display:none;border:0;" alt="" />`;
 
   // If body is already HTML, append pixel before </body> or at end
   if (/<html[\s>]/i.test(body)) {
@@ -340,6 +341,14 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`✅ Email sent and recorded: ${sentId} → ${to}`);
+
+    // Fire webhook: email.sent
+    dispatchWebhook(user.id, "email.sent", {
+      sentEmailId: sentId,
+      to,
+      subject,
+      leadId: leadToUpdate?.id ?? null,
+    }).catch(() => {});
 
     // Update lead status to contacted
     const leadToUpdate = lead ?? await (async () => {
