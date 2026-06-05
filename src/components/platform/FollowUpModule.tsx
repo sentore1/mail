@@ -878,129 +878,165 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="block text-sm font-semibold text-gray-800">
-                  Select Batch to Follow Up
+                  Look up a send date
                 </label>
-                {(bulkDateFilter !== "all" || bulkNiche !== "all" || bulkFUFilter !== "all") && (
+                {bulkDateFilter !== "all" && (
                   <button onClick={()=>{setBulkDateFilter("all");setBulkNiche("all");setBulkFUFilter("all");setBulkSelected(new Set());}}
                     className="text-xs text-gray-400 hover:text-gray-700 underline">
-                    Clear filters
+                    Clear
                   </button>
                 )}
               </div>
 
-              {/* Group by send date, then niche, then FU count */}
-              <div className="rounded-xl border border-gray-200 overflow-hidden">
-                {/* Table header */}
-                <div className="grid grid-cols-5 px-4 py-2 bg-gray-50 border-b border-gray-200 text-[10px] font-bold text-gray-500 uppercase tracking-wide">
-                  <span className="col-span-2">Send Date / Niche</span>
-                  <span className="text-center">Leads</span>
-                  <span className="text-center">FU Stage</span>
-                  <span className="text-right">Due 🔔</span>
-                </div>
+              {/* Date input */}
+              <input
+                type="date"
+                value={bulkDateFilter === "all" ? "" : bulkDateFilter}
+                onChange={e => {
+                  const val = e.target.value;
+                  if (!val) { setBulkDateFilter("all"); setBulkNiche("all"); setBulkFUFilter("all"); setBulkSelected(new Set()); return; }
+                  setBulkDateFilter(val);
+                  setBulkNiche("all");
+                  setBulkFUFilter("all");
+                  setBulkSelected(new Set());
+                }}
+                className="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-800 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 outline-none bg-white mb-3"
+              />
 
-                {/* All-dates summary row */}
-                <button
-                  onClick={()=>{setBulkDateFilter("all");setBulkNiche("all");setBulkFUFilter("all");setBulkSelected(new Set(eligibleThreads.map(t=>t.leadId)));}}
-                  className={`w-full grid grid-cols-5 items-center px-4 py-2.5 border-b border-gray-100 text-left hover:bg-blue-50 transition-colors ${bulkDateFilter==="all"&&bulkNiche==="all"&&bulkFUFilter==="all"?"bg-blue-50":""}`}>
-                  <span className="col-span-2 text-sm font-bold text-gray-800">All batches</span>
-                  <span className="text-sm font-semibold text-gray-900 text-center">{eligibleThreads.length}</span>
-                  <span className="text-xs text-gray-400 text-center">—</span>
-                  <span className="text-sm font-bold text-right text-red-500">{eligibleThreads.filter(t=>daysSince(t)>=3).length||"—"}</span>
-                </button>
-
-                {/* Per-date groups */}
-                {availableDates.map(date => {
-                  const dateLeads = eligibleThreads.filter(t => getOriginalSentDate(t) === date);
-                  if (dateLeads.length === 0) return null;
-                  const dateLabel = new Date(date+"T00:00:00").toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric",year:"numeric"});
-                  const dateNiches = Array.from(new Set(dateLeads.map(t=>t.niche||"—"))).sort();
-                  const dateDue = dateLeads.filter(t=>daysSince(t)>=3).length;
-                  const isDateActive = bulkDateFilter === date && bulkNiche === "all" && bulkFUFilter === "all";
-
-                  return (
-                    <div key={date} className="border-b border-gray-100 last:border-0">
-                      {/* Date header row */}
-                      <button
-                        onClick={()=>{
-                          setBulkDateFilter(date);setBulkNiche("all");setBulkFUFilter("all");
-                          setBulkSelected(new Set(dateLeads.map(t=>t.leadId)));
-                        }}
-                        className={`w-full grid grid-cols-5 items-center px-4 py-2.5 text-left hover:bg-amber-50 transition-colors ${isDateActive?"bg-amber-50":""}`}>
-                        <div className="col-span-2 flex items-center gap-2">
-                          <span className="text-xs font-bold text-gray-500">📅</span>
-                          <span className="text-sm font-bold text-gray-800">{dateLabel}</span>
-                        </div>
+              {/* If no date picked — show summary of all available dates */}
+              {bulkDateFilter === "all" && (
+                <div className="rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="grid grid-cols-4 px-4 py-2 bg-gray-50 border-b border-gray-200 text-[10px] font-bold text-gray-500 uppercase tracking-wide">
+                    <span className="col-span-2">Date</span>
+                    <span className="text-center">Leads</span>
+                    <span className="text-right">Due 🔔</span>
+                  </div>
+                  {availableDates.length === 0 && (
+                    <p className="text-xs text-gray-400 text-center py-6">No sent emails found</p>
+                  )}
+                  {availableDates.slice(0, 10).map(date => {
+                    const dateLeads = eligibleThreads.filter(t => getOriginalSentDate(t) === date);
+                    const due = dateLeads.filter(t => daysSince(t) >= 3).length;
+                    const label = new Date(date+"T00:00:00").toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric",year:"numeric"});
+                    return (
+                      <button key={date}
+                        onClick={() => { setBulkDateFilter(date); setBulkNiche("all"); setBulkFUFilter("all"); setBulkSelected(new Set()); }}
+                        className="w-full grid grid-cols-4 items-center px-4 py-2.5 border-b border-gray-100 last:border-0 text-left hover:bg-blue-50 transition-colors">
+                        <span className="col-span-2 text-sm font-medium text-gray-800">{label}</span>
                         <span className="text-sm font-semibold text-gray-700 text-center">{dateLeads.length}</span>
-                        <span className="text-xs text-gray-400 text-center">{dateNiches.length} niche{dateNiches.length!==1?"s":""}</span>
-                        <span className={`text-sm font-bold text-right ${dateDue>0?"text-red-500":"text-gray-300"}`}>{dateDue>0?`${dateDue} 🔔`:"—"}</span>
+                        <span className={`text-sm font-bold text-right ${due > 0 ? "text-red-500" : "text-gray-300"}`}>{due > 0 ? `${due} 🔔` : "—"}</span>
+                      </button>
+                    );
+                  })}
+                  {availableDates.length > 10 && (
+                    <p className="text-[11px] text-gray-400 text-center py-2">Pick a date above to see older batches</p>
+                  )}
+                </div>
+              )}
+
+              {/* If a date is picked — show niches + FU breakdown for that date */}
+              {bulkDateFilter !== "all" && (() => {
+                const dateLeads = eligibleThreads.filter(t => getOriginalSentDate(t) === bulkDateFilter);
+                const dateLabel = new Date(bulkDateFilter+"T00:00:00").toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric",year:"numeric"});
+
+                if (dateLeads.length === 0) return (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-center">
+                    <p className="text-sm font-semibold text-amber-800">No emails sent on {dateLabel}</p>
+                    <p className="text-xs text-amber-600 mt-1">Try a different date</p>
+                  </div>
+                );
+
+                const dateNiches = Array.from(new Set(dateLeads.map(t => t.niche || "—"))).sort();
+
+                return (
+                  <div className="space-y-2">
+                    <p className="text-xs text-gray-500 font-medium">
+                      <span className="font-bold text-gray-800">{dateLeads.length} leads</span> were emailed on {dateLabel}
+                    </p>
+
+                    <div className="rounded-xl border border-gray-200 overflow-hidden">
+                      <div className="grid grid-cols-5 px-4 py-2 bg-gray-50 border-b border-gray-200 text-[10px] font-bold text-gray-500 uppercase tracking-wide">
+                        <span className="col-span-2">Niche</span>
+                        <span className="text-center">Leads</span>
+                        <span className="text-center">Follow-ups done</span>
+                        <span className="text-right">Select</span>
+                      </div>
+
+                      {/* All niches row */}
+                      <button
+                        onClick={()=>{setBulkNiche("all");setBulkFUFilter("all");setBulkSelected(new Set(dateLeads.map(t=>t.leadId)));}}
+                        className={`w-full grid grid-cols-5 items-center px-4 py-2.5 border-b border-gray-100 text-left hover:bg-blue-50 transition-colors ${bulkNiche==="all"&&bulkFUFilter==="all"?"bg-blue-50":""}`}>
+                        <span className="col-span-2 text-sm font-bold text-gray-700">All niches</span>
+                        <span className="text-sm font-semibold text-center text-gray-900">{dateLeads.length}</span>
+                        <div className="flex items-center justify-center gap-1 flex-wrap">
+                          {Array.from(new Set(dateLeads.map(t=>t.followupCount))).sort((a,b)=>a-b).map(fc => {
+                            const cnt = dateLeads.filter(t=>t.followupCount===fc).length;
+                            return <span key={fc} className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${fc===0?"bg-amber-100 text-amber-700":"bg-blue-100 text-blue-700"}`}>{fc===0?"No FU":`FU${fc}`} ×{cnt}</span>;
+                          })}
+                        </div>
+                        <span className="text-[10px] text-blue-600 font-semibold text-right">Select all</span>
                       </button>
 
-                      {/* Niche rows under this date */}
+                      {/* Per-niche rows */}
                       {dateNiches.map(niche => {
-                        const nicheLeads = dateLeads.filter(t=>(t.niche||"—")===niche);
+                        const nicheLeads = dateLeads.filter(t => (t.niche||"—") === niche);
                         const nicheFUCounts = Array.from(new Set(nicheLeads.map(t=>t.followupCount))).sort((a,b)=>a-b);
-                        const nicheDue = nicheLeads.filter(t=>daysSince(t)>=3).length;
+                        const isSelected = bulkNiche === (niche==="—"?"":niche) && bulkFUFilter === "all";
 
                         return (
                           <div key={niche} className="border-t border-gray-50">
-                            {/* Niche header */}
-                            <button
+                            {/* Niche row — div instead of button to avoid nested button error */}
+                            <div
                               onClick={()=>{
-                                setBulkDateFilter(date);setBulkNiche(niche==="—"?"":niche);setBulkFUFilter("all");
+                                setBulkNiche(niche==="—"?"":niche);
+                                setBulkFUFilter("all");
                                 setBulkSelected(new Set(nicheLeads.map(t=>t.leadId)));
                               }}
-                              className={`w-full grid grid-cols-5 items-center pl-8 pr-4 py-2 text-left hover:bg-blue-50 transition-colors ${bulkDateFilter===date&&(bulkNiche===niche||(bulkNiche===""&&niche==="—"))&&bulkFUFilter==="all"?"bg-blue-50":""}`}>
-                              <div className="col-span-2 flex items-center gap-1.5">
-                                <span className="text-gray-300">└</span>
-                                <span className="text-xs font-semibold text-gray-700">{niche}</span>
-                              </div>
-                              <span className="text-xs font-bold text-gray-800 text-center">{nicheLeads.length}</span>
-                              <div className="flex items-center justify-center gap-1 flex-wrap">
-                                {nicheFUCounts.map(fc=>{
+                              className={`w-full grid grid-cols-5 items-center px-4 py-2.5 text-left cursor-pointer hover:bg-blue-50 transition-colors ${isSelected?"bg-blue-50":""}`}>
+                              <span className="col-span-2 text-sm font-semibold text-gray-700">{niche}</span>
+                              <span className="text-sm font-bold text-gray-900 text-center">{nicheLeads.length}</span>
+                              <div className="flex items-center justify-center gap-1 flex-wrap" onClick={e=>e.stopPropagation()}>
+                                {nicheFUCounts.map(fc => {
                                   const cnt = nicheLeads.filter(t=>t.followupCount===fc).length;
                                   return (
-                                    <span key={fc}
+                                    <span
+                                      key={fc}
                                       onClick={e=>{
                                         e.stopPropagation();
-                                        setBulkDateFilter(date);setBulkNiche(niche==="—"?"":niche);setBulkFUFilter(fc);
+                                        setBulkNiche(niche==="—"?"":niche);
+                                        setBulkFUFilter(fc);
                                         setBulkSelected(new Set(nicheLeads.filter(t=>t.followupCount===fc).map(t=>t.leadId)));
                                       }}
                                       className={`text-[9px] px-1.5 py-0.5 rounded font-bold cursor-pointer transition-colors ${
-                                        bulkDateFilter===date&&(bulkNiche===niche||(bulkNiche===""&&niche==="—"))&&bulkFUFilter===fc
+                                        bulkNiche===(niche==="—"?"":niche)&&bulkFUFilter===fc
                                           ?"bg-blue-600 text-white"
                                           :fc===0?"bg-amber-100 text-amber-700 hover:bg-amber-200":"bg-blue-100 text-blue-700 hover:bg-blue-200"
                                       }`}
-                                      title={`FU #${fc} sent — click to select ${cnt} leads`}
+                                      title={`Click to select only these ${cnt} leads`}
                                     >
-                                      {fc===0?"0FU":`FU${fc}`} {cnt}
+                                      {fc===0?"No FU":`FU${fc}`} ×{cnt}
                                     </span>
                                   );
                                 })}
                               </div>
-                              <span className={`text-xs font-bold text-right ${nicheDue>0?"text-red-500":"text-gray-300"}`}>{nicheDue>0?`${nicheDue} 🔔`:"—"}</span>
-                            </button>
+                              <span className="text-[10px] text-blue-600 font-semibold text-right">Select</span>
+                            </div>
                           </div>
                         );
                       })}
                     </div>
-                  );
-                })}
-              </div>
 
-              {/* Active filter summary */}
-              {(bulkDateFilter!=="all"||bulkNiche!=="all"||bulkFUFilter!=="all") && (
-                <div className="mt-2 flex items-center justify-between">
-                  <p className="text-xs text-blue-600 font-medium">
-                    <span className="font-bold">{filteredEligible.length} lead{filteredEligible.length!==1?"s":""}</span> selected
-                    {bulkDateFilter!=="all" && <> · {new Date(bulkDateFilter+"T00:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric"})}</>}
-                    {bulkNiche!=="all" && bulkNiche!=="" && <> · {bulkNiche}</>}
-                    {bulkFUFilter!=="all" && <> · FU#{bulkFUFilter} sent → sending FU #{Number(bulkFUFilter)+1}</>}
-                  </p>
-                  {bulkSelected.size > 0 && (
-                    <span className="text-xs text-gray-500">{bulkSelected.size} checked</span>
-                  )}
-                </div>
-              )}
+                    {/* Selected summary */}
+                    {bulkSelected.size > 0 && (
+                      <p className="text-xs text-blue-600 font-medium">
+                        <span className="font-bold">{bulkSelected.size} lead{bulkSelected.size!==1?"s":""}</span> selected
+                        {bulkFUFilter !== "all" && <> · will send Follow-Up #{Number(bulkFUFilter)+1}</>}
+                        <button onClick={()=>setBulkSelected(new Set())} className="ml-2 text-gray-400 hover:text-gray-600 underline">Clear</button>
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Lead list */}
