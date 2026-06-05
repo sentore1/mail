@@ -1,7 +1,7 @@
 "use client";
 
 import { ActiveModule } from "@/types/platform";
-import { Radio, Mail, Settings, Layout, Server, Send, Megaphone, ShieldCheck, BarChart2, Zap, GitBranch } from "lucide-react";
+import { Radio, Mail, Settings, Layout, Server, Send, Megaphone, ShieldCheck, BarChart2, Zap, GitBranch, FlaskConical, Tag } from "lucide-react";
 
 interface SidebarProps {
   activeModule: ActiveModule;
@@ -12,27 +12,29 @@ const navGroups = [
   {
     label: "Outreach",
     items: [
-      { id: "scraper" as ActiveModule,       label: "Scraper",      icon: Radio,        badge: null },
-      { id: "email-writer" as ActiveModule,  label: "Email Writer", icon: Mail,         badge: null },
-      { id: "campaigns" as ActiveModule,     label: "Campaigns",    icon: Megaphone,    badge: null },
-      { id: "follow-up" as ActiveModule,     label: "Follow-Up",    icon: Send,         badge: null },
-      { id: "sequences" as ActiveModule,     label: "Sequences",    icon: GitBranch,    badge: null },
+      { id: "scraper" as ActiveModule,       label: "Scraper",        icon: Radio,          badge: null },
+      { id: "email-writer" as ActiveModule,  label: "Email Writer",   icon: Mail,           badge: null },
+      { id: "campaigns" as ActiveModule,     label: "Campaigns",      icon: Megaphone,      badge: null },
+      { id: "follow-up" as ActiveModule,     label: "Follow-Up",      icon: Send,           badge: null },
+      { id: "sequences" as ActiveModule,     label: "Sequences",      icon: GitBranch,      badge: null },
     ],
   },
   {
     label: "Management",
     items: [
-      { id: "crm" as ActiveModule,           label: "CRM",          icon: Layout,       badge: null },
-      { id: "analytics" as ActiveModule,     label: "Analytics",    icon: BarChart2,    badge: null },
-      { id: "verification" as ActiveModule,  label: "Verify Emails",icon: ShieldCheck,  badge: null },
+      { id: "crm" as ActiveModule,           label: "CRM",            icon: Layout,         badge: null },
+      { id: "custom-fields" as ActiveModule, label: "Custom Fields",  icon: Tag,            badge: null },
+      { id: "analytics" as ActiveModule,     label: "Analytics",      icon: BarChart2,      badge: null },
+      { id: "ab-testing" as ActiveModule,    label: "A/B Testing",    icon: FlaskConical,   badge: null },
+      { id: "verification" as ActiveModule,  label: "Verify Emails",  icon: ShieldCheck,    badge: null },
     ],
   },
   {
     label: "Settings",
     items: [
-      { id: "smtp-manager" as ActiveModule,  label: "SMTP Manager", icon: Server,       badge: null },
-      { id: "ai-settings" as ActiveModule,   label: "AI Settings",  icon: Settings,     badge: null },
-      { id: "webhooks" as ActiveModule,      label: "Webhooks",     icon: Zap,          badge: null },
+      { id: "smtp-manager" as ActiveModule,  label: "SMTP Manager",   icon: Server,         badge: null },
+      { id: "ai-settings" as ActiveModule,   label: "AI Settings",    icon: Settings,       badge: null },
+      { id: "webhooks" as ActiveModule,      label: "Webhooks",       icon: Zap,            badge: null },
     ],
   },
 ];

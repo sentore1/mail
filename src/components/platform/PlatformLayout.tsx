@@ -16,6 +16,7 @@ import AnalyticsModule from "./AnalyticsModule";
 import WebhooksModule from "./WebhooksModule";
 import SequenceBuilderModule from "./SequenceBuilderModule";
 import ABTestingModule from "./ABTestingModule";
+import CustomFieldsModule from "./CustomFieldsModule";
 import { createClient } from "../../../supabase/client";
 import { useRouter } from "next/navigation";
 
@@ -167,6 +168,14 @@ export default function PlatformLayout({ userId, userEmail }: PlatformLayoutProp
 
           <LazyModule active={activeModule === "sequences"}>
             <SequenceBuilderModule userId={userId} />
+          </LazyModule>
+
+          <LazyModule active={activeModule === "ab-testing"}>
+            <ABTestingModule userId={userId} />
+          </LazyModule>
+
+          <LazyModule active={activeModule === "custom-fields"}>
+            <CustomFieldsModule userId={userId} />
           </LazyModule>
         </main>
       </div>
