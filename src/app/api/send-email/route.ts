@@ -342,14 +342,6 @@ export async function POST(request: NextRequest) {
 
     console.log(`✅ Email sent and recorded: ${sentId} → ${to}`);
 
-    // Fire webhook: email.sent
-    dispatchWebhook(user.id, "email.sent", {
-      sentEmailId: sentId,
-      to,
-      subject,
-      leadId: leadToUpdate?.id ?? null,
-    }).catch(() => {});
-
     // Update lead status to contacted
     const leadToUpdate = lead ?? await (async () => {
       const { data } = await service
@@ -360,6 +352,14 @@ export async function POST(request: NextRequest) {
         .maybeSingle();
       return data ?? null;
     })();
+
+    // Fire webhook: email.sent (after leadToUpdate is resolved)
+    dispatchWebhook(user.id, "email.sent", {
+      sentEmailId: sentId,
+      to,
+      subject,
+      leadId: leadToUpdate?.id ?? null,
+    }).catch(() => {});
 
     if (leadToUpdate) {
       await service.from("leads").update({

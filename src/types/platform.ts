@@ -362,6 +362,8 @@ export type ActiveModule =
   | 'sequences'
   | 'ab-testing'
   | 'custom-fields'
+  | 'integrations'
+  | 'whatsapp'
   | 'verification';
 
 // ─── Tone Types ───────────────────────────────────────────────────────────────

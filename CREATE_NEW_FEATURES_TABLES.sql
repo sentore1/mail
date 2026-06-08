@@ -166,5 +166,66 @@ CREATE POLICY "lead_custom_values_user" ON lead_custom_field_values
 CREATE INDEX IF NOT EXISTS idx_lead_custom_values_lead_id ON lead_custom_field_values(lead_id);
 CREATE INDEX IF NOT EXISTS idx_lead_custom_values_field_id ON lead_custom_field_values(field_id);
 
+-- ── 11. Integration Configs ──────────────────────────────────
+CREATE TABLE IF NOT EXISTS integration_configs (
+  id              TEXT PRIMARY KEY,  -- "{user_id}:{integration_id}"
+  user_id         UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  integration_id  TEXT NOT NULL,     -- "hubspot", "salesforce", etc.
+  status          TEXT NOT NULL DEFAULT 'connected',
+  detail          TEXT,              -- display string e.g. portal ID
+  config          JSONB,             -- encrypted or raw config (API keys etc.)
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(user_id, integration_id)
+);
+
+ALTER TABLE integration_configs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "integration_configs_user" ON integration_configs
+  USING (user_id = auth.uid());
+
+-- ── 12. Add OAuth columns to smtp_accounts and email_inbox_config ──
+ALTER TABLE smtp_accounts
+  ADD COLUMN IF NOT EXISTS auth_type TEXT DEFAULT 'password',
+  ADD COLUMN IF NOT EXISTS oauth_access_token TEXT,
+  ADD COLUMN IF NOT EXISTS oauth_refresh_token TEXT,
+  ADD COLUMN IF NOT EXISTS oauth_expires_at TIMESTAMPTZ;
+
+ALTER TABLE email_inbox_config
+  ADD COLUMN IF NOT EXISTS auth_type TEXT DEFAULT 'password';
+
+-- ── 13. WhatsApp Notification Settings ──────────────────────
+CREATE TABLE IF NOT EXISTS whatsapp_notification_settings (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id          UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE UNIQUE,
+  whatsapp_number  TEXT NOT NULL DEFAULT '',
+  enabled          BOOLEAN NOT NULL DEFAULT false,
+  sender_name      TEXT NOT NULL DEFAULT '',
+  events           TEXT[] NOT NULL DEFAULT '{}',
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE whatsapp_notification_settings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "whatsapp_settings_user" ON whatsapp_notification_settings
+  USING (user_id = auth.uid());
+
+-- ── 14. WhatsApp Delivery Log ─────────────────────────────────
+CREATE TABLE IF NOT EXISTS whatsapp_delivery_log (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  event         TEXT NOT NULL,
+  to_number     TEXT NOT NULL,
+  message       TEXT,
+  success       BOOLEAN NOT NULL DEFAULT false,
+  error_message TEXT,
+  sent_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE whatsapp_delivery_log ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "whatsapp_log_user" ON whatsapp_delivery_log
+  USING (user_id = auth.uid());
+
+CREATE INDEX IF NOT EXISTS idx_whatsapp_log_user_id ON whatsapp_delivery_log(user_id);
+
 -- Done!
 SELECT 'Migration complete — all new feature tables created successfully' AS status;

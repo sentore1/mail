@@ -1,7 +1,7 @@
 "use client";
 
 import { ActiveModule } from "@/types/platform";
-import { Radio, Mail, Settings, Layout, LogOut, Server, Clock, Menu, BarChart2, FileText, Megaphone, Zap, GitBranch, ShieldCheck, FlaskConical, Tag } from "lucide-react";
+import { Radio, Mail, Settings, Layout, LogOut, Server, Clock, Menu, BarChart2, FileText, Megaphone, Zap, GitBranch, ShieldCheck, FlaskConical, Tag, Link2, MessageSquare } from "lucide-react";
 import { NotificationsBell } from "./NotificationsPanel";
 
 interface TopBarProps {
@@ -26,6 +26,8 @@ const moduleInfo: Record<ActiveModule, { label: string; desc: string; icon: Reac
   sequences:      { label: "Sequence Builder",  desc: "Configure auto follow-up delays and stop rules",     icon: GitBranch },
   "ab-testing":   { label: "A/B Testing",       desc: "Test subject lines and email variants",              icon: FlaskConical },
   "custom-fields":{ label: "Custom Fields",     desc: "Add extra data fields to your leads",                icon: Tag },
+  integrations:   { label: "Integrations",      desc: "Connect Gmail, Outlook, HubSpot, Zapier and more",   icon: Link2 },
+  whatsapp:       { label: "WhatsApp Alerts",   desc: "Get WhatsApp notifications for email events",        icon: MessageSquare },
   verification:   { label: "Email Verification",desc: "Verify email addresses before sending",              icon: ShieldCheck },
 };
 

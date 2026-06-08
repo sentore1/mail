@@ -1,7 +1,7 @@
 "use client";
 
 import { ActiveModule } from "@/types/platform";
-import { Radio, Mail, Settings, Layout, Server, Send, Megaphone, ShieldCheck, BarChart2, Zap, GitBranch, FlaskConical, Tag } from "lucide-react";
+import { Radio, Mail, Settings, Layout, Server, Send, Megaphone, ShieldCheck, BarChart2, Zap, GitBranch, FlaskConical, Tag, Link2, MessageSquare } from "lucide-react";
 
 interface SidebarProps {
   activeModule: ActiveModule;
@@ -35,6 +35,8 @@ const navGroups = [
       { id: "smtp-manager" as ActiveModule,  label: "SMTP Manager",   icon: Server,         badge: null },
       { id: "ai-settings" as ActiveModule,   label: "AI Settings",    icon: Settings,       badge: null },
       { id: "webhooks" as ActiveModule,      label: "Webhooks",       icon: Zap,            badge: null },
+      { id: "integrations" as ActiveModule,  label: "Integrations",   icon: Link2,          badge: null },
+      { id: "whatsapp" as ActiveModule,      label: "WhatsApp Alerts",icon: MessageSquare,  badge: null },
     ],
   },
 ];

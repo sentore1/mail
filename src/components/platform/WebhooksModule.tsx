@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Loader2, Plus, Trash2, Zap, CheckCircle, XCircle, Eye, EyeOff, RefreshCw } from "lucide-react";
+import { Loader2, Zap, CheckCircle, XCircle, RefreshCw, Send } from "lucide-react";
 import { toast } from "sonner";
 
 interface WebhooksModuleProps { userId: string; }
@@ -10,307 +10,269 @@ type WebhookEvent =
   | "email.sent" | "email.opened" | "email.clicked" | "email.bounced"
   | "reply.received" | "lead.status_changed" | "sequence.completed";
 
-const EVENT_LABELS: Record<WebhookEvent, { label: string; desc: string }> = {
-  "email.sent":          { label: "Email Sent",          desc: "Fires when an email is successfully delivered" },
-  "email.opened":        { label: "Email Opened",         desc: "Fires when a recipient opens an email" },
-  "email.clicked":       { label: "Link Clicked",         desc: "Fires when a recipient clicks a tracked link" },
-  "email.bounced":       { label: "Email Bounced",        desc: "Fires when an email hard-bounces" },
-  "reply.received":      { label: "Reply Received",       desc: "Fires when a reply is detected in your inbox" },
-  "lead.status_changed": { label: "Lead Status Changed",  desc: "Fires when a lead's status is updated" },
-  "sequence.completed":  { label: "Sequence Completed",   desc: "Fires when all follow-ups in a sequence are done" },
+const EVENT_CONFIG: Record<WebhookEvent, { label: string; desc: string; emoji: string; defaultOn: boolean }> = {
+  "reply.received":      { label: "Reply Received",      desc: "Someone replied to one of your emails",              emoji: "💬", defaultOn: true  },
+  "email.opened":        { label: "Email Opened",         desc: "A recipient opened your email",                      emoji: "👀", defaultOn: true  },
+  "email.clicked":       { label: "Link Clicked",         desc: "A recipient clicked a tracked link",                 emoji: "🖱️", defaultOn: true  },
+  "email.bounced":       { label: "Email Bounced",        desc: "An email failed to deliver",                         emoji: "⚠️", defaultOn: true  },
+  "email.sent":          { label: "Email Sent",           desc: "Every time an email is delivered (high volume)",     emoji: "📤", defaultOn: false },
+  "lead.status_changed": { label: "Lead Status Changed",  desc: "A lead's CRM status is updated",                    emoji: "🔄", defaultOn: false },
+  "sequence.completed":  { label: "Sequence Completed",   desc: "A lead finishes the full follow-up sequence",        emoji: "✅", defaultOn: false },
 };
 
-const ALL_EVENTS = Object.keys(EVENT_LABELS) as WebhookEvent[];
+const ALL_EVENTS = Object.keys(EVENT_CONFIG) as WebhookEvent[];
 
-interface Webhook {
-  id: string;
-  name: string;
-  url: string;
+interface ZapierSettings {
+  enabled: boolean;
   events: WebhookEvent[];
-  secret?: string;
-  is_active: boolean;
-  created_at: string;
 }
 
-interface Delivery {
-  id: string;
+interface RecentDelivery {
   event: string;
-  status_code: number;
   success: boolean;
+  status_code: number;
   delivered_at: string;
   error_message?: string;
 }
 
 export default function WebhooksModule({ userId }: WebhooksModuleProps) {
-  const [webhooks, setWebhooks] = useState<Webhook[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [testingId, setTestingId] = useState<string | null>(null);
-  const [deliveries, setDeliveries] = useState<Record<string, Delivery[]>>({});
-  const [showDeliveries, setShowDeliveries] = useState<string | null>(null);
-  const [showSecret, setShowSecret] = useState<Record<string, boolean>>({});
+  const [settings, setSettings] = useState<ZapierSettings>({
+    enabled: true,
+    events: ALL_EVENTS.filter(e => EVENT_CONFIG[e].defaultOn),
+  });
+  const [loading, setLoading]   = useState(true);
+  const [saving, setSaving]     = useState(false);
+  const [testing, setTesting]   = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [deliveries, setDeliveries] = useState<RecentDelivery[]>([]);
+  const [zapierConfigured, setZapierConfigured] = useState<boolean | null>(null);
 
-  // Form state
-  const [form, setForm] = useState({ name: "", url: "", secret: "", events: [] as WebhookEvent[] });
+  useEffect(() => {
+    // Load saved settings
+    fetch("/api/webhooks/zapier-settings")
+      .then(async r => {
+        const text = await r.text();
+        if (!text) return;
+        try {
+          const d = JSON.parse(text);
+          if (d.settings) setSettings(d.settings);
+          if (typeof d.configured === "boolean") setZapierConfigured(d.configured);
+        } catch {}
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/webhooks");
-      const data = await res.json();
-      setWebhooks(data.webhooks ?? []);
-    } finally { setLoading(false); }
-  };
-
-  useEffect(() => { load(); }, []);
+    // Load recent deliveries
+    fetch("/api/webhooks/zapier-deliveries")
+      .then(async r => {
+        const text = await r.text();
+        if (!text) return;
+        try { const d = JSON.parse(text); setDeliveries(d.deliveries ?? []); } catch {}
+      })
+      .catch(() => {});
+  }, []);
 
   const toggleEvent = (ev: WebhookEvent) => {
-    setForm(f => ({
-      ...f,
-      events: f.events.includes(ev) ? f.events.filter(e => e !== ev) : [...f.events, ev],
+    setSettings(s => ({
+      ...s,
+      events: s.events.includes(ev) ? s.events.filter(e => e !== ev) : [...s.events, ev],
     }));
   };
 
   const save = async () => {
-    if (!form.url) { toast.error("URL is required"); return; }
-    if (!form.url.startsWith("https://")) { toast.error("URL must start with https://"); return; }
-    if (form.events.length === 0) { toast.error("Select at least one event"); return; }
     setSaving(true);
     try {
-      const res = await fetch("/api/webhooks", {
+      const res = await fetch("/api/webhooks/zapier-settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(settings),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Webhook created");
-      setShowForm(false);
-      setForm({ name: "", url: "", secret: "", events: [] });
-      load();
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : {};
+      if (!res.ok) throw new Error(data.error || "Save failed");
+      toast.success("Zapier settings saved");
     } catch (e: any) { toast.error(e.message); }
     finally { setSaving(false); }
   };
 
-  const toggle = async (hook: Webhook) => {
-    await fetch("/api/webhooks", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: hook.id, is_active: !hook.is_active }),
-    });
-    setWebhooks(prev => prev.map(h => h.id === hook.id ? { ...h, is_active: !h.is_active } : h));
-  };
-
-  const remove = async (id: string) => {
-    if (!confirm("Delete this webhook?")) return;
-    await fetch(`/api/webhooks?id=${id}`, { method: "DELETE" });
-    setWebhooks(prev => prev.filter(h => h.id !== id));
-    toast.success("Webhook deleted");
-  };
-
-  const sendTest = async (hook: Webhook) => {
-    setTestingId(hook.id);
+  const sendTest = async () => {
+    setTesting(true);
+    setTestResult(null);
     try {
-      const res = await fetch(hook.url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          event: "email.sent",
-          timestamp: new Date().toISOString(),
-          data: { test: true, userId, message: "Test delivery from Pryro Mail" },
-        }),
-      });
-      if (res.ok) toast.success(`Test delivered — ${res.status}`);
-      else toast.error(`Server responded with ${res.status}`);
+      const res = await fetch("/api/webhooks/test-zapier", { method: "POST" });
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : {};
+      if (!res.ok) throw new Error(data.error || "Test failed");
+      setTestResult({ ok: true, msg: "✅ Test event sent to Zapier! Check your Zap's task history." });
+      // Refresh deliveries
+      fetch("/api/webhooks/zapier-deliveries")
+        .then(async r => { const t = await r.text(); if (t) { try { const d = JSON.parse(t); setDeliveries(d.deliveries ?? []); } catch {} } })
+        .catch(() => {});
     } catch (e: any) {
-      toast.error(`Delivery failed: ${e.message}`);
-    } finally { setTestingId(null); }
+      setTestResult({ ok: false, msg: e.message });
+    } finally { setTesting(false); }
   };
 
-  const loadDeliveries = async (hookId: string) => {
-    if (showDeliveries === hookId) { setShowDeliveries(null); return; }
-    try {
-      const res = await fetch(`/api/webhooks/deliveries?webhookId=${hookId}`);
-      const data = await res.json();
-      setDeliveries(prev => ({ ...prev, [hookId]: data.deliveries ?? [] }));
-      setShowDeliveries(hookId);
-    } catch { toast.error("Failed to load delivery history"); }
-  };
+  if (loading) return (
+    <div className="flex items-center justify-center h-40">
+      <Loader2 size={20} className="animate-spin text-blue-600" />
+    </div>
+  );
 
   return (
-    <div className="p-6 space-y-6 max-w-3xl">
+    <div className="p-6 space-y-6 max-w-2xl">
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-            <Zap size={18} className="text-blue-600" /> Webhooks
+            <Zap size={18} className="text-blue-600" /> Zapier Integration
           </h2>
-          <p className="text-xs text-gray-500 mt-0.5">Send real-time event data to any URL — use with Zapier, Make, or your own server</p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Select which events get forwarded to Zapier — connect to 6,000+ apps automatically
+          </p>
         </div>
-        <button onClick={() => setShowForm(v => !v)}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors">
-          <Plus size={14} /> Add Webhook
+        {/* Master enable toggle */}
+        <button
+          onClick={() => setSettings(s => ({ ...s, enabled: !s.enabled }))}
+          className={`relative w-12 h-6 rounded-full transition-colors ${settings.enabled ? "bg-blue-600" : "bg-gray-200"}`}>
+          <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${settings.enabled ? "translate-x-6" : "translate-x-0.5"}`} />
         </button>
       </div>
 
-      {/* New webhook form */}
-      {showForm && (
-        <div className="rounded-xl border border-blue-200 bg-blue-50 p-5 space-y-4">
-          <p className="text-sm font-bold text-blue-900">New Webhook</p>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Name <span className="font-normal text-gray-400">(optional)</span></label>
-              <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                placeholder="e.g. Zapier CRM Sync"
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm outline-none focus:border-blue-400 bg-white" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Endpoint URL <span className="text-red-500">*</span></label>
-              <input value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))}
-                placeholder="https://hooks.zapier.com/..."
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm outline-none focus:border-blue-400 bg-white" />
-            </div>
-          </div>
-
+      {/* Connection status */}
+      {zapierConfigured === false && (
+        <div className="flex items-start gap-2 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
+          <Zap size={14} className="text-amber-500 shrink-0 mt-0.5" />
           <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1">Signing Secret <span className="font-normal text-gray-400">(optional — for HMAC verification)</span></label>
-            <input value={form.secret} onChange={e => setForm(f => ({ ...f, secret: e.target.value }))}
-              placeholder="Leave blank to skip signature verification"
-              className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm outline-none focus:border-blue-400 bg-white font-mono" />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-2">Events to subscribe to <span className="text-red-500">*</span></label>
-            <div className="grid grid-cols-2 gap-2">
-              {ALL_EVENTS.map(ev => {
-                const { label, desc } = EVENT_LABELS[ev];
-                const checked = form.events.includes(ev);
-                return (
-                  <label key={ev} onClick={() => toggleEvent(ev)}
-                    className={`flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-colors ${checked ? "border-blue-400 bg-white" : "border-gray-200 bg-white hover:border-gray-300"}`}>
-                    <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 mt-0.5 ${checked ? "border-blue-500 bg-blue-500" : "border-gray-300"}`}>
-                      {checked && <svg width="8" height="6" viewBox="0 0 8 6" fill="none"><path d="M1 3l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-                    </div>
-                    <div>
-                      <p className="text-xs font-semibold text-gray-800">{label}</p>
-                      <p className="text-[10px] text-gray-400">{desc}</p>
-                    </div>
-                  </label>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="flex gap-2 pt-1">
-            <button onClick={save} disabled={saving}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
-              {saving ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} Save Webhook
-            </button>
-            <button onClick={() => { setShowForm(false); setForm({ name: "", url: "", secret: "", events: [] }); }}
-              className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-300 text-gray-600 hover:bg-gray-50">
-              Cancel
-            </button>
+            <p className="text-xs font-bold text-amber-800">Zapier URL not configured</p>
+            <p className="text-[11px] text-amber-700 mt-0.5">
+              Ask your administrator to add <code className="bg-amber-100 px-1 rounded">ZAPIER_WEBHOOK_URL</code> to the server's environment variables, then restart the server.
+            </p>
           </div>
         </div>
       )}
 
-      {/* Webhook list */}
-      {loading ? (
-        <div className="flex items-center justify-center h-32"><Loader2 size={18} className="animate-spin text-blue-600" /></div>
-      ) : webhooks.length === 0 ? (
-        <div className="text-center py-12 text-gray-400 border border-dashed border-gray-200 rounded-xl">
-          <Zap size={28} className="mx-auto mb-3 opacity-40" />
-          <p className="text-sm font-medium">No webhooks configured</p>
-          <p className="text-xs mt-1">Add one above to forward events to Zapier, Make, or your own endpoint</p>
+      {zapierConfigured === true && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-green-50 border border-green-200">
+          <CheckCircle size={14} className="text-green-500" />
+          <p className="text-xs font-semibold text-green-800">Zapier is connected and ready to receive events</p>
         </div>
-      ) : (
-        <div className="space-y-3">
-          {webhooks.map(hook => (
-            <div key={hook.id} className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`w-2 h-2 rounded-full shrink-0 ${hook.is_active ? "bg-green-500" : "bg-gray-300"}`} />
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-900 truncate">{hook.name || hook.url}</p>
-                    <p className="text-[11px] text-gray-400 font-mono truncate">{hook.url}</p>
+      )}
+
+      {/* Event toggles */}
+      {settings.enabled && (
+        <div>
+          <p className="text-sm font-semibold text-gray-800 mb-3">
+            Send to Zapier when…
+            <span className="font-normal text-gray-400 ml-2 text-xs">
+              ({settings.events.length} of {ALL_EVENTS.length} events enabled)
+            </span>
+          </p>
+          <div className="space-y-2">
+            {ALL_EVENTS.map(ev => {
+              const { label, desc, emoji } = EVENT_CONFIG[ev];
+              const on = settings.events.includes(ev);
+              return (
+                <div key={ev} onClick={() => toggleEvent(ev)}
+                  className={`flex items-center justify-between px-4 py-3 rounded-xl border cursor-pointer transition-all ${
+                    on ? "border-blue-300 bg-blue-50" : "border-gray-200 bg-white hover:border-gray-300"
+                  }`}>
+                  <div className="flex items-center gap-3">
+                    <span className="text-lg w-6 text-center">{emoji}</span>
+                    <div>
+                      <p className={`text-sm font-semibold ${on ? "text-blue-800" : "text-gray-700"}`}>{label}</p>
+                      <p className="text-xs text-gray-400">{desc}</p>
+                    </div>
+                  </div>
+                  <div className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ${on ? "bg-blue-500" : "bg-gray-200"}`}>
+                    <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${on ? "translate-x-5" : "translate-x-0.5"}`} />
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5 shrink-0 ml-3">
-                  <button onClick={() => sendTest(hook)} disabled={testingId === hook.id}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1">
-                    {testingId === hook.id ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} Test
-                  </button>
-                  <button onClick={() => loadDeliveries(hook.id)}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 flex items-center gap-1">
-                    <Eye size={11} /> Logs
-                  </button>
-                  <button onClick={() => toggle(hook)}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${hook.is_active ? "border-green-200 bg-green-50 text-green-700 hover:bg-green-100" : "border-gray-200 text-gray-500 hover:bg-gray-50"}`}>
-                    {hook.is_active ? "Active" : "Paused"}
-                  </button>
-                  <button onClick={() => remove(hook.id)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Events */}
-              <div className="px-4 pb-3 flex flex-wrap gap-1">
-                {hook.events.map(ev => (
-                  <span key={ev} className="text-[9px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-100">
-                    {EVENT_LABELS[ev]?.label ?? ev}
-                  </span>
-                ))}
-              </div>
-
-              {/* Delivery logs */}
-              {showDeliveries === hook.id && (
-                <div className="border-t border-gray-100 px-4 py-3">
-                  <p className="text-xs font-semibold text-gray-600 mb-2">Recent Deliveries</p>
-                  {(deliveries[hook.id] ?? []).length === 0 ? (
-                    <p className="text-xs text-gray-400">No deliveries yet</p>
-                  ) : (
-                    <div className="space-y-1 max-h-40 overflow-y-auto">
-                      {(deliveries[hook.id] ?? []).map(d => (
-                        <div key={d.id} className="flex items-center gap-2 text-xs">
-                          {d.success
-                            ? <CheckCircle size={11} className="text-green-500 shrink-0" />
-                            : <XCircle size={11} className="text-red-400 shrink-0" />}
-                          <span className="font-mono text-gray-500 shrink-0">{d.status_code}</span>
-                          <span className="text-gray-600 shrink-0">{d.event}</span>
-                          <span className="text-gray-400 text-[10px] ml-auto shrink-0">
-                            {new Date(d.delivered_at).toLocaleString()}
-                          </span>
-                          {d.error_message && <span className="text-red-400 truncate text-[10px]">{d.error_message}</span>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
+              );
+            })}
+          </div>
         </div>
       )}
 
-      {/* Payload reference */}
+      {/* Test result */}
+      {testResult && (
+        <div className={`flex items-start gap-2 px-4 py-3 rounded-xl border ${
+          testResult.ok ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"
+        }`}>
+          {testResult.ok
+            ? <CheckCircle size={14} className="text-green-600 shrink-0 mt-0.5" />
+            : <XCircle size={14} className="text-red-500 shrink-0 mt-0.5" />}
+          <p className={`text-xs leading-relaxed ${testResult.ok ? "text-green-800" : "text-red-700"}`}>
+            {testResult.msg}
+          </p>
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="flex gap-3">
+        <button onClick={save} disabled={saving}
+          className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors">
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+          Save Settings
+        </button>
+        <button onClick={sendTest} disabled={testing || zapierConfigured === false}
+          className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-semibold border border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-40 transition-colors">
+          {testing ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+          Send Test Event
+        </button>
+      </div>
+
+      {/* Payload preview */}
       <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-        <p className="text-xs font-bold text-gray-700 mb-2">Sample Payload</p>
+        <p className="text-xs font-bold text-gray-700 mb-2">Payload sent to Zapier for each event</p>
         <pre className="text-[10px] text-gray-600 overflow-x-auto leading-relaxed">{`{
   "event": "reply.received",
-  "timestamp": "2025-06-05T10:30:00.000Z",
+  "timestamp": "2025-06-08T10:30:00.000Z",
+  "platform": "pryro_mail",
   "data": {
     "leadId": "uuid-...",
-    "fromEmail": "john@company.com",
-    "subject": "Re: Strategic Partnership Opportunity",
+    "leadEmail": "john@company.com",
+    "companyName": "Acme Corp",
     "sentiment": "interested",
+    "subject": "Re: Strategic Partnership Opportunity",
     "userId": "uuid-..."
   }
 }`}</pre>
-        <p className="text-[10px] text-gray-400 mt-2">The <code className="bg-gray-200 px-1 rounded">X-Pryro-Signature</code> header contains an HMAC-SHA256 signature if you set a signing secret.</p>
       </div>
+
+      {/* Recent deliveries */}
+      {deliveries.length > 0 && (
+        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+            <p className="text-xs font-bold text-gray-700">Recent Zapier Deliveries</p>
+            <button onClick={() => {
+              fetch("/api/webhooks/zapier-deliveries")
+                .then(async r => { const t = await r.text(); if (t) { try { const d = JSON.parse(t); setDeliveries(d.deliveries ?? []); } catch {} } })
+                .catch(() => {});
+            }} className="p-1 rounded hover:bg-gray-100">
+              <RefreshCw size={11} className="text-gray-400" />
+            </button>
+          </div>
+          <div className="divide-y divide-gray-50 max-h-48 overflow-y-auto">
+            {deliveries.map((d, i) => (
+              <div key={i} className="flex items-center gap-3 px-4 py-2.5 text-xs">
+                {d.success
+                  ? <CheckCircle size={12} className="text-green-500 shrink-0" />
+                  : <XCircle size={12} className="text-red-400 shrink-0" />}
+                <span className="font-mono text-gray-500 shrink-0 w-4 text-center">{d.status_code || "—"}</span>
+                <span className="text-gray-700 shrink-0">{d.event}</span>
+                <span className="text-gray-400 text-[10px] ml-auto shrink-0">
+                  {new Date(d.delivered_at).toLocaleString()}
+                </span>
+                {d.error_message && (
+                  <span className="text-red-400 text-[10px] truncate max-w-32">{d.error_message}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

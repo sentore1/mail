@@ -17,6 +17,8 @@ import WebhooksModule from "./WebhooksModule";
 import SequenceBuilderModule from "./SequenceBuilderModule";
 import ABTestingModule from "./ABTestingModule";
 import CustomFieldsModule from "./CustomFieldsModule";
+import IntegrationsModule from "./IntegrationsModule";
+import WhatsAppNotificationsModule from "./WhatsAppNotificationsModule";
 import { createClient } from "../../../supabase/client";
 import { useRouter } from "next/navigation";
 
@@ -176,6 +178,14 @@ export default function PlatformLayout({ userId, userEmail }: PlatformLayoutProp
 
           <LazyModule active={activeModule === "custom-fields"}>
             <CustomFieldsModule userId={userId} />
+          </LazyModule>
+
+          <LazyModule active={activeModule === "integrations"}>
+            <IntegrationsModule userId={userId} />
+          </LazyModule>
+
+          <LazyModule active={activeModule === "whatsapp"}>
+            <WhatsAppNotificationsModule userId={userId} />
           </LazyModule>
         </main>
       </div>
