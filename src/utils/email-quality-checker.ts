@@ -95,7 +95,6 @@ const HARD_BANNED: string[] = [
   'act now',
   'click here',
   'buy now',
-  'free trial',
   'guaranteed results',
   'no obligation',
   'risk-free',
@@ -233,6 +232,9 @@ function personalizationScore(subject: string, body: string, companyName: string
 
   // Named greeting (Hi [Name], not "Hi there,")
   if (/^hi [a-z]{2,},/im.test(body) && !/^hi there,/im.test(body)) score += 9;
+
+  // Free trial mention = strong positive signal (Pryro-specific)
+  if (/free trial|try it free|start.*free|pryro\.com/i.test(full)) score += 8;
 
   return Math.min(score, 100);
 }

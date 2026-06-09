@@ -170,6 +170,11 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{
   signals.signOff      = signOff;
   signals.isGenericEmail = genericEmail;
 
+  // Re-build greeting now that we have the actual lead email for prefix extraction
+  // (researchProspect[Sync] was called without the email, so this is the real resolution)
+  const { buildGreeting: buildGreetingFn } = await import('./prospect-researcher');
+  signals.greeting = buildGreetingFn(effectiveContactName, lead.email);
+
   // ── 5. Generate ──────────────────────────────────────────────────────────
   const result = await buildPersonalizedEmail(
     {

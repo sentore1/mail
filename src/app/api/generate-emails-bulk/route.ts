@@ -197,8 +197,18 @@ export async function POST(request: NextRequest) {
           });
 
           // Stamp correct values from lead data
-          signals.signOff      = profileSignOff;
+          signals.signOff        = profileSignOff;
           signals.isGenericEmail = genericEmail;
+          // Re-build greeting with the actual lead email so prefix extraction works
+          signals.greeting = resolvedContactName
+            ? `Hi ${resolvedContactName},`
+            : (lead.email && !genericEmail
+                ? (() => {
+                    const { extractFirstName } = require('@/utils/prospect-researcher');
+                    const { name } = extractFirstName(null, lead.email);
+                    return name ? `Hi ${name},` : 'Hi there,';
+                  })()
+                : 'Hi there,');
 
           const result = await buildPersonalizedEmail(
             { companyName: name, niche: lead.niche, location: lead.location, companyContext: lead.company_context, website: lead.website, signals, senderName, senderPhone, customPainPoint, emailIndex: idx },

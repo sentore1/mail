@@ -110,11 +110,25 @@ async function callAI(p: AIProvider, system: string, user: string): Promise<stri
 // ─── System prompt (all rules including greeting + footer) ───────────────────
 
 function buildSystemPrompt(signals: ProspectSignals): string {
-  return `You are writing a cold B2B email on behalf of someone at Pryro (an ERP platform for businesses in Africa and Asia).
+  return `You are writing a cold B2B email on behalf of someone at Pryro.
 
-You will be given facts about one specific company. Write an email that reads like it was personally written for them by a human — not a template, not an advertisement.
+WHAT PRYRO ACTUALLY IS (use these real facts — never invent features):
+Pryro is a complete cloud ERP platform that serves businesses worldwide. Its real modules are:
+  - Financial Management: invoicing, budgets, forecasting, cash flow tracking, proposals, quotations
+  - Inventory Management: real-time stock tracking, multi-warehouse, supplier management, analytics
+  - HR & Payroll: attendance tracking, payroll processing, benefits administration, scheduling
+  - Project Management: tasks, time tracking, timesheets, resource management, progress reports
+  - CRM: customer relationships, pipeline, invoicing integration
+  - AI-powered Analytics: real-time dashboards, business intelligence, instant insights
 
-The business type is: ${signals.niche || 'business'}. Write ONLY about what a ${signals.niche || 'business'} actually does. Do NOT mix up industries (e.g. never write about animals for a hospital, never write about bookings for a pharmacy).
+PRYRO'S REAL CREDIBILITY (you may reference ONE of these if it adds trust — do not list them all):
+  - Free trial available (pryro.com)
+  - 1–2 week implementation
+  - 99.9% uptime guarantee
+  - Enterprise-grade security: 256-bit encryption, SOC 2, GDPR, ISO 27001
+  - Trusted by 64,000+ businesses worldwide
+
+The business type being emailed is: ${signals.niche || 'business'}. Write ONLY about what a ${signals.niche || 'business'} actually does. Do NOT mix up industries.
 
 ═══════════════════════════════════════
 ABSOLUTE RULES — violating any single rule means the email fails:
@@ -122,62 +136,54 @@ ABSOLUTE RULES — violating any single rule means the email fails:
 
 RULE 1 — GREETING (first line of body):
 The very first line must be the greeting: "${signals.greeting}"
-Use this exactly. It must be on its own line, followed by a blank line, then the first observation sentence.
-NEVER use: "Dear Sir/Madam", "To Whom It May Concern", "Dear [Name]", "Hello there".
+Use this exactly as-is. It must be on its own line, followed by a blank line.
+NEVER change the greeting, never add "Dear", "Sir", "Madam", or "Hello there".
+If the greeting is "Hi there," — that means no first name was available. Do not invent a name.
 
-RULE 2 — FIRST OBSERVATION (second element, after greeting):
+RULE 2 — FIRST OBSERVATION (after greeting):
 Must include the company's name AND their city/location.
-Must be written in your own words as an observation about their operational situation — NOT a quote or paraphrase from their website.
-Must NEVER start with: "Most companies", "Many businesses", "Most clinics", "A lot of".
-Must NEVER use phrases like: "I was looking at your website", "I came across your website", "I noticed on your website", "I saw on your website", "According to your website", "Based on your website", "your website mentions", "I visited your website", "I found on your website".
-GOOD: "${signals.companyName} in ${signals.location || 'your city'} — clinics at this scale almost always end up managing billing, stock, and payroll in separate systems."
-BAD: "I was looking at ${signals.companyName}'s website — you provide healthcare services." / "Most pharmacies struggle with…"
+Written in your own words — NOT quoting or paraphrasing from their website.
+Must NEVER use: "I was looking at your website", "I came across your website", "I noticed on your website", "I visited your website", "I found on your website", "According to your website", "Based on your website".
+Must NEVER start with: "Most companies", "Many businesses", "Most clinics".
+GOOD: "${signals.companyName} in ${signals.location || 'your city'} — clinics at this stage almost always hit the same wall: HR, billing, and stock in separate systems."
 
 RULE 3 — SUBJECT LINE:
-Must be a sharp, specific observation or bold question about THIS company's business situation. Under 8 words ideally.
-End with a question mark OR a clear bold observation.
-NEVER use these subject line patterns (they read like support tickets, announcements, or generic outreach):
-  - "patient billing question" or "[X] question" format
-  - "quick question for [company]'s [team]" format
-  - "[X] — an [adjective] fix worth [time]" format
-  - "partnership", "collaboration", "opportunity", "proposal", "introduction", "follow-up", "ERP", "synergy"
-GOOD examples that work for healthcare:
-  "${signals.companyName} — billing, stock, and payroll still separate?"
-  "${signals.companyName} — is your admin team still reconciling manually?"
-  "${signals.companyName} — how long does month-end take?"
-  "Healthcare ops in [city] — one gap worth closing"
-  "${signals.companyName} — patient scheduling and billing in one place?"
+Under 8 words. Sharp, specific observation or bold question about THIS company's pain point.
+Reference the company name OR their exact operational problem.
+BANNED subjects: anything with "partnership", "collaboration", "opportunity", "proposal", "introduction", "follow-up", "ERP", "synergy", "question for [team]", "fix worth [time]".
+GOOD: "${signals.companyName} — HR payroll and billing still separate?" / "${signals.companyName} — expiry write-offs catching up?"
 
 RULE 4 — LENGTH & STRUCTURE:
-Body: greeting line + 3 short paragraphs. Under 120 words total (not counting the footer). Short sentences.
-Paragraph 1 (after greeting): Observation about their specific business (2 sentences)
-Paragraph 2: Problem sentence + Pryro sentence (2 sentences)
-Paragraph 3: CTA only (1 sentence ending with ?)
-Then: blank line + footer
+Greeting + 3 short paragraphs + footer. Under 100 words in the body (not counting footer).
+STRICT: every paragraph must contain MAXIMUM 2 sentences. Never put 3 or 4 sentences in one paragraph.
+  P1 (2 sentences max): One specific observation about this company's operational situation.
+  P2 (2 sentences max): One problem sentence. One Pryro module sentence.
+  P3 (1 sentence): One CTA question ending with ?
+  Then: blank line + footer verbatim
 
-RULE 5 — PRYRO MENTION:
-One sentence only in paragraph 2. Never list features. Never "best-in-class", "innovative", "cutting-edge", "seamless", "robust".
-NEVER mention "referral commission", "20-30%", or any commission offer in a first cold email. That is for follow-ups only.
-GOOD: "Pryro is an ERP that [specific fix for their specific problem]."
+RULE 5 — PRYRO SENTENCE (paragraph 2):
+One sentence only. Must name the SPECIFIC Pryro module relevant to this industry.
+Must describe what that module actually does for their specific problem.
+NEVER list all modules. NEVER say "best-in-class", "innovative", "cutting-edge", "seamless", "robust".
+NEVER mention "referral commission", "20-30%", or any commission offer. That is for follow-ups only.
+GOOD: "Pryro's HR & Payroll module handles attendance, payroll, and benefits — connected directly to financial management so your admin team works from one system."
 
 RULE 6 — CTA:
-Final paragraph = one soft question only. Must end with "?".
+One soft question ending with ?
+Where natural, reference Pryro's free trial: "...there's a free trial if you want to see it on your actual numbers" or "you can try it free".
 NEVER: "Let's schedule a call", "Book a demo", "Let me know if you're interested", "Please revert".
-GOOD: "Would a 10-minute call be worth it to see if this fits how you run ${signals.companyName}?"
+GOOD: "Would it be worth seeing how Pryro handles [specific thing] for a [sector] your size — there's a free trial if you want to test it on your own data?"
 
-RULE 7 — FOOTER (mandatory, exact format):
-After the CTA paragraph, leave a blank line then write the footer EXACTLY as provided below.
-Do not alter it, do not add "Kind regards" or "Yours faithfully" before it.
-The footer is already correctly formatted — copy it verbatim.
+RULE 7 — FOOTER:
+After the CTA, blank line then copy the footer VERBATIM. Do not alter it.
 
-RULE 8 — COMPLETELY BANNED PHRASES (instant fail):
-i hope this email finds you well | i hope you are doing well | i wanted to reach out | i am reaching out | touching base | circling back | checking in | as per | kindly revert | leverage | synergy | game-changer | cutting-edge | revolutionary | disruptive | world-class | industry-leading | state-of-the-art | innovative solution | seamless | robust | best-in-class | we help companies like yours | businesses like yours | unlock potential | drive growth | scale your business | warm regards | yours sincerely | best wishes | streamline | optimize | empower | transform | referral commission | 20-30% | 20–30% | i was looking at your website | i came across your website | i noticed on your website | i saw on your website | according to your website | based on your website | your website mentions | i visited your website | i found on your website | patient billing question | quick question for | an admin fix worth
+RULE 8 — BANNED PHRASES:
+i hope this email finds you well | i wanted to reach out | i am reaching out | touching base | circling back | checking in | as per | kindly revert | leverage | synergy | game-changer | cutting-edge | revolutionary | disruptive | world-class | industry-leading | state-of-the-art | innovative solution | seamless | robust | best-in-class | we help companies like yours | unlock potential | drive growth | scale your business | warm regards | yours sincerely | best wishes | streamline | optimize | empower | transform | referral commission | 20-30% | 20–30% | i was looking at your website | i came across your website | i noticed on your website | i saw on your website | based on your website | your website mentions
 
 RULE 9 — INDUSTRY ACCURACY:
-Only write about what a ${signals.niche || 'business'} actually does.
-Never mix in unrelated industry language. If the niche is "clinic", write about patients, billing, and medical stock — not animals, bookings, or crops.
+Write ONLY about what a ${signals.niche || 'business'} does. Never mix in unrelated industry language.
 
-OUTPUT FORMAT — respond with exactly:
+OUTPUT FORMAT:
 SUBJECT: [subject line]
 BODY:
 [email body including greeting, paragraphs, and footer]`;
