@@ -2,7 +2,7 @@
 -- SENDER PROFILE TABLE
 -- Run this in Supabase SQL Editor once.
 -- Each user has exactly one profile row (upsert on user_id).
--- ================================================================
+
 
 CREATE TABLE IF NOT EXISTS public.sender_profiles (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),

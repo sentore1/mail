@@ -121,72 +121,77 @@ Pryro is a complete cloud ERP platform that serves businesses worldwide. Its rea
   - CRM: customer relationships, pipeline, invoicing integration
   - AI-powered Analytics: real-time dashboards, business intelligence, instant insights
 
-PRYRO'S REAL CREDIBILITY (you may reference ONE of these if it adds trust — do not list them all):
+PRYRO'S REAL CREDIBILITY (you may reference ONE naturally — do not list them all):
   - Free trial available (pryro.com)
   - 1–2 week implementation
   - 99.9% uptime guarantee
-  - Enterprise-grade security: 256-bit encryption, SOC 2, GDPR, ISO 27001
   - Trusted by 64,000+ businesses worldwide
 
 The business type being emailed is: ${signals.niche || 'business'}. Write ONLY about what a ${signals.niche || 'business'} actually does. Do NOT mix up industries.
 
-═══════════════════════════════════════
-ABSOLUTE RULES — violating any single rule means the email fails:
-═══════════════════════════════════════
+PERMANENT RULES — every single rule is non-negotiable:
 
-RULE 1 — GREETING (first line of body):
-The very first line must be the greeting: "${signals.greeting}"
-Use this exactly as-is. It must be on its own line, followed by a blank line.
-NEVER change the greeting, never add "Dear", "Sir", "Madam", or "Hello there".
-If the greeting is "Hi there," — that means no first name was available. Do not invent a name.
+RULE 1 — GREETING (first line, mandatory):
+Use this exact greeting: "${signals.greeting}"
+Copy it verbatim. One line. Followed by a blank line.
+This is the ONLY allowed greeting format.
+PERMANENTLY BANNED: "Dear Sir/Madam", "To Whom It May Concern", "Hello there", "Dear [Name]".
+If the greeting is "Hi there," — use it as-is. Do not invent a name. Do not change it.
+The greeting is provided by the system and must be used exactly as given.
 
-RULE 2 — FIRST OBSERVATION (after greeting):
-Must include the company's name AND their city/location.
-Written in your own words — NOT quoting or paraphrasing from their website.
-Must NEVER use: "I was looking at your website", "I came across your website", "I noticed on your website", "I visited your website", "I found on your website", "According to your website", "Based on your website".
-Must NEVER start with: "Most companies", "Many businesses", "Most clinics".
-GOOD: "${signals.companyName} in ${signals.location || 'your city'} — clinics at this stage almost always hit the same wall: HR, billing, and stock in separate systems."
+RULE 2 — FIRST OBSERVATION (paragraph 1, line 1):
+Must name the company AND their city.
+Written entirely in your own words — never a quote or paraphrase from their website.
+Must feel like a genuine human insight, not a script opener.
+BANNED openers: "Most companies", "Many businesses", "Most clinics", "at this stage almost always", "clinics at this stage", "I was looking at your website", "I came across your website", "I noticed on your website".
 
-RULE 3 — SUBJECT LINE:
-Under 8 words. Sharp, specific observation or bold question about THIS company's pain point.
-Reference the company name OR their exact operational problem.
-BANNED subjects: anything with "partnership", "collaboration", "opportunity", "proposal", "introduction", "follow-up", "ERP", "synergy", "question for [team]", "fix worth [time]".
-GOOD: "${signals.companyName} — HR payroll and billing still separate?" / "${signals.companyName} — expiry write-offs catching up?"
+RULE 3 — SUBJECT LINE (under 8 words):
+Sharp specific question or bold observation naming this company's exact pain point.
+Must contain the company name OR a specific operational problem.
+BANNED: "partnership", "collaboration", "opportunity", "proposal", "introduction", "follow-up", "ERP", "synergy", "question for [team]", "fix worth [time]".
 
-RULE 4 — LENGTH & STRUCTURE:
-Greeting + 3 short paragraphs + footer. Under 100 words in the body (not counting footer).
-STRICT: every paragraph must contain MAXIMUM 2 sentences. Never put 3 or 4 sentences in one paragraph.
-  P1 (2 sentences max): One specific observation about this company's operational situation.
-  P2 (2 sentences max): One problem sentence. One Pryro module sentence.
-  P3 (1 sentence): One CTA question ending with ?
-  Then: blank line + footer verbatim
+RULE 4 — STRUCTURE AND LENGTH:
+  Line 1: Greeting (verbatim from Rule 1)
+  Blank line
+  P1 (MAXIMUM 2 sentences, each under 20 words): Specific observation about this company.
+  Blank line
+  P2 (EXACTLY 2 sentences, each under 20 words): One problem sentence. One Pryro module sentence.
+  Blank line
+  P3 (EXACTLY 1 sentence): CTA question ending with ?
+  Blank line
+  Footer (verbatim, no changes)
+Total body words (not counting footer): under 100.
+NEVER write 3 or 4 sentences in a single paragraph.
 
-RULE 5 — PRYRO SENTENCE (paragraph 2):
-One sentence only. Must name the SPECIFIC Pryro module relevant to this industry.
-Must describe what that module actually does for their specific problem.
-NEVER list all modules. NEVER say "best-in-class", "innovative", "cutting-edge", "seamless", "robust".
-NEVER mention "referral commission", "20-30%", or any commission offer. That is for follow-ups only.
-GOOD: "Pryro's HR & Payroll module handles attendance, payroll, and benefits — connected directly to financial management so your admin team works from one system."
+RULE 5 — PRYRO SENTENCE (P2, sentence 2):
+ONE sentence only. Name the SPECIFIC Pryro module for this industry.
+End with a brief mention of the free trial.
+BANNED: listing multiple modules, "best-in-class", "innovative", "cutting-edge", "seamless", "robust", "referral commission", "20-30%".
+GOOD: "Pryro's HR & Payroll module handles attendance and payroll in one place — there's a free trial if you want to test it on your own numbers."
 
-RULE 6 — CTA:
+RULE 6 — CTA (P3, one sentence):
 One soft question ending with ?
-Where natural, reference Pryro's free trial: "...there's a free trial if you want to see it on your actual numbers" or "you can try it free".
-NEVER: "Let's schedule a call", "Book a demo", "Let me know if you're interested", "Please revert".
-GOOD: "Would it be worth seeing how Pryro handles [specific thing] for a [sector] your size — there's a free trial if you want to test it on your own data?"
+MUST naturally reference Pryro's free trial.
+BANNED: "Let's schedule a call", "Book a demo", "Let me know if interested", "Please revert".
 
 RULE 7 — FOOTER:
-After the CTA, blank line then copy the footer VERBATIM. Do not alter it.
+Copy the footer below VERBATIM after P3. Blank line before it. No changes.
 
-RULE 8 — BANNED PHRASES:
-i hope this email finds you well | i wanted to reach out | i am reaching out | touching base | circling back | checking in | as per | kindly revert | leverage | synergy | game-changer | cutting-edge | revolutionary | disruptive | world-class | industry-leading | state-of-the-art | innovative solution | seamless | robust | best-in-class | we help companies like yours | unlock potential | drive growth | scale your business | warm regards | yours sincerely | best wishes | streamline | optimize | empower | transform | referral commission | 20-30% | 20–30% | i was looking at your website | i came across your website | i noticed on your website | i saw on your website | based on your website | your website mentions
+RULE 8 — PERMANENTLY BANNED PHRASES (instant disqualification):
+i hope this email finds you well | i wanted to reach out | i am reaching out | touching base | circling back | checking in | kindly revert | leverage | synergy | game-changer | cutting-edge | revolutionary | disruptive | world-class | industry-leading | state-of-the-art | innovative solution | seamless | robust | best-in-class | we help companies like yours | unlock potential | drive growth | scale your business | warm regards | yours sincerely | best wishes | streamline | optimize | empower | transform | referral commission | 20-30% | 20–30% | i was looking at your website | i came across your website | based on your website | your website mentions | should have been automated a long time ago | easy to miss until an audit | clinics at this stage almost always | businesses at this stage | companies at this stage | at this stage almost always hit the same wall
 
 RULE 9 — INDUSTRY ACCURACY:
 Write ONLY about what a ${signals.niche || 'business'} does. Never mix in unrelated industry language.
 
-OUTPUT FORMAT:
+RULE 10 — COMPANY NAME:
+Use the company name exactly as provided: "${signals.companyName}"
+Do not add, remove, or change any characters. Do not add "(Ltd)", "(Inc)", etc.
+If the company name looks incomplete or contains special characters, still use it as-is.
+
+OUTPUT FORMAT (respond with exactly this structure):
 SUBJECT: [subject line]
 BODY:
-[email body including greeting, paragraphs, and footer]`;
+[email body]`;
 }
 
 // ─── User prompt ──────────────────────────────────────────────────────────────
@@ -231,16 +236,24 @@ Write the email now. Follow all 9 rules exactly. The problem paragraph MUST be w
 // ─── Parse AI response ────────────────────────────────────────────────────────
 
 function parseAIResponse(raw: string): { subject: string; body: string } | null {
+  // Strip any separator lines the AI may have echoed from the system prompt
+  const cleaned = raw
+    .replace(/[═─━=]{4,}/g, '')        // ════ or ──── or ==== lines
+    .replace(/[-─]{4,}/g, '')            // ---- lines
+    .replace(/\*{4,}/g, '')              // **** lines
+    .replace(/^PERMANENT RULES.*$/gm, '')
+    .replace(/^RULE \d+.*$/gm, '')       // "RULE 1 —" lines echoed from prompt
+    .trim();
   // Try SUBJECT: / BODY: format
-  const sm = raw.match(/SUBJECT:\s*(.+?)(?:\n|$)/i);
-  const bm = raw.match(/BODY:\s*([\s\S]+?)$/i);
+  const sm = cleaned.match(/SUBJECT:\s*(.+?)(?:\n|$)/i);
+  const bm = cleaned.match(/BODY:\s*([\s\S]+?)$/i);
   if (sm && bm) {
     const subject = sm[1]?.trim().replace(/^["']|["']$/g, '').replace(/\*\*(.+?)\*\*/g, '$1') ?? '';
     const body    = bm[1]?.trim().replace(/\*\*(.+?)\*\*/g, '$1').replace(/^#{1,6}\s+/gm, '').replace(/^[-*+]\s+/gm, '') ?? '';
     if (subject && body) return { subject, body };
   }
   // Fallback: first non-empty line = subject, rest = body
-  const lines = raw.trim().split('\n').filter(l => l.trim());
+  const lines = cleaned.split('\n').filter(l => l.trim());
   if (lines.length >= 2) {
     const subject = (lines[0] ?? '').replace(/^(SUBJECT:|Subject:)\s*/i, '').trim();
     const body    = lines.slice(1).join('\n').replace(/^(BODY:|Body:)\s*/i, '').trim();
@@ -253,12 +266,21 @@ function parseAIResponse(raw: string): { subject: string; body: string } | null 
 // If the AI dropped or mangled the footer, stamp the correct one back on.
 
 function enforceFooter(body: string, signOff: string): string {
+  // Strip separator lines the AI may have echoed from the system prompt
+  const cleanBody = body
+    .replace(/[═─━=]{4,}/gm, '')
+    .replace(/[-─]{4,}/gm, '')
+    .replace(/^PERMANENT RULES.*$/gm, '')
+    .replace(/^RULE \d+.*$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
   // signOff from sender profile always starts with "Best regards,"
   // If the body already ends with the footer (or close to it), don't double-stamp.
   const footerSignal = signOff.split('\n')[2] ?? ''; // e.g. the full name line
-  if (footerSignal && body.includes(footerSignal)) return body;
+  if (footerSignal && cleanBody.includes(footerSignal)) return cleanBody;
   // Strip any existing sign-off attempts so we don't get two footers
-  const stripped = body
+  const stripped = cleanBody
     .replace(/\n+(best regards|kind regards|warm regards|yours (sincerely|faithfully)|regards)[,.]?[\s\S]*$/i, '')
     .replace(/\n+[A-Z][a-z]+ from [A-Z][a-z]+[\s\S]*$/m, '')
     .trimEnd();
@@ -296,13 +318,16 @@ export async function buildPersonalizedEmail(
 
   // ── Try AI ─────────────────────────────────────────────────────────────
   if (aiProvider) {
+    console.log(`[EmailBuilder] Calling ${aiProvider.provider}/${aiProvider.active_model} for "${companyName}" (niche=${params.niche}, idx=${params.emailIndex ?? 0})`);
     try {
       const system = buildSystemPrompt(signals);
       const user   = buildUserPrompt(params);
       const raw    = await callAI(aiProvider, system, user);
       const parsed = parseAIResponse(raw);
 
-      if (parsed) {
+      if (!parsed) {
+        console.warn(`[EmailBuilder] Could not parse AI response for "${companyName}" — raw: ${raw.slice(0, 200)}`);
+      } else {
         // Enforce footer: if AI dropped or altered it, stamp the correct one back
         const bodyWithFooter = enforceFooter(parsed.body, signals.signOff);
 
@@ -313,7 +338,10 @@ export async function buildPersonalizedEmail(
           externalPersonalizationScore: signals.personalizationScore,
         });
 
-        if (quality.passed && quality.score >= 60) {
+        console.log(`[EmailBuilder] Quality check for "${companyName}": score=${quality.score}, passed=${quality.passed}, blocks=${quality.flags.filter(f=>f.severity==='block').map(f=>f.type).join(',') || 'none'}`);
+
+        if (quality.passed && quality.score >= 70) {
+          console.log(`[EmailBuilder] ✅ AI email accepted for "${companyName}" (score=${quality.score})`);
           return {
             subject: parsed.subject,
             body: bodyWithFooter,
@@ -324,11 +352,13 @@ export async function buildPersonalizedEmail(
             dataSource: signals.personalizationScore >= 65 ? 'ai_personalized' : 'ai_industry',
           };
         }
-        console.warn(`[EmailBuilder] AI output for "${companyName}" failed quality (score ${quality.score}). Falling back to template.`);
+        console.warn(`[EmailBuilder] ⚠️ AI output for "${companyName}" scored ${quality.score}/70. Blocks: ${quality.flags.filter(f=>f.severity==='block').map(f=>f.message.slice(0,60)).join(' | ') || 'none'}. Falling back.`);
       }
     } catch (err: any) {
-      console.warn(`[EmailBuilder] AI failed for "${companyName}": ${err?.message}. Using template.`);
+      console.error(`[EmailBuilder] ❌ AI call failed for "${companyName}": ${err?.message}`);
     }
+  } else {
+    console.log(`[EmailBuilder] No AI provider available for "${companyName}" — using template directly`);
   }
 
   // ── Fallback ───────────────────────────────────────────────────────────
