@@ -1,7 +1,7 @@
 "use client";
 
 import { ActiveModule } from "@/types/platform";
-import { Radio, Mail, Settings, Layout, LogOut, Server, Clock, Menu, BarChart2, FileText, Megaphone, Zap, GitBranch, ShieldCheck } from "lucide-react";
+import { Radio, Mail, Settings, Layout, LogOut, Server, Clock, Menu, BarChart2, FileText, Megaphone, Zap, GitBranch, ShieldCheck, FlaskConical, Tag, Link2, MessageSquare } from "lucide-react";
 import { NotificationsBell } from "./NotificationsPanel";
 
 interface TopBarProps {
@@ -13,18 +13,22 @@ interface TopBarProps {
 }
 
 const moduleInfo: Record<ActiveModule, { label: string; desc: string; icon: React.ElementType }> = {
-  scraper:       { label: "Email Scraper",    desc: "Find and scrape leads by niche & location",          icon: Radio },
-  "email-writer":{ label: "AI Email Writer",  desc: "Generate personalized cold outreach emails",         icon: Mail },
-  crm:           { label: "CRM Pipeline",     desc: "Manage and track your outreach pipeline",            icon: Layout },
-  "smtp-manager":{ label: "SMTP Manager",     desc: "Manage your email sending accounts",                 icon: Server },
-  "ai-settings": { label: "AI Settings",      desc: "Configure AI providers and active model",            icon: Settings },
-  "follow-up":   { label: "Follow-Up System", desc: "Manage automated email follow-up sequences",         icon: Clock },
-  analytics:     { label: "Analytics",        desc: "Real-time campaign performance and insights",        icon: BarChart2 },
-  campaigns:     { label: "Campaigns",        desc: "Create and manage email campaigns",                  icon: Megaphone },
-  templates:     { label: "Templates",        desc: "Manage reusable email templates",                    icon: FileText },
-  webhooks:      { label: "Webhooks",         desc: "Send real-time events to Zapier or your own server", icon: Zap },
-  sequences:     { label: "Sequence Builder", desc: "Configure auto follow-up delays and stop rules",     icon: GitBranch },
-  verification:  { label: "Email Verification",desc:"Verify email addresses before sending",              icon: ShieldCheck },
+  scraper:        { label: "Email Scraper",     desc: "Find and scrape leads by niche & location",          icon: Radio },
+  "email-writer": { label: "AI Email Writer",   desc: "Generate personalized cold outreach emails",         icon: Mail },
+  crm:            { label: "CRM Pipeline",      desc: "Manage and track your outreach pipeline",            icon: Layout },
+  "smtp-manager": { label: "SMTP Manager",      desc: "Manage your email sending accounts",                 icon: Server },
+  "ai-settings":  { label: "AI Settings",       desc: "Configure AI providers and active model",            icon: Settings },
+  "follow-up":    { label: "Follow-Up System",  desc: "Manage automated email follow-up sequences",         icon: Clock },
+  analytics:      { label: "Analytics",         desc: "Real-time campaign performance and insights",        icon: BarChart2 },
+  campaigns:      { label: "Campaigns",         desc: "Create and manage email campaigns",                  icon: Megaphone },
+  templates:      { label: "Templates",         desc: "Manage reusable email templates",                    icon: FileText },
+  webhooks:       { label: "Webhooks",          desc: "Send real-time events to Zapier or your own server", icon: Zap },
+  sequences:      { label: "Sequence Builder",  desc: "Configure auto follow-up delays and stop rules",     icon: GitBranch },
+  "ab-testing":   { label: "A/B Testing",       desc: "Test subject lines and email variants",              icon: FlaskConical },
+  "custom-fields":{ label: "Custom Fields",     desc: "Add extra data fields to your leads",                icon: Tag },
+  integrations:   { label: "Integrations",      desc: "Connect Gmail, Outlook, HubSpot, Zapier and more",   icon: Link2 },
+  whatsapp:       { label: "WhatsApp Alerts",   desc: "Get WhatsApp notifications for email events",        icon: MessageSquare },
+  verification:   { label: "Email Verification",desc: "Verify email addresses before sending",              icon: ShieldCheck },
 };
 
 export default function TopBar({ activeModule, userEmail, userId, onLogout, onMenuToggle }: TopBarProps) {

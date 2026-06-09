@@ -6,7 +6,7 @@ import {
   Mail, RefreshCw, Copy, Save, ChevronDown, Loader2,
   CheckCircle, Zap, Send, CheckSquare, Square,
   ChevronLeft, ChevronRight, X, AtSign, Edit3,
-  Users, Sparkles, PenLine,
+  Users, Sparkles, PenLine, UserCircle, AlertTriangle,
 } from "lucide-react";
 import { createClient } from "../../../supabase/client";
 import { toast } from "sonner";
@@ -14,6 +14,7 @@ import { toast } from "sonner";
 interface EmailWriterProps {
   userId: string;
   preloadedLead?: Lead | null;
+  onGoToProfile?: () => void;   // navigate to sender-profile module
 }
 
 const TONE_OPTIONS: { value: ToneType; label: string; desc: string }[] = [
@@ -22,7 +23,7 @@ const TONE_OPTIONS: { value: ToneType; label: string; desc: string }[] = [
   { value: "Surgical",   label: "Surgical",   desc: "Hyper-personalized, proves you did your homework" },
 ];
 
-export default function EmailWriterModule({ userId, preloadedLead }: EmailWriterProps) {
+export default function EmailWriterModule({ userId, preloadedLead, onGoToProfile }: EmailWriterProps) {
   const supabase = createClient();
 
   // ── Shared ────────────────────────────────────────────────────────────────
@@ -48,6 +49,7 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
   const [leadSearch, setLeadSearch]           = useState("");
   const [isSaving, setIsSaving]               = useState(false);
   const [isSendingSingle, setIsSendingSingle] = useState(false);
+  const [emailQuality, setEmailQuality]       = useState<{ score: number; personalizationScore: number; dataSource: string; qualityPassed: boolean } | null>(null);
   const [isEnriching, setIsEnriching]         = useState(false);
   const [enriched, setEnriched]               = useState(false);
   const [useCustomRecipient, setUseCustomRecipient] = useState(false);
@@ -79,10 +81,12 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isOnPlatformRef = useRef(true);
 
-  // ── Sender name — editable per user ──────────────────────────────────────
-  const [senderName, setSenderName] = useState("");
-  const [senderTitle, setSenderTitle] = useState("Executive Sales");
-  const [senderPhone, setSenderPhone] = useState("");
+  // ── Sender profile — loaded from sender_profiles table ───────────────────
+  const [senderName,       setSenderName]       = useState("");
+  const [senderPhone,      setSenderPhone]       = useState("");
+  const [senderTitle,      setSenderTitle]       = useState("Executive Sales"); // kept for compat
+  const [profileComplete,  setProfileComplete]   = useState(true);
+  const [profileDisplay,   setProfileDisplay]    = useState<{ name: string; title: string; company: string; phone: string } | null>(null);
 
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(() => { fetchLeads(); loadSenderProfile(); }, []);
@@ -119,26 +123,34 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
     }
   };
 
-  /** Load sender name from active SMTP account */
+  /** Load sender details from the sender_profiles table (single source of truth) */
   const loadSenderProfile = async () => {
-    // Only pre-fill if the user hasn't already set a name
     try {
       const { data } = await supabase
-        .from("smtp_accounts")
-        .select("email, sender_name")
+        .from("sender_profiles")
+        .select("full_name, job_title, company_name, phone, is_complete")
         .eq("user_id", userId)
-        .eq("status", "active")
-        .order("sent_today", { ascending: true })
-        .limit(1)
-        .single();
+        .maybeSingle();
       if (data) {
-        const name = data.sender_name ||
-          data.email.split("@")[0]
-            .replace(/[._\-]/g, " ")
-            .replace(/\b\w/g, (c: string) => c.toUpperCase());
-        setSenderName(name);
+        setSenderName(data.full_name  || "");
+        setSenderPhone(data.phone     || "");
+        setSenderTitle(data.job_title || "Executive Sales");
+        setProfileComplete(data.is_complete ?? false);
+        setProfileDisplay({
+          name:    data.full_name    || "",
+          title:   data.job_title   || "",
+          company: data.company_name || "",
+          phone:   data.phone        || "",
+        });
+      } else {
+        setProfileComplete(false);
+        setProfileDisplay(null);
       }
-    } catch { /* no SMTP account yet */ }
+    } catch {
+      // sender_profiles table may not exist yet — treat as incomplete
+      setProfileComplete(false);
+      setProfileDisplay(null);
+    }
   };
 
   /** Save company/service — no-op since profile is hardcoded */
@@ -192,30 +204,55 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
   // ── Single: generate ──────────────────────────────────────────────────────
   const generateEmail = async () => {
     if (!selectedLead) { toast.error("Select a lead first"); return; }
+
+    // Q7: block generation if profile is incomplete
+    if (!profileComplete) {
+      toast.error("Complete your Sender Profile first — go to Settings → Sender Profile.");
+      onGoToProfile?.();
+      return;
+    }
+
     setIsGenerating(true);
     setGeneratedEmail(null);
+    setEmailQuality(null);
     setIsEditing(false);
     try {
       const { generateAIEmail } = await import("@/utils/ai-email-generator");
-      const { subject, body } = await generateAIEmail({
+      const result = await generateAIEmail({
         lead: {
-          company_name: selectedLead.company_name,
-          niche: selectedLead.niche,
-          location: selectedLead.location,
+          company_name:    selectedLead.company_name,
+          niche:           selectedLead.niche,
+          location:        selectedLead.location,
           company_context: selectedLead.company_context,
+          website:         (selectedLead as any).website ?? null,
+          contact_name:    (selectedLead as any).contact_name ?? null,
         },
         yourCompany,
         yourService,
         tone,
         customPainPoint: customPainPoint || undefined,
         userId,
-        senderName: senderName || undefined,
-        senderTitle: senderTitle || undefined,
-        senderPhone: senderPhone || undefined,
+        skipResearch: false,
       });
-      setGeneratedEmail({ subject, body, model: "AI" });
-      setEditSubject(subject);
-      setEditBody(body);
+
+      const extResult = result as any;
+      setGeneratedEmail({ subject: result.subject, body: result.body, model: extResult.model || "AI" });
+      setEditSubject(result.subject);
+      setEditBody(result.body);
+
+      if (extResult.qualityScore !== undefined) {
+        setEmailQuality({
+          score: extResult.qualityScore,
+          personalizationScore: extResult.personalizationScore || 0,
+          dataSource: extResult.dataSource || "template",
+          qualityPassed: extResult.qualityPassed !== false,
+        });
+      }
+
+      // Warn if profile was incomplete at generation time
+      if (extResult.profileIncomplete) {
+        toast.warning("Sender profile incomplete — go to Settings → Sender Profile to fix your footer.");
+      }
     } catch (err: any) {
       toast.error(err.message || "Failed to generate email. Check AI settings.");
     } finally {
@@ -391,15 +428,22 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
   const generateBulkEmails = async () => {
     if (selectedLeadIds.size === 0) { toast.error("Select at least one lead"); return; }
 
-    const selected = leads.filter((l) => selectedLeadIds.has(l.id));
-    const withEmail = selected.filter(l => l.email && l.email.trim());
-    const noEmail = selected.filter(l => !l.email || !l.email.trim());
+    // Q7: block bulk generation if profile is incomplete
+    if (!profileComplete) {
+      toast.error("Complete your Sender Profile first — Settings → Sender Profile.");
+      onGoToProfile?.();
+      return;
+    }
+
+    const selected   = leads.filter((l) => selectedLeadIds.has(l.id));
+    const withEmail  = selected.filter(l => l.email && l.email.trim());
+    const noEmail    = selected.filter(l => !l.email || !l.email.trim());
 
     if (noEmail.length > 0) {
-      toast.warning(`${noEmail.length} lead${noEmail.length > 1 ? 's' : ''} have no email and will be skipped.`);
+      toast.warning(`${noEmail.length} lead${noEmail.length > 1 ? "s" : ""} have no email and will be skipped.`);
     }
     if (withEmail.length === 0) {
-      toast.error("None of the selected leads have an email address. Add emails first.");
+      toast.error("None of the selected leads have an email address.");
       return;
     }
 
@@ -412,21 +456,22 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           leads: withEmail.map((l) => ({
-            id: l.id,
-            company_name: l.company_name,
-            niche: l.niche,
-            location: l.location,
+            id:              l.id,
+            company_name:    l.company_name,
+            niche:           l.niche,
+            location:        l.location,
             company_context: l.company_context,
-            email: l.email,
-            website: (l as any).website ?? null,
-            source_url: (l as any).source_url ?? null,
+            email:           l.email,
+            contact_name:    (l as any).contact_name  ?? null,
+            website:         (l as any).website       ?? null,
+            source_url:      (l as any).source_url    ?? null,
           })),
           yourCompany,
           yourService,
           tone: bulkTone,
           customPainPoint: bulkPainPoint || undefined,
-          senderName: senderName || undefined,
-          senderTitle: senderTitle || undefined,
+          // profile fields sent as hint — API will prefer the DB row
+          senderName:  senderName  || undefined,
           senderPhone: senderPhone || undefined,
         }),
       });
@@ -474,6 +519,9 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
                 body: e.body,
                 model: e.model,
                 isFallback: e.isFallback,
+                personalizationScore: e.personalizationScore ?? 0,
+                qualityScore: e.qualityScore ?? 0,
+                dataSource: e.dataSource ?? 'template',
                 isEditing: false,
                 editSubject: e.subject,
                 editBody: e.body,
@@ -789,45 +837,49 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
               )}
             </div>
 
-            {/* Sender identity */}
-            <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 flex flex-col gap-3">
-              <p className="text-xs font-semibold text-blue-800 flex items-center gap-1.5">
-                <AtSign size={12} />
-                Your Signature — appears at the bottom of every email
-              </p>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Your Name</label>
-                  <input
-                    value={senderName}
-                    onChange={(e) => setSenderName(e.target.value)}
-                    placeholder="e.g. Rukundo Abkar"
-                    className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Your Title</label>
-                  <input
-                    value={senderTitle}
-                    onChange={(e) => setSenderTitle(e.target.value)}
-                    placeholder="e.g. Executive Sales"
-                    className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"
-                  />
+            {/* Sender profile card — read-only, driven by sender_profiles table */}
+            {!profileComplete ? (
+              <div
+                className="flex items-start gap-3 p-4 rounded-xl bg-amber-50 border border-amber-200 cursor-pointer hover:bg-amber-100 transition-colors"
+                onClick={() => onGoToProfile?.()}
+                role="button"
+                title="Go to Sender Profile settings"
+              >
+                <AlertTriangle size={15} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-amber-800">Sender profile not set up</p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    Your name, title, company, and phone aren't configured yet — your emails will have a missing footer.
+                    <span className="font-semibold underline ml-1">Click here to set it up →</span>
+                  </p>
                 </div>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Your Phone <span className="text-gray-400 font-normal">(optional — shown in signature)</span></label>
-                <input
-                  value={senderPhone}
-                  onChange={(e) => setSenderPhone(e.target.value)}
-                  placeholder="e.g. +256 700 123 456"
-                  className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"
-                />
+            ) : profileDisplay && (
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                    <UserCircle size={16} className="text-blue-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Your sender footer</p>
+                    <pre className="text-xs text-gray-800 font-sans whitespace-pre leading-relaxed">
+{`Best regards,
+
+${profileDisplay.name}
+${profileDisplay.title}
+${profileDisplay.company}
+${profileDisplay.phone}`}
+                    </pre>
+                  </div>
+                </div>
+                <button
+                  onClick={() => onGoToProfile?.()}
+                  className="flex-shrink-0 text-xs font-medium text-blue-600 hover:text-blue-700 underline"
+                >
+                  Edit
+                </button>
               </div>
-              <p className="text-[10px] text-blue-600">
-                Signature preview: <span className="font-medium">{senderName || "Your Name"} · {senderTitle || "Executive Sales"}{senderPhone ? ` · ${senderPhone}` : ""} · Pryro</span>
-              </p>
-            </div>
+            )}
 
             {/* Tone selector */}
             <div>
@@ -883,6 +935,29 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
                     <CheckCircle size={14} className="text-green-500" />
                     <span className="text-xs font-semibold text-gray-700">Generated Email</span>
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">{generatedEmail.model}</span>
+                    {emailQuality && (
+                      <>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                          emailQuality.score >= 75 ? 'bg-green-50 text-green-700' :
+                          emailQuality.score >= 50 ? 'bg-yellow-50 text-yellow-700' :
+                          'bg-red-50 text-red-700'
+                        }`}>
+                          Quality: {emailQuality.score}/100
+                        </span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                          emailQuality.personalizationScore >= 60 ? 'bg-green-50 text-green-700' :
+                          emailQuality.personalizationScore >= 35 ? 'bg-yellow-50 text-yellow-700' :
+                          'bg-gray-50 text-gray-500'
+                        }`}>
+                          Personal: {emailQuality.personalizationScore}%
+                        </span>
+                        {emailQuality.dataSource !== 'template_fallback' && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 font-semibold capitalize">
+                            {emailQuality.dataSource.replace(/_/g, ' ')}
+                          </span>
+                        )}
+                      </>
+                    )}
                   </div>
                   <div className="flex items-center gap-1">
                     <button onClick={() => { setIsEditing((v) => !v); setEditSubject(generatedEmail.subject); setEditBody(generatedEmail.body); }}
@@ -969,45 +1044,35 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
           <div className="p-6 flex flex-col gap-5">
             {bulkEmails.length === 0 && !isGenerating ? (
               <>
-                {/* Sender identity */}
-                <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 flex flex-col gap-3">
-                  <p className="text-xs font-semibold text-blue-800 flex items-center gap-1.5">
-                    <AtSign size={12} />
-                    Your Signature — appears at the bottom of every email
-                  </p>
-                  <div className="grid grid-cols-2 gap-3">
+                {/* Sender profile card — bulk mode */}
+                {!profileComplete ? (
+                  <div
+                    className="flex items-start gap-3 p-4 rounded-xl bg-amber-50 border border-amber-200 cursor-pointer hover:bg-amber-100 transition-colors"
+                    onClick={() => onGoToProfile?.()}
+                    role="button"
+                  >
+                    <AlertTriangle size={15} className="text-amber-600 mt-0.5 flex-shrink-0" />
                     <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">Your Name</label>
-                      <input
-                        value={senderName}
-                        onChange={(e) => setSenderName(e.target.value)}
-                        placeholder="Type your full name here"
-                        className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">Your Title</label>
-                      <input
-                        value={senderTitle}
-                        onChange={(e) => setSenderTitle(e.target.value)}
-                        placeholder="e.g. Executive Sales"
-                        className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"
-                      />
+                      <p className="text-sm font-semibold text-amber-800">Sender profile not set up</p>
+                      <p className="text-xs text-amber-700 mt-0.5">
+                        Your name and contact details won't appear in the email footer.
+                        <span className="font-semibold underline ml-1">Set up profile →</span>
+                      </p>
                     </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">Your Phone <span className="text-gray-400 font-normal">(optional — shown in signature)</span></label>
-                    <input
-                      value={senderPhone}
-                      onChange={(e) => setSenderPhone(e.target.value)}
-                      placeholder="e.g. +256 700 123 456"
-                      className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 focus:border-blue-400 bg-white outline-none"
-                    />
+                ) : profileDisplay && (
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <UserCircle size={15} className="text-blue-600 flex-shrink-0" />
+                      <p className="text-xs text-gray-700 truncate">
+                        Sending as <span className="font-semibold">{profileDisplay.name}</span>
+                        {profileDisplay.title ? ` · ${profileDisplay.title}` : ""}
+                        {profileDisplay.phone ? ` · ${profileDisplay.phone}` : ""}
+                      </p>
+                    </div>
+                    <button onClick={() => onGoToProfile?.()} className="text-xs text-blue-600 hover:underline flex-shrink-0">Edit</button>
                   </div>
-                  <p className="text-[10px] text-blue-600">
-                    Signature preview: <span className="font-medium">{senderName || "Your Name"} · {senderTitle || "Executive Sales"}{senderPhone ? ` · ${senderPhone}` : ""} · Pryro</span>
-                  </p>
-                </div>
+                )}
 
                 {/* Tone */}
                 <div>
@@ -1242,6 +1307,15 @@ export default function EmailWriterModule({ userId, preloadedLead }: EmailWriter
                                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200 font-medium">Template</span>
                               ) : (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-medium">AI</span>
+                              )}
+                              {email.personalizationScore > 0 && (
+                                <span className={`ml-1 text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                  email.personalizationScore >= 60 ? 'bg-green-50 text-green-700' :
+                                  email.personalizationScore >= 35 ? 'bg-yellow-50 text-yellow-700' :
+                                  'bg-gray-50 text-gray-500'
+                                }`}>
+                                  {email.personalizationScore}%
+                                </span>
                               )}
                             </td>
                             <td className="px-4 py-3">

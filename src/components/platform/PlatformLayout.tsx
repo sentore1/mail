@@ -16,6 +16,10 @@ import AnalyticsModule from "./AnalyticsModule";
 import WebhooksModule from "./WebhooksModule";
 import SequenceBuilderModule from "./SequenceBuilderModule";
 import ABTestingModule from "./ABTestingModule";
+import CustomFieldsModule from "./CustomFieldsModule";
+import IntegrationsModule from "./IntegrationsModule";
+import WhatsAppNotificationsModule from "./WhatsAppNotificationsModule";
+import SenderProfileModule from "./SenderProfileModule";
 import { createClient } from "../../../supabase/client";
 import { useRouter } from "next/navigation";
 
@@ -138,6 +142,7 @@ export default function PlatformLayout({ userId, userEmail }: PlatformLayoutProp
               key={preloadedLead?.id || "email-writer"}
               userId={userId}
               preloadedLead={preloadedLead}
+              onGoToProfile={() => handleModuleChange("sender-profile")}
             />
           </LazyModule>
 
@@ -167,6 +172,26 @@ export default function PlatformLayout({ userId, userEmail }: PlatformLayoutProp
 
           <LazyModule active={activeModule === "sequences"}>
             <SequenceBuilderModule userId={userId} />
+          </LazyModule>
+
+          <LazyModule active={activeModule === "ab-testing"}>
+            <ABTestingModule userId={userId} />
+          </LazyModule>
+
+          <LazyModule active={activeModule === "custom-fields"}>
+            <CustomFieldsModule userId={userId} />
+          </LazyModule>
+
+          <LazyModule active={activeModule === "integrations"}>
+            <IntegrationsModule userId={userId} />
+          </LazyModule>
+
+          <LazyModule active={activeModule === "whatsapp"}>
+            <WhatsAppNotificationsModule userId={userId} />
+          </LazyModule>
+
+          <LazyModule active={activeModule === "sender-profile"}>
+            <SenderProfileModule userId={userId} />
           </LazyModule>
         </main>
       </div>

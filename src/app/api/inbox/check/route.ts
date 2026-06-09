@@ -346,6 +346,17 @@ async function processInbox(
       }
 
       result.newReplies++;
+
+      // Fire WhatsApp notification for reply
+      try {
+        const { notifyWhatsApp } = await import("@/utils/whatsapp-notifier");
+        await notifyWhatsApp(config.user_id, "reply.received", {
+          leadId,
+          companyName: parsed.from,
+          sentiment: "neutral",
+          subject: parsed.subject,
+        });
+      } catch { /* non-fatal */ }
     } catch (err) {
       result.errors.push(`Error processing message: ${err instanceof Error ? err.message : String(err)}`);
     }

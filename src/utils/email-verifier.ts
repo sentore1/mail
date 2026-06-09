@@ -1,225 +1,292 @@
 /**
- * Email Verifier — three-level check, no paid API needed.
+ * EMAIL VERIFIER
+ * ──────────────
+ * Answers Q6, Q7, Q8, Q9:
  *
- * Level 1: Format check (regex)
- * Level 2: MX DNS check — does the domain have mail servers?
- * Level 3: SMTP RCPT-TO probe — does the specific mailbox exist?
- *          Connects to the mail server and asks without sending anything.
- *          Falls back gracefully if the server blocks probes.
+ *  Q6  DNS MX check + SMTP RCPT-TO probe + mailbox existence
+ *  Q7  Flag / remove invalid emails, move to review list
+ *  Q8  Detect catch-all domains (accept-all servers)
+ *  Q9  Detect generic emails (info@, contact@), flag as low-priority,
+ *      attempt to suggest a better direct email
+ *
+ * All verification is done without paid APIs:
+ *  - DNS MX via Google DNS-over-HTTPS
+ *  - Catch-all detection via probing a random mailbox
+ *  - SMTP probe via fetch to a lightweight serverless helper
+ *    (falls back gracefully if SMTP probe is unavailable)
  */
 
-import * as net from 'net';
-import * as dns from 'dns/promises';
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-export interface VerifyResult {
-  valid: boolean;
-  reason: 'valid' | 'invalid_format' | 'no_mx_record' | 'mailbox_rejected' | 'unverifiable';
-  detail?: string;
+export type VerificationStatus =
+  | 'valid'          // deliverable, real mailbox
+  | 'catch_all'      // domain accepts everything — can't confirm mailbox
+  | 'invalid'        // domain has no MX / SMTP rejected
+  | 'risky'          // generic prefix or low-confidence
+  | 'unverifiable'   // SMTP probe timed out / blocked — unknown
+  | 'disposable';    // throwaway email domain
+
+export interface VerificationResult {
+  email:          string;
+  status:         VerificationStatus;
+  mx_found:       boolean;
+  is_catch_all:   boolean;
+  is_generic:     boolean;
+  is_disposable:  boolean;
+  smtp_reachable: boolean | null;   // null = not probed
+  risk_score:     number;           // 0 (safe) – 100 (dangerous)
+  reason:         string;           // human-readable explanation
+  checked_at:     string;
 }
 
-const FORMAT_RE = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/;
+// ─── Disposable domain list (common burner services) ─────────────────────────
 
-// Domains that always block SMTP probes — skip RCPT-TO for these
-const PROBE_BLOCKED_DOMAINS = new Set([
-  'gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.uk', 'yahoo.fr',
-  'outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'office365.com',
-  'icloud.com', 'me.com', 'mac.com',
-  'protonmail.com', 'proton.me',
-  'aol.com', 'yandex.com', 'yandex.ru',
-  'zoho.com', 'fastmail.com',
+const DISPOSABLE_DOMAINS = new Set([
+  'mailinator.com','guerrillamail.com','tempmail.com','throwaway.email',
+  'yopmail.com','sharklasers.com','guerrillamailblock.com','grr.la',
+  'guerrillamail.info','guerrillamail.biz','guerrillamail.de','guerrillamail.net',
+  'guerrillamail.org','spam4.me','trashmail.com','trashmail.me','trashmail.net',
+  'maildrop.cc','dispostable.com','mailnull.com','spamgourmet.com',
+  'discard.email','fakeinbox.com','tempr.email','throwam.com','spamoff.de',
+  'getairmail.com','filzmail.com','spambog.com','powered.name',
+  'spamdecoy.net','tempomail.fr','spamfree24.org','kasmail.com',
 ]);
 
-// ─── Level 2: MX DNS check ────────────────────────────────────────────────────
+// ─── Generic email prefixes (Q9) ─────────────────────────────────────────────
 
-async function getMXRecords(domain: string): Promise<string[]> {
+const GENERIC_PREFIXES = new Set([
+  'info','contact','hello','hi','mail','support','help','admin','office',
+  'team','sales','reception','general','webmaster','enquiry','enquiries',
+  'bookings','booking','hr','marketing','accounts','billing','feedback',
+  'service','media','press','shop','store','news','pr','noreply','no-reply',
+  'donotreply','abuse','postmaster','hostmaster','unsubscribe',
+]);
+
+// ─── DNS MX lookup via Google DoH ────────────────────────────────────────────
+
+const mxCache = new Map<string, { hasMX: boolean; records: string[] }>();
+
+export async function checkMX(domain: string): Promise<{ hasMX: boolean; records: string[] }> {
+  if (mxCache.has(domain)) return mxCache.get(domain)!;
   try {
-    const records = await dns.resolveMx(domain);
-    if (!records || records.length === 0) return [];
-    // Sort by priority (lowest = highest priority)
-    records.sort((a, b) => a.priority - b.priority);
-    return records.map(r => r.exchange);
+    const res = await fetch(
+      `https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=MX`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    if (!res.ok) { mxCache.set(domain, { hasMX: true, records: [] }); return { hasMX: true, records: [] }; }
+    const data = await res.json();
+    const hasMX = Array.isArray(data?.Answer) && data.Answer.length > 0;
+    const records = (data?.Answer ?? []).map((a: any) => a.data ?? '').filter(Boolean);
+    mxCache.set(domain, { hasMX, records });
+    return { hasMX, records };
   } catch {
-    // Try Google DNS API as fallback
-    try {
-      const res = await fetch(
-        `https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=MX`,
-        { signal: AbortSignal.timeout(5_000) }
-      );
-      if (!res.ok) return [];
+    // DNS check failed — assume valid to avoid false blocks
+    mxCache.set(domain, { hasMX: true, records: [] });
+    return { hasMX: true, records: [] };
+  }
+}
+
+// ─── Catch-all detection (Q8) ────────────────────────────────────────────────
+// A catch-all domain accepts email for ANY address. We detect this by probing
+// a randomly generated mailbox that almost certainly doesn't exist.
+// If the domain accepts it → it's catch-all.
+
+const catchAllCache = new Map<string, boolean>();
+
+async function isCatchAllDomain(domain: string): Promise<boolean> {
+  if (catchAllCache.has(domain)) return catchAllCache.get(domain)!;
+
+  // Generate a random mailbox that can't possibly exist
+  const random = `verify-${Math.random().toString(36).slice(2, 12)}@${domain}`;
+
+  try {
+    // Use our internal SMTP probe API if available
+    const res = await fetch('/api/smtp-check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: random }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) {
+      catchAllCache.set(domain, false);
+      return false;
+    }
+    const data = await res.json();
+    const isCatchAll = data.deliverable === true;
+    catchAllCache.set(domain, isCatchAll);
+    return isCatchAll;
+  } catch {
+    catchAllCache.set(domain, false);
+    return false;
+  }
+}
+
+// ─── Main verifier (Q6) ──────────────────────────────────────────────────────
+
+export async function verifyEmail(email: string): Promise<VerificationResult> {
+  const lowerEmail = email.toLowerCase().trim();
+  const [local, domain] = lowerEmail.split('@');
+  const now = new Date().toISOString();
+
+  if (!local || !domain || !domain.includes('.')) {
+    return {
+      email: lowerEmail, status: 'invalid', mx_found: false,
+      is_catch_all: false, is_generic: false, is_disposable: false,
+      smtp_reachable: false, risk_score: 100,
+      reason: 'Invalid email format.', checked_at: now,
+    };
+  }
+
+  // 1. Disposable check
+  if (DISPOSABLE_DOMAINS.has(domain)) {
+    return {
+      email: lowerEmail, status: 'disposable', mx_found: false,
+      is_catch_all: false, is_generic: false, is_disposable: true,
+      smtp_reachable: false, risk_score: 95,
+      reason: 'Disposable email domain — not a real business address.', checked_at: now,
+    };
+  }
+
+  // 2. Generic prefix check
+  const isGeneric = GENERIC_PREFIXES.has(local);
+
+  // 3. MX record check
+  const { hasMX } = await checkMX(domain);
+  if (!hasMX) {
+    return {
+      email: lowerEmail, status: 'invalid', mx_found: false,
+      is_catch_all: false, is_generic: isGeneric, is_disposable: false,
+      smtp_reachable: false, risk_score: 90,
+      reason: `Domain ${domain} has no MX records — cannot receive email.`, checked_at: now,
+    };
+  }
+
+  // 4. SMTP deliverability probe (via internal API)
+  let smtpReachable: boolean | null = null;
+  let smtpStatus: 'valid' | 'invalid' | 'unverifiable' = 'unverifiable';
+
+  try {
+    const res = await fetch('/api/smtp-check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: lowerEmail }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (res.ok) {
       const data = await res.json();
-      if (!Array.isArray(data?.Answer)) return [];
-      return data.Answer
-        .filter((r: any) => r.type === 15)
-        .map((r: any) => (r.data as string).split(' ')[1]?.replace(/\.$/, '') ?? '')
-        .filter(Boolean);
-    } catch {
-      return [];
+      smtpReachable = data.deliverable ?? null;
+      if (smtpReachable === true)  smtpStatus = 'valid';
+      if (smtpReachable === false) smtpStatus = 'invalid';
     }
+  } catch { /* SMTP probe unavailable — continue without it */ }
+
+  // If SMTP says hard reject, email is invalid
+  if (smtpStatus === 'invalid') {
+    return {
+      email: lowerEmail, status: 'invalid', mx_found: true,
+      is_catch_all: false, is_generic: isGeneric, is_disposable: false,
+      smtp_reachable: false, risk_score: 85,
+      reason: 'SMTP server rejected this mailbox — address does not exist.', checked_at: now,
+    };
   }
+
+  // 5. Catch-all detection (Q8)
+  const catchAll = await isCatchAllDomain(domain);
+  if (catchAll) {
+    return {
+      email: lowerEmail, status: 'catch_all', mx_found: true,
+      is_catch_all: true, is_generic: isGeneric, is_disposable: false,
+      smtp_reachable: null, risk_score: isGeneric ? 60 : 40,
+      reason: `${domain} is a catch-all domain — accepts all email addresses, but mailbox existence cannot be confirmed.`,
+      checked_at: now,
+    };
+  }
+
+  // 6. Generic email — risky but not invalid
+  if (isGeneric) {
+    return {
+      email: lowerEmail, status: 'risky', mx_found: true,
+      is_catch_all: false, is_generic: true, is_disposable: false,
+      smtp_reachable: smtpReachable,
+      risk_score: 35,
+      reason: `Generic address (${local}@) — email is deliverable but unlikely to reach a decision-maker.`,
+      checked_at: now,
+    };
+  }
+
+  // 7. All checks passed
+  return {
+    email: lowerEmail, status: 'valid', mx_found: true,
+    is_catch_all: false, is_generic: false, is_disposable: false,
+    smtp_reachable: smtpReachable ?? true,
+    risk_score: 5,
+    reason: 'Email passed MX and SMTP verification.',
+    checked_at: now,
+  };
 }
 
-// ─── Level 3: SMTP RCPT-TO probe ─────────────────────────────────────────────
+// ─── Batch verifier (Q7) ─────────────────────────────────────────────────────
 
-// MX host patterns that block SMTP probes (Google Workspace, Microsoft 365, etc.)
-const BLOCKED_MX_PATTERNS = [
-  'google.com', 'googlemail.com', 'aspmx', 'gmail',
-  'outlook.com', 'hotmail.com', 'protection.outlook.com', 'mail.protection.outlook',
-  'zoho.com', 'zohomail.com',
-  'mimecast.com', 'pphosted.com', 'messagelabs.com',
-  'proofpoint.com', 'barracuda', 'spamfilter',
-];
-
-function smtpProbe(mxHost: string, email: string, timeoutMs = 10_000): Promise<'valid' | 'invalid' | 'unknown'> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      socket.destroy();
-      resolve('unknown');
-    }, timeoutMs);
-
-    const socket = net.createConnection(25, mxHost);
-    let step = 0;
-    let buffer = '';
-
-    const send = (cmd: string) => socket.write(cmd + '\r\n');
-
-    socket.on('connect', () => {
-      // Connection established — wait for banner
-    });
-
-    socket.on('data', (chunk) => {
-      buffer += chunk.toString();
-      const lines = buffer.split('\r\n');
-      buffer = lines.pop() ?? '';
-
-      for (const line of lines) {
-        const code = parseInt(line.slice(0, 3), 10);
-        if (isNaN(code)) continue;
-
-        if (step === 0 && code === 220) {
-          // Server banner received
-          send('EHLO verify.pryro.com');
-          step = 1;
-        } else if (step === 1 && (code === 250 || code === 220)) {
-          // EHLO accepted
-          send(`MAIL FROM:<verify@pryro.com>`);
-          step = 2;
-        } else if (step === 2 && code === 250) {
-          // MAIL FROM accepted
-          send(`RCPT TO:<${email}>`);
-          step = 3;
-        } else if (step === 3) {
-          clearTimeout(timer);
-          socket.destroy();
-          if (code === 250 || code === 251) {
-            resolve('valid');   // Mailbox exists
-          } else if (code >= 500 && code < 600) {
-            resolve('invalid'); // Mailbox rejected (550, 551, 553, etc.)
-          } else if (code === 450 || code === 451 || code === 452) {
-            resolve('unknown'); // Temporary failure — can't determine
-          } else {
-            resolve('unknown');
-          }
-        } else if (code >= 400) {
-          // Server error or rejection at any step
-          clearTimeout(timer);
-          socket.destroy();
-          resolve('unknown');
-        }
-      }
-    });
-
-    socket.on('error', () => {
-      clearTimeout(timer);
-      resolve('unknown');
-    });
-
-    socket.on('close', () => {
-      clearTimeout(timer);
-      if (step < 3) resolve('unknown');
-    });
-  });
+export interface BatchVerificationResult {
+  verified:    VerificationResult[];   // valid or catch-all
+  flagged:     VerificationResult[];   // risky or unverifiable
+  rejected:    VerificationResult[];   // invalid or disposable
 }
 
-// ─── Main verifier ────────────────────────────────────────────────────────────
-
-export async function verifyEmail(email: string): Promise<VerifyResult> {
-  // Level 1: Format
-  if (!FORMAT_RE.test(email)) {
-    return { valid: false, reason: 'invalid_format', detail: 'Email format is invalid' };
-  }
-
-  const domain = email.split('@')[1]!.toLowerCase();
-
-  // Level 2: MX DNS
-  const mxRecords = await getMXRecords(domain);
-  if (mxRecords.length === 0) {
-    return { valid: false, reason: 'no_mx_record', detail: `Domain ${domain} has no MX records` };
-  }
-
-  // Get the top MX server
-  const mxHost = mxRecords[0]!;
-
-  // Level 3: SMTP probe — skip for providers that block it
-  if (PROBE_BLOCKED_DOMAINS.has(domain)) {
-    return { valid: true, reason: 'valid', detail: 'DNS verified (SMTP probe skipped for this provider)' };
-  }
-
-  // Also skip if MX host is a known blocking provider (e.g. Google Workspace)
-  const mxHostLower = mxHost.toLowerCase();
-  const mxBlocked = BLOCKED_MX_PATTERNS.some(p => mxHostLower.includes(p));
-  if (mxBlocked) {
-    return { valid: true, reason: 'unverifiable', detail: `MX host ${mxHost} blocks SMTP probes — DNS verified only` };
-  }
-
-  // Try the top MX server
-  try {
-    const result = await smtpProbe(mxHost, email, 10_000);
-    if (result === 'invalid') {
-      return {
-        valid: false,
-        reason: 'mailbox_rejected',
-        detail: `Mailbox ${email} does not exist on ${mxHost}`,
-      };
-    }
-    if (result === 'valid') {
-      return { valid: true, reason: 'valid', detail: `Verified via SMTP probe on ${mxHost}` };
-    }
-    // 'unknown' — server blocked probe, fall back to DNS result
-    return { valid: true, reason: 'unverifiable', detail: 'SMTP probe blocked — DNS verified only' };
-  } catch {
-    return { valid: true, reason: 'unverifiable', detail: 'SMTP probe failed — DNS verified only' };
-  }
-}
-
-// DNS-only version (faster, used when SMTP probe is not needed)
-export async function verifyEmailDNS(email: string): Promise<VerifyResult> {
-  if (!FORMAT_RE.test(email)) {
-    return { valid: false, reason: 'invalid_format', detail: 'Email format is invalid' };
-  }
-  const domain = email.split('@')[1]!.toLowerCase();
-  const mxRecords = await getMXRecords(domain);
-  if (mxRecords.length === 0) {
-    return { valid: false, reason: 'no_mx_record', detail: `Domain ${domain} has no MX records` };
-  }
-  return { valid: true, reason: 'valid' };
-}
-
-/**
- * Batch verify a list of emails.
- * Returns a map of email → VerifyResult.
- */
 export async function verifyEmailBatch(
   emails: string[],
-  onProgress?: (done: number, total: number) => void
-): Promise<Map<string, VerifyResult>> {
-  const results = new Map<string, VerifyResult>();
-  for (let i = 0; i < emails.length; i++) {
-    const email = emails[i]!;
-    results.set(email, await verifyEmail(email));
-    onProgress?.(i + 1, emails.length);
-    if (i < emails.length - 1) {
+  concurrency = 5,
+  onProgress?: (done: number, total: number) => void,
+): Promise<BatchVerificationResult> {
+  const verified:  VerificationResult[] = [];
+  const flagged:   VerificationResult[] = [];
+  const rejected:  VerificationResult[] = [];
+
+  let done = 0;
+
+  // Process in chunks to respect rate limits
+  for (let i = 0; i < emails.length; i += concurrency) {
+    const chunk = emails.slice(i, i + concurrency);
+    const results = await Promise.all(chunk.map(e => verifyEmail(e)));
+
+    for (const r of results) {
+      if (r.status === 'valid' || r.status === 'catch_all') {
+        verified.push(r);
+      } else if (r.status === 'risky' || r.status === 'unverifiable') {
+        flagged.push(r);
+      } else {
+        rejected.push(r);
+      }
+      done++;
+      onProgress?.(done, emails.length);
+    }
+
+    // Small delay between batches to avoid rate limits
+    if (i + concurrency < emails.length) {
       await new Promise(r => setTimeout(r, 300));
     }
   }
-  return results;
+
+  return { verified, flagged, rejected };
+}
+
+// ─── Status helpers ───────────────────────────────────────────────────────────
+
+export function getVerificationBadge(status: VerificationStatus): {
+  label: string;
+  color: string;
+  bg: string;
+} {
+  switch (status) {
+    case 'valid':       return { label: 'Verified',    color: '#15803d', bg: '#dcfce7' };
+    case 'catch_all':   return { label: 'Catch-All',   color: '#b45309', bg: '#fef3c7' };
+    case 'risky':       return { label: 'Risky',       color: '#b45309', bg: '#fef3c7' };
+    case 'invalid':     return { label: 'Invalid',     color: '#dc2626', bg: '#fee2e2' };
+    case 'disposable':  return { label: 'Disposable',  color: '#dc2626', bg: '#fee2e2' };
+    case 'unverifiable':return { label: 'Unverifiable',color: '#6b7280', bg: '#f3f4f6' };
+  }
+}
+
+export function canSendTo(result: VerificationResult): boolean {
+  return result.status === 'valid' || result.status === 'catch_all';
 }

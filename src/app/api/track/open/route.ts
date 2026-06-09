@@ -85,6 +85,13 @@ export async function GET(request: NextRequest) {
           leadId: sentEmail.lead_id,
           openedAt: now,
         }).catch(() => {});
+
+        // Fire WhatsApp notification
+        const { notifyWhatsApp } = await import('@/utils/whatsapp-notifier');
+        notifyWhatsApp(sentEmail.user_id, 'email.opened', {
+          leadId: sentEmail.lead_id,
+          companyName: sentEmail.lead_id ? `lead ${sentEmail.lead_id.slice(0, 8)}` : "a lead",
+        }).catch(() => {});
       }
     } catch (err) {
       // Non-fatal — always return the pixel

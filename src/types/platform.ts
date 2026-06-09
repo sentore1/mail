@@ -360,7 +360,12 @@ export type ActiveModule =
   | 'analytics'
   | 'webhooks'
   | 'sequences'
-  | 'verification';
+  | 'ab-testing'
+  | 'custom-fields'
+  | 'integrations'
+  | 'whatsapp'
+  | 'verification'
+  | 'sender-profile';
 
 // ─── Tone Types ───────────────────────────────────────────────────────────────
 
