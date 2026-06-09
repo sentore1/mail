@@ -159,22 +159,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Block personal email providers for cold B2B outreach
-    const toDomain = to.split('@')[1]?.toLowerCase() ?? '';
-    const PERSONAL_DOMAINS = new Set([
-      'gmail.com','googlemail.com','yahoo.com','yahoo.co.uk','yahoo.fr',
-      'hotmail.com','hotmail.co.uk','outlook.com','live.com','msn.com',
-      'icloud.com','me.com','mac.com','aol.com','protonmail.com','proton.me',
-      'yandex.com','yandex.ru','mail.ru',
-    ]);
-    if (PERSONAL_DOMAINS.has(toDomain)) {
-      return NextResponse.json(
-        { success: false, error: `Email not sent — ${toDomain} is a personal email provider, not a business address` },
-        { status: 400 }
-      );
-    }
+    // Note: personal email domains (gmail, yahoo, etc.) are allowed for B2B outreach
+    // in markets like Africa/Asia where business owners use personal email addresses.
+    // The personal domain block has been removed to support these markets.
 
-    // Block placeholder/fake local parts
+    // Block only obvious placeholder/fake local parts
     const toLocal = to.split('@')[0]?.toLowerCase() ?? '';
     const FAKE_LOCALS = new Set([
       'johndoe','john.doe','john_doe','janedoe','jane.doe',
@@ -187,34 +176,33 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify the email address before attempting to send (full SMTP probe — confirms mailbox exists)
-    const verification = await verifyEmail(to);
-    if (!verification.valid) {
-      const service = createServiceClient();
-      // Log the skip to sent_emails so CRM shows it
-      await service.from("sent_emails").insert({
-        user_id: user.id,
-        lead_id: leadId ?? null,
-        to_email: to,
-        subject,
-        body: emailBody,
-        sent_at: new Date().toISOString(),
-        status: "failed",
-        bounce_reason: `Email not sent — ${verification.detail ?? verification.reason}`,
-      }).catch(() => {});
-      // Mark lead as invalid_email
-      if (leadId) {
-        await service.from("leads").update({
-          status: "invalid_email",
-          email_verified: false,
-          updated_at: new Date().toISOString(),
-        }).eq("id", leadId).catch(() => {});
-      }
+    // Email verification — only block on hard failures (no MX record, disposable domain).
+    // Do NOT block on SMTP probe results — port 25 is blocked on most cloud hosts.
+    const verification = await verifyEmail(to).catch(() => null);
+    if (verification?.status === 'disposable') {
       return NextResponse.json(
-        { success: false, error: `Email address is not valid: ${verification.detail ?? verification.reason}` },
+        { success: false, error: `Disposable email address — not a real business contact.` },
         { status: 400 }
       );
     }
+    if (verification?.status === 'invalid' && !verification.mx_found) {
+      const service2 = createServiceClient();
+      await service2.from("sent_emails").insert({
+        user_id: user.id, lead_id: leadId ?? null, to_email: to,
+        subject, body: emailBody, sent_at: new Date().toISOString(), status: "failed",
+        bounce_reason: `Domain ${to.split('@')[1]} has no MX record — cannot receive email`,
+      }).catch(() => {});
+      if (leadId) {
+        await service2.from("leads").update({
+          status: "invalid_email", email_verified: false, updated_at: new Date().toISOString(),
+        }).eq("id", leadId).catch(() => {});
+      }
+      return NextResponse.json(
+        { success: false, error: `Domain ${to.split('@')[1]} has no mail server.` },
+        { status: 400 }
+      );
+    }
+    // All other statuses (valid, catch_all, risky, unverifiable) — proceed with send
 
     const service = createServiceClient();
 
