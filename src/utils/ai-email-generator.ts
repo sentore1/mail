@@ -10,7 +10,7 @@
  */
 
 import { createClient }                          from '../../supabase/client';
-import { researchProspect, researchProspectSync } from './prospect-researcher';
+import { researchProspect, researchProspectSync, isGenericEmailAddress, extractFirstName } from './prospect-researcher';
 import { buildPersonalizedEmail }                 from './personalized-email-builder';
 
 export interface EmailGenerationParams {
@@ -20,14 +20,14 @@ export interface EmailGenerationParams {
     location: string | null;
     company_context: string | null;
     website?: string | null;
-    contact_name?: string | null;   // prospect's first name for greeting
+    contact_name?: string | null;
+    email?: string | null;        // used for name extraction + generic email detection
   };
   yourCompany: string;
   yourService: string;
   tone: 'Direct' | 'Aggressive' | 'Surgical';
   customPainPoint?: string;
   userId: string;
-  // Legacy fields — still accepted but profile takes precedence
   senderName?: string;
   senderEmail?: string;
   senderTitle?: string;
@@ -114,6 +114,8 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{
   qualityPassed?: boolean;
   dataSource?: string;
   profileIncomplete?: boolean;
+  isGenericEmail?: boolean;
+  greetingIsFallback?: boolean;
 }> {
   const { lead, userId, emailIndex = 0 } = params;
 
@@ -140,13 +142,19 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{
     }
   } catch { /* no AI */ }
 
-  // ── 3. Research prospect ─────────────────────────────────────────────────
+  // ── 3. Resolve contact name — contact field first, then email prefix ──────
+  const { name: resolvedName } = extractFirstName(lead.contact_name, lead.email);
+  const effectiveContactName = resolvedName;
+  const genericEmail = isGenericEmailAddress(lead.email);
+  const nameIsFallback = !resolvedName;
+
+  // ── 4. Research prospect ─────────────────────────────────────────────────
   const researchParams = {
     companyName:    lead.company_name,
     niche:          lead.niche,
     location:       lead.location,
     companyContext: lead.company_context,
-    contactName:    lead.contact_name ?? null,
+    contactName:    effectiveContactName,
     senderName,
     senderPhone,
     emailIndex,
@@ -158,10 +166,11 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{
         () => researchProspectSync(researchParams),
       );
 
-  // Override the sign-off in signals with the one built from the DB profile
-  signals.signOff = signOff;
+  // Stamp the correct values derived from lead data
+  signals.signOff      = signOff;
+  signals.isGenericEmail = genericEmail;
 
-  // ── 4. Generate ──────────────────────────────────────────────────────────
+  // ── 5. Generate ──────────────────────────────────────────────────────────
   const result = await buildPersonalizedEmail(
     {
       companyName:    lead.company_name,
@@ -187,6 +196,8 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{
     qualityPassed:        result.qualityPassed,
     dataSource:           result.dataSource,
     profileIncomplete:    !profileComplete,
+    isGenericEmail:       genericEmail,
+    greetingIsFallback:   nameIsFallback,
   };
 }
 

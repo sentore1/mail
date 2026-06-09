@@ -47,7 +47,7 @@ export interface GeneratedEmail {
 interface AIProvider { provider: string; api_key: string; active_model: string; }
 
 async function callAI(p: AIProvider, system: string, user: string): Promise<string> {
-  const body = { temperature: 0.6, max_tokens: 420 };
+  const body = { temperature: 0.75, max_tokens: 420 };  // 0.75 for more variation across bulk sends
 
   if (p.provider === 'openai') {
     const r = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -127,16 +127,26 @@ NEVER use: "Dear Sir/Madam", "To Whom It May Concern", "Dear [Name]", "Hello the
 
 RULE 2 — FIRST OBSERVATION (second element, after greeting):
 Must include the company's name AND their city/location.
-Must describe something specific and real about their business situation.
+Must be written in your own words as an observation about their operational situation — NOT a quote or paraphrase from their website.
 Must NEVER start with: "Most companies", "Many businesses", "Most clinics", "A lot of".
-GOOD: "${signals.companyName} in ${signals.location || 'your city'} — [specific observation about their situation]."
-BAD: "Most pharmacies struggle with…" / "Many hotels face…"
+Must NEVER use phrases like: "I was looking at your website", "I came across your website", "I noticed on your website", "I saw on your website", "According to your website", "Based on your website", "your website mentions", "I visited your website", "I found on your website".
+GOOD: "${signals.companyName} in ${signals.location || 'your city'} — clinics at this scale almost always end up managing billing, stock, and payroll in separate systems."
+BAD: "I was looking at ${signals.companyName}'s website — you provide healthcare services." / "Most pharmacies struggle with…"
 
 RULE 3 — SUBJECT LINE:
-Must be a specific question or observation about THIS company's situation.
-5–10 words. End with a question mark OR reference the company name.
-NEVER use: "partnership", "collaboration", "opportunity", "proposal", "introduction", "follow-up", "ERP", "synergy".
-GOOD: "${signals.companyName} — how are you catching expiry dates?" / "Quick question about ${signals.companyName}'s bookings"
+Must be a sharp, specific observation or bold question about THIS company's business situation. Under 8 words ideally.
+End with a question mark OR a clear bold observation.
+NEVER use these subject line patterns (they read like support tickets, announcements, or generic outreach):
+  - "patient billing question" or "[X] question" format
+  - "quick question for [company]'s [team]" format
+  - "[X] — an [adjective] fix worth [time]" format
+  - "partnership", "collaboration", "opportunity", "proposal", "introduction", "follow-up", "ERP", "synergy"
+GOOD examples that work for healthcare:
+  "${signals.companyName} — billing, stock, and payroll still separate?"
+  "${signals.companyName} — is your admin team still reconciling manually?"
+  "${signals.companyName} — how long does month-end take?"
+  "Healthcare ops in [city] — one gap worth closing"
+  "${signals.companyName} — patient scheduling and billing in one place?"
 
 RULE 4 — LENGTH & STRUCTURE:
 Body: greeting line + 3 short paragraphs. Under 120 words total (not counting the footer). Short sentences.
@@ -161,7 +171,7 @@ Do not alter it, do not add "Kind regards" or "Yours faithfully" before it.
 The footer is already correctly formatted — copy it verbatim.
 
 RULE 8 — COMPLETELY BANNED PHRASES (instant fail):
-i hope this email finds you well | i hope you are doing well | i wanted to reach out | i am reaching out | touching base | circling back | checking in | as per | kindly revert | leverage | synergy | game-changer | cutting-edge | revolutionary | disruptive | world-class | industry-leading | state-of-the-art | innovative solution | seamless | robust | best-in-class | we help companies like yours | businesses like yours | unlock potential | drive growth | scale your business | warm regards | yours sincerely | best wishes | streamline | optimize | empower | transform | referral commission | 20-30% | 20–30%
+i hope this email finds you well | i hope you are doing well | i wanted to reach out | i am reaching out | touching base | circling back | checking in | as per | kindly revert | leverage | synergy | game-changer | cutting-edge | revolutionary | disruptive | world-class | industry-leading | state-of-the-art | innovative solution | seamless | robust | best-in-class | we help companies like yours | businesses like yours | unlock potential | drive growth | scale your business | warm regards | yours sincerely | best wishes | streamline | optimize | empower | transform | referral commission | 20-30% | 20–30% | i was looking at your website | i came across your website | i noticed on your website | i saw on your website | according to your website | based on your website | your website mentions | i visited your website | i found on your website | patient billing question | quick question for | an admin fix worth
 
 RULE 9 — INDUSTRY ACCURACY:
 Only write about what a ${signals.niche || 'business'} actually does.
@@ -183,8 +193,8 @@ Industry: ${signals.niche || 'Business'}
 City: ${(signals.location || 'your city').split(',')[0]?.trim()}
 `;
 
-  if (signals.websiteDescription) ctx += `\nWhat we found on their website:\n"${signals.websiteDescription.slice(0, 300)}"\n`;
-  if (signals.recentActivity)     ctx += `\nRecent activity: "${signals.recentActivity.slice(0, 180)}"\n`;
+  if (signals.websiteDescription) ctx += `\nBackground context about their business (use this to understand what they do — DO NOT quote or paraphrase this text in the email):\n"${signals.websiteDescription.slice(0, 300)}"\n`;
+  if (signals.recentActivity)     ctx += `\nRecent activity (use this as context — write in your own words, do NOT quote it directly):\n"${signals.recentActivity.slice(0, 180)}"\n`;
   if (signals.techMentions.length > 0) ctx += `\nTools detected on their site: ${signals.techMentions.join(', ')}\n`;
   if (signals.staffCount)         ctx += `\nStaff count: ${signals.staffCount}\n`;
   if (customPainPoint)            ctx += `\nSpecific pain point to address: ${customPainPoint}\n`;
@@ -196,7 +206,7 @@ ${signals.greeting}
 Suggested observation line after greeting (use this or write a better one — must follow Rule 2):
 "${signals.firstLine}"
 
-Problem to address:
+Problem angle for THIS email — use this as the basis but write it in fresh language, not the same sentence as any other email you have written for this industry:
 "${signals.problemSentence}"
 
 How Pryro fixes it (use this exact sentence — do NOT add commission mention):
@@ -205,10 +215,11 @@ How Pryro fixes it (use this exact sentence — do NOT add commission mention):
 CTA to end with (use this or write a better one — must be a soft question ending with ?):
 "${signals.ctaSentence}"
 
+${signals.isGenericEmail ? `⚠ NOTE: The recipient email address appears to be a generic address (info@, contact@, etc.). This means the email may not reach a decision-maker. Write the email as if addressing whoever manages operations or admin — do NOT reference that you are writing to a generic inbox.\n` : ''}
 Footer to copy VERBATIM after the CTA paragraph (blank line, then this, no changes):
 ${signals.signOff}
 
-Write the email now. Follow all 9 rules exactly.`;
+Write the email now. Follow all 9 rules exactly. The problem paragraph MUST be written in fresh language — do not copy the problem angle sentence word-for-word.`;
 }
 
 // ─── Parse AI response ────────────────────────────────────────────────────────

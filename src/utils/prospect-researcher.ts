@@ -25,10 +25,11 @@ export interface ProspectSignals {
   greeting: string;            // "Hi John," or "Hi there," — never "Dear Sir/Madam"
   firstLine: string;           // must contain company name or city — never generic
   subjectLine: string;         // question or specific observation
-  problemSentence: string;     // one sentence, THIS industry's dominant pain
+  problemSentence: string;     // one unique angle for THIS email — varies per send
   pryroSentence: string;       // one sentence, Pryro's direct fix (NO commission mention)
   ctaSentence: string;         // one soft question
   signOff: string;             // professional footer built from sender profile
+  isGenericEmail: boolean;     // true if email prefix is info@, contact@, etc.
 
   personalizationScore: number;   // 0–100
   dataSource: 'website' | 'news' | 'industry';
@@ -46,9 +47,12 @@ interface NicheProfile {
   sectorLabel: string;
   firstLineTemplates: Array<(company: string, city: string) => string>;
   subjectTemplates:   Array<(company: string, city: string) => string>;
-  problemSentence:    string;
-  pryroSentence:      string;
-  ctaOptions:         string[];
+  // Multiple problem angles — caller picks by index for variety across bulk sends
+  problemAngles:   string[];
+  pryroSentence:   string;
+  ctaOptions:      string[];
+  // Default problem sentence (first angle) — kept for backward compat
+  problemSentence: string;
 }
 
 export const NICHE_PROFILES: Record<string, NicheProfile> = {
@@ -57,17 +61,22 @@ export const NICHE_PROFILES: Record<string, NicheProfile> = {
   pharmacy: {
     sectorLabel: 'pharmacy',
     firstLineTemplates: [
-      (c, l) => `I noticed ${c} is based in ${l} — pharmacies there are dealing with a specific stock-management headache right now.`,
-      (c, l) => `${c} in ${l} caught my attention — drug expiry write-offs are quietly eating into pharmacy margins across the region.`,
-      (c, l) => `Running a pharmacy in ${l} like ${c} means tracking stock, expiry dates, and billing in at least three different places.`,
+      (c, l) => `${c} in ${l} — drug expiry write-offs are one of the biggest silent margin killers for pharmacies in the region right now.`,
+      (c, l) => `${c} in ${l} — pharmacies at your scale typically end up tracking stock in one system, billing in another, and payroll in a spreadsheet.`,
+      (c, l) => `${c} in ${l} — most pharmacies don't catch expired stock until it's already been written off, and by then the damage is done.`,
     ],
     subjectTemplates: [
-      (c)    => `${c} — how are you catching expiry dates today?`,
-      (c)    => `Quick question about ${c}'s stock system`,
-      (c, l) => `Pharmacies in ${l} — one thing worth fixing`,
+      (c)    => `${c} — are expiry write-offs eating into margin?`,
+      (c)    => `${c} — stock, billing, payroll in three places?`,
+      (c, l) => `Pharmacy ops in ${l} — one gap worth closing`,
     ],
-    problemSentence: `Most pharmacies end up managing drug stock in one place, billing in another, and staff payroll in a spreadsheet — and expired stock usually isn't caught until it's too late.`,
-    pryroSentence:   `Pryro is an ERP that tracks stock with expiry alerts, handles billing, and runs payroll in one place.`,
+    problemAngles: [
+      `Drug stock, billing, and payroll almost always live in separate systems — which means expired stock often isn't caught until it's already been written off.`,
+      `Managing drug expiry manually means someone is always a step behind — by the time the alert comes, the write-off has already happened.`,
+      `Pharmacy billing errors compound quickly when stock records and invoice systems don't talk to each other — the losses are invisible until month-end.`,
+    ],
+    get problemSentence() { return this.problemAngles[0]!; },
+    pryroSentence: `Pryro is an ERP that tracks stock with expiry alerts, handles billing, and runs payroll in one place.`,
     ctaOptions: [
       `Would a 10-minute call be worth it to see if it fits how you're running ${'{company}'}?`,
       `Is managing expiry dates and billing in separate tools something you're actively trying to fix?`,
@@ -75,21 +84,25 @@ export const NICHE_PROFILES: Record<string, NicheProfile> = {
     ],
   },
 
-  // ── CLINIC / HEALTHCARE ───────────────────────────────────────────────────
   healthcare: {
     sectorLabel: 'clinic',
     firstLineTemplates: [
-      (c, l) => `${c} in ${l} — clinics your size usually hit the same admin wall around patient billing and stock.`,
-      (c, l) => `I came across ${c} in ${l} — healthcare providers there are spending a lot of admin time on reconciliation work that should be automatic.`,
-      (c, l) => `Running a clinic like ${c} in ${l} means patient billing, pharmacy stock, and staff schedules rarely live in the same system.`,
+      (c, l) => `${c} in ${l} — clinics at this stage almost always hit the same wall: billing, stock, and payroll running in completely separate systems.`,
+      (c, l) => `${c} in ${l} — healthcare admin work that should be automatic is still eating hours every week at most clinics this size.`,
+      (c, l) => `${c} in ${l} — when patient billing, pharmacy stock, and HR all live in different tools, the reconciliation burden falls on your admin team every single month.`,
     ],
     subjectTemplates: [
-      (c)    => `${c} — patient billing question`,
-      (c)    => `Quick question for ${c}'s admin team`,
-      (c, l) => `Clinics in ${l} — an admin fix worth 2 min`,
+      (c)    => `${c} — is your admin team still reconciling manually?`,
+      (c)    => `${c} — billing, stock, and payroll still separate?`,
+      (c, l) => `Healthcare admin in ${l} — one friction worth fixing`,
     ],
-    problemSentence: `Patient scheduling, stock, billing, and payroll usually live in separate tools — which means your admin team spends hours each week manually reconciling data that should flow automatically.`,
-    pryroSentence:   `Pryro connects patient management, pharmacy stock, billing, and HR into one system.`,
+    problemAngles: [
+      `Patient scheduling, stock, billing, and payroll usually live in separate tools — which means your admin team spends hours each week manually reconciling data that should flow automatically.`,
+      `When pharmacy stock, patient billing, and HR payroll are each in a different system, your admin staff spends more time moving numbers between spreadsheets than doing actual admin work.`,
+      `The gap between patient appointment systems and billing reconciliation is where most clinic admin hours quietly disappear every week — and it compounds every month.`,
+    ],
+    get problemSentence() { return this.problemAngles[0]!; },
+    pryroSentence: `Pryro connects patient management, pharmacy stock, billing, and HR into one system.`,
     ctaOptions: [
       `Would a 10-minute call make sense to see if it fits how ${'{company}'} currently runs?`,
       `Is this the kind of problem your admin team has been trying to solve?`,
@@ -97,21 +110,25 @@ export const NICHE_PROFILES: Record<string, NicheProfile> = {
     ],
   },
 
-  // ── HOTEL / LODGE ─────────────────────────────────────────────────────────
   hotel: {
     sectorLabel: 'hotel',
     firstLineTemplates: [
-      (c, l) => `${c} in ${l} — hotels your size usually manage reservations, housekeeping, and vendor billing in completely separate places.`,
-      (c, l) => `I came across ${c} in ${l} — front desk teams there are still doing manual end-of-day reconciliation between reservations and finance.`,
-      (c, l) => `Running a property like ${c} in ${l} means your ops team is probably moving between at least four different tools every day.`,
+      (c, l) => `${c} in ${l} — hotels at this scale almost always end up managing reservations, housekeeping, and vendor billing in completely separate systems.`,
+      (c, l) => `${c} in ${l} — front desk teams at properties your size are typically still doing manual reconciliation between reservations and finance at end of day.`,
+      (c, l) => `${c} in ${l} — when reservations, housekeeping, and vendor invoices all live in different places, month-end reporting becomes a week-long exercise.`,
     ],
     subjectTemplates: [
-      (c)    => `${c} — still reconciling reservations manually?`,
-      (c)    => `Quick question for ${c}'s ops team`,
-      (c, l) => `Hotels in ${l} — one daily friction worth fixing`,
+      (c)    => `${c} — reservations, housekeeping, finance still separate?`,
+      (c)    => `${c} — is month-end still a manual exercise?`,
+      (c, l) => `Hotel ops in ${l} — one gap worth closing`,
     ],
-    problemSentence: `Reservations, housekeeping rosters, vendor invoices, and end-of-month financials almost never live in the same system — which means your front desk and accounts team lose hours each week moving data between tools.`,
-    pryroSentence:   `Pryro unifies reservations, housekeeping, vendor billing, and financials in one dashboard.`,
+    problemAngles: [
+      `Reservations, housekeeping rosters, vendor invoices, and end-of-month financials almost never live in the same system — which means your front desk and accounts team lose hours each week moving data between tools.`,
+      `When housekeeping schedules and vendor billing aren't connected to your reservations system, the front desk ends up doing manual reconciliation work that should be automatic.`,
+      `Hotel month-end becomes a multi-day exercise when occupancy data, vendor invoices, and staff payroll each live in different places — and errors from that gap quietly compound.`,
+    ],
+    get problemSentence() { return this.problemAngles[0]!; },
+    pryroSentence: `Pryro unifies reservations, housekeeping, vendor billing, and financials in one dashboard.`,
     ctaOptions: [
       `Would a 10-minute call make sense to see if it fits how ${'{company}'} operates today?`,
       `Is the reservations-to-finance gap something your team has flagged as a problem?`,
@@ -122,36 +139,44 @@ export const NICHE_PROFILES: Record<string, NicheProfile> = {
   lodge: {
     sectorLabel: 'lodge',
     firstLineTemplates: [
-      (c, l) => `${c} in ${l} — lodges managing bookings across WhatsApp and a paper register are hitting a natural ceiling.`,
-      (c, l) => `I noticed ${c} is in ${l} — guesthouses there often end up with bookings in one place and accounts in another.`,
+      (c, l) => `${c} in ${l} — lodges managing bookings across WhatsApp and a paper register are hitting a natural growth ceiling.`,
+      (c, l) => `${c} in ${l} — guesthouses at this stage almost always have bookings in one place and accounts in another.`,
     ],
     subjectTemplates: [
-      (c)    => `${c} — bookings and payroll in one place?`,
-      (c)    => `Quick question about ${c}'s booking setup`,
+      (c)    => `${c} — bookings and payroll still in separate places?`,
+      (c)    => `${c} — is month-end always a scramble?`,
     ],
-    problemSentence: `Bookings from multiple channels, housekeeping schedules, vendor bills, and end-of-month payroll rarely sit in the same system — which means month-end is always a scramble.`,
-    pryroSentence:   `Pryro connects bookings, staff schedules, vendor billing, and financials in one place.`,
+    problemAngles: [
+      `Bookings from multiple channels, housekeeping schedules, vendor bills, and end-of-month payroll rarely sit in the same system — which means month-end is always a scramble.`,
+      `When WhatsApp bookings, paper registers, and supplier invoices aren't connected, it's nearly impossible to know your actual occupancy margin until after the fact.`,
+    ],
+    get problemSentence() { return this.problemAngles[0]!; },
+    pryroSentence: `Pryro connects bookings, staff schedules, vendor billing, and financials in one place.`,
     ctaOptions: [
       `Would a 10-minute call be worth it to see if it fits how ${'{company}'} currently runs?`,
       `Is keeping bookings and costs in sync something your team does manually right now?`,
     ],
   },
 
-  // ── TRAVEL AGENCY ─────────────────────────────────────────────────────────
   travel: {
     sectorLabel: 'travel agency',
     firstLineTemplates: [
-      (c, l) => `${c} in ${l} — travel agencies your size often don't know their actual margin per trip until the booking is already closed.`,
-      (c, l) => `I came across ${c} in ${l} — tracking agent commissions and supplier costs in real time is something most agencies in the region are still doing manually.`,
-      (c, l) => `Running an agency like ${c} in ${l} means your team is probably reconciling bookings, supplier payments, and commission in Excel at the end of every month.`,
+      (c, l) => `${c} in ${l} — travel agencies at this scale often close bookings without knowing the actual margin until the trip is already over.`,
+      (c, l) => `${c} in ${l} — tracking agent commissions and supplier costs in real time is still a manual process at most agencies in the region.`,
+      (c, l) => `${c} in ${l} — when bookings, supplier payments, and agent commissions all live in spreadsheets, your P&L is always a month behind.`,
     ],
     subjectTemplates: [
-      (c)    => `${c} — do you know your margin per booking?`,
-      (c)    => `Quick question about ${c}'s commission tracking`,
-      (c, l) => `Travel agencies in ${l} — margin tracking fix`,
+      (c)    => `${c} — do you know your margin before the trip ends?`,
+      (c)    => `${c} — commissions and supplier costs still in Excel?`,
+      (c, l) => `Travel agency margins in ${l} — one fix worth seeing`,
     ],
-    problemSentence: `Client bookings, supplier payments, agent commissions, and monthly P&L almost never live in one place — which means you often don't know your real margin until the trip is already over.`,
-    pryroSentence:   `Pryro tracks bookings, supplier costs, agent commissions, and P&L in real time.`,
+    problemAngles: [
+      `Client bookings, supplier payments, agent commissions, and monthly P&L almost never live in one place — which means you often don't know your real margin until the trip is already over.`,
+      `When agent commissions and supplier invoices are tracked separately from bookings, the P&L calculation always lands late — and by then you've already committed to the next deal.`,
+      `Travel agency profitability is genuinely hard to track when each booking, supplier payment, and agent commission lives in a different spreadsheet or email thread.`,
+    ],
+    get problemSentence() { return this.problemAngles[0]!; },
+    pryroSentence: `Pryro tracks bookings, supplier costs, agent commissions, and P&L in real time.`,
     ctaOptions: [
       `Would it be worth a 10-minute call to see if it solves what ${'{company}'} is dealing with?`,
       `Is tracking margins per trip in real time something you've been trying to fix?`,
@@ -159,76 +184,88 @@ export const NICHE_PROFILES: Record<string, NicheProfile> = {
     ],
   },
 
-  // ── RESTAURANT ────────────────────────────────────────────────────────────
   restaurant: {
     sectorLabel: 'restaurant',
     firstLineTemplates: [
-      (c, l) => `${c} in ${l} — restaurants your size usually don't have a clear picture of food cost until the end of the month.`,
-      (c, l) => `I came across ${c} in ${l} — kitchen inventory, daily sales, and supplier invoices are almost always in separate places at this stage.`,
+      (c, l) => `${c} in ${l} — restaurants at this stage typically don't have a clear picture of food cost until the end of the month.`,
+      (c, l) => `${c} in ${l} — kitchen inventory, daily sales, and supplier invoices almost always end up in separate places at this scale.`,
     ],
     subjectTemplates: [
-      (c)    => `${c} — what's your food cost today?`,
-      (c)    => `Quick question about ${c}'s daily reporting`,
+      (c)    => `${c} — do you know today's food cost?`,
+      (c)    => `${c} — kitchen, sales, suppliers still separate?`,
     ],
-    problemSentence: `Ingredient costs, staff attendance, daily sales, and supplier invoices rarely live in the same system — which means food cost and margin are only visible at month-end, when it's too late to act.`,
-    pryroSentence:   `Pryro tracks inventory, daily sales, staff payroll, and supplier billing in one place.`,
+    problemAngles: [
+      `Ingredient costs, staff attendance, daily sales, and supplier invoices rarely live in the same system — which means food cost and margin are only visible at month-end, when it's too late to act.`,
+      `Without a live view of ingredient costs against daily sales, most restaurants only discover their food cost problem after it's already eaten into the month's margin.`,
+    ],
+    get problemSentence() { return this.problemAngles[0]!; },
+    pryroSentence: `Pryro tracks inventory, daily sales, staff payroll, and supplier billing in one place.`,
     ctaOptions: [
       `Would a 10-minute call make sense to see if it fits how ${'{company}'} currently tracks costs?`,
       `Is daily reconciliation between kitchen, suppliers, and payroll something your team does manually?`,
     ],
   },
 
-  // ── RETAIL ────────────────────────────────────────────────────────────────
   retail: {
     sectorLabel: 'retail',
     firstLineTemplates: [
-      (c, l) => `${c} in ${l} — retail businesses your size usually deal with stock going out of sync across locations without any warning.`,
-      (c, l) => `I came across ${c} in ${l} — supplier reorders and inventory levels are a constant manual effort at this scale.`,
+      (c, l) => `${c} in ${l} — retail businesses at this scale usually deal with stock going out of sync across locations without any early warning.`,
+      (c, l) => `${c} in ${l} — supplier reorders and inventory levels become a constant manual effort once you're operating at this size.`,
     ],
     subjectTemplates: [
-      (c)    => `${c} — is stockout still a weekly issue?`,
-      (c)    => `Quick question about ${c}'s inventory`,
+      (c)    => `${c} — is stockout still a weekly surprise?`,
+      (c)    => `${c} — inventory and reorders still manual?`,
     ],
-    problemSentence: `Inventory across locations, supplier reorders, daily sales, and payroll almost never talk to each other — which means stockouts and margin surprises are a regular part of the month.`,
-    pryroSentence:   `Pryro syncs inventory, supplier orders, sales reporting, and payroll in one system.`,
+    problemAngles: [
+      `Inventory across locations, supplier reorders, daily sales, and payroll almost never talk to each other — which means stockouts and margin surprises are a regular part of the month.`,
+      `When stock levels, supplier reorder points, and sales data live in separate places, the first sign of a stockout is usually an empty shelf — not a system alert.`,
+    ],
+    get problemSentence() { return this.problemAngles[0]!; },
+    pryroSentence: `Pryro syncs inventory, supplier orders, sales reporting, and payroll in one system.`,
     ctaOptions: [
       `Would a short call be worth it to see if it fixes the stock sync issue at ${'{company}'}?`,
       `Is keeping inventory and supplier reorders in sync something your team manages manually?`,
     ],
   },
 
-  // ── LOGISTICS ─────────────────────────────────────────────────────────────
   logistics: {
     sectorLabel: 'logistics company',
     firstLineTemplates: [
-      (c, l) => `${c} in ${l} — logistics businesses your size usually have driver payroll, trip billing, and warehouse stock in completely separate places.`,
-      (c, l) => `I came across ${c} in ${l} — end-of-month billing reconciliation is still mostly manual for transport companies in the region.`,
+      (c, l) => `${c} in ${l} — logistics businesses at this scale almost always have driver payroll, trip billing, and warehouse stock in completely separate places.`,
+      (c, l) => `${c} in ${l} — end-of-month billing reconciliation is still a manual process at most transport companies in the region.`,
     ],
     subjectTemplates: [
-      (c)    => `${c} — how long does month-end billing take?`,
-      (c)    => `Quick question about ${c}'s ops setup`,
+      (c)    => `${c} — how many days does month-end billing take?`,
+      (c)    => `${c} — driver payroll and trip billing still separate?`,
     ],
-    problemSentence: `Driver trip logs, payroll, fuel costs, warehouse stock, and client invoicing almost never sit in the same system — which means reconciliation takes days and billing errors are easy to miss.`,
-    pryroSentence:   `Pryro connects driver payroll, trip billing, fuel tracking, and warehouse inventory in one system.`,
+    problemAngles: [
+      `Driver trip logs, payroll, fuel costs, warehouse stock, and client invoicing almost never sit in the same system — which means reconciliation takes days and billing errors are easy to miss.`,
+      `When driver trip records, fuel logs, and client billing aren't connected, month-end reconciliation is a manual exercise that takes days and still produces errors.`,
+    ],
+    get problemSentence() { return this.problemAngles[0]!; },
+    pryroSentence: `Pryro connects driver payroll, trip billing, fuel tracking, and warehouse inventory in one system.`,
     ctaOptions: [
       `Would a 10-minute call make sense to see if it fits how ${'{company}'} operates?`,
       `Is reconciling driver trips with billing and payroll something your team does manually right now?`,
     ],
   },
 
-  // ── SCHOOL ────────────────────────────────────────────────────────────────
   school: {
     sectorLabel: 'school',
     firstLineTemplates: [
-      (c, l) => `${c} in ${l} — schools your size usually manage fee collection, payroll, and supplies in three completely separate places.`,
-      (c, l) => `I came across ${c} in ${l} — end-of-term reporting is still a week-long manual exercise for most schools in the region.`,
+      (c, l) => `${c} in ${l} — schools at this size almost always manage fee collection, payroll, and supplies in three completely separate places.`,
+      (c, l) => `${c} in ${l} — end-of-term reporting is still a week-long manual exercise at most schools in the region.`,
     ],
     subjectTemplates: [
-      (c)    => `${c} — is end-of-term still manual?`,
-      (c)    => `Quick question about ${c}'s admin setup`,
+      (c)    => `${c} — is end-of-term reporting still manual?`,
+      (c)    => `${c} — fees, payroll, supplies still in three places?`,
     ],
-    problemSentence: `Student fees, staff payroll, school supplies, and exam records almost never live in the same system — which means your bursar and admin office spend weeks at the end of each term chasing reconciliation.`,
-    pryroSentence:   `Pryro handles fee collection, payroll, supplies, and term reporting in one place.`,
+    problemAngles: [
+      `Student fees, staff payroll, school supplies, and exam records almost never live in the same system — which means your bursar and admin office spend weeks at the end of each term chasing reconciliation.`,
+      `When fee collection, payroll, and supplies purchasing all run through separate registers or spreadsheets, term-end reporting becomes a reconciliation marathon that eats into the holiday.`,
+    ],
+    get problemSentence() { return this.problemAngles[0]!; },
+    pryroSentence: `Pryro handles fee collection, payroll, supplies, and term reporting in one place.`,
     ctaOptions: [
       `Would a short call make sense to see if it fits how ${'{company}'} currently runs?`,
       `Is managing fees and payroll across separate systems something your admin team deals with daily?`,
@@ -257,20 +294,23 @@ export function getNicheProfile(niche: string | null): NicheProfile {
   const key = detectNicheKey(niche);
   if (NICHE_PROFILES[key]) return NICHE_PROFILES[key]!;
 
-  // Generic fallback — still uses company name + city, never "most companies"
   const label = niche ? niche.toLowerCase().replace(/\b(services?|solutions?|ltd|inc|group)\b/gi, '').trim() : 'business';
   return {
     sectorLabel: label,
     firstLineTemplates: [
-      (c, l) => `${c} in ${l} — businesses at your stage usually hit a wall with manual back-office work.`,
-      (c, l) => `I came across ${c} in ${l} — operations at this scale tend to outgrow spreadsheets fast.`,
+      (c, l) => `${c} in ${l} — at this stage, manual back-office work usually starts costing more time than the team can afford.`,
+      (c, l) => `${c} in ${l} — operations at this scale tend to outgrow spreadsheets faster than most teams expect.`,
     ],
     subjectTemplates: [
-      (c)    => `Quick question about ${c}'s back-office setup`,
-      (c, l) => `${c} in ${l} — worth 2 minutes on this`,
+      (c)    => `${c} — still running ops manually?`,
+      (c, l) => `${c} in ${l} — one back-office fix worth seeing`,
     ],
-    problemSentence: `Finance, inventory, payroll, and CRM rarely live in the same system — which means your team spends time moving data between tools instead of running the business.`,
-    pryroSentence:   `Pryro consolidates finance, inventory, HR, and CRM into one system.`,
+    problemAngles: [
+      `Finance, inventory, payroll, and CRM rarely live in the same system — which means your team spends time moving data between tools instead of running the business.`,
+      `When finance, inventory, and HR each run in a different tool, the coordination overhead quietly compounds — and it gets worse as the team grows.`,
+    ],
+    get problemSentence() { return this.problemAngles[0]!; },
+    pryroSentence: `Pryro consolidates finance, inventory, HR, and CRM into one system.`,
     ctaOptions: [
       `Would a 10-minute call make sense to see if it fits how ${'{company}'} currently operates?`,
       `Is this something your team has been trying to solve?`,
@@ -278,14 +318,74 @@ export function getNicheProfile(niche: string | null): NicheProfile {
   };
 }
 
-// ─── Greeting builder (Q1 / Q4) ─────────────────────────────────────────────
-// Always "Hi [FirstName]," or "Hi there," — never "Dear Sir/Madam"
+// ─── Generic email detector ──────────────────────────────────────────────────
 
-export function buildGreeting(contactName?: string | null): string {
-  if (!contactName) return 'Hi there,';
-  const first = contactName.trim().split(/[\s,]+/)[0]?.trim() ?? '';
-  if (first.length < 2) return 'Hi there,';
-  return `Hi ${first.charAt(0).toUpperCase() + first.slice(1).toLowerCase()},`;
+const GENERIC_EMAIL_PREFIXES = new Set([
+  'info','contact','hello','hi','mail','support','help','admin','office',
+  'team','sales','reception','general','webmaster','enquiry','enquiries',
+  'bookings','booking','hr','marketing','accounts','billing','feedback',
+  'service','media','press','shop','store','news','pr','noreply','no-reply',
+]);
+
+export function isGenericEmailAddress(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const local = email.split('@')[0]?.toLowerCase() ?? '';
+  return GENERIC_EMAIL_PREFIXES.has(local);
+}
+
+// ─── First name extractor (Q5 — always try to get a real name) ───────────────
+// Priority: contactName field → email prefix → fallback to company-based greeting
+
+export function extractFirstName(
+  contactName?: string | null,
+  email?: string | null,
+): { name: string | null; source: 'contact_field' | 'email_prefix' | 'none' } {
+  // 1. Use contact name field if present
+  if (contactName) {
+    const first = contactName.trim().split(/[\s,]+/)[0]?.trim() ?? '';
+    if (first.length >= 2 && /^[a-zA-Z]/.test(first)) {
+      return { name: first.charAt(0).toUpperCase() + first.slice(1).toLowerCase(), source: 'contact_field' };
+    }
+  }
+
+  // 2. Try email prefix — only for personal-looking prefixes (first.last, firstname, etc.)
+  if (email && !isGenericEmailAddress(email)) {
+    const local = email.split('@')[0]?.toLowerCase() ?? '';
+    // firstname.lastname@ or firstname_lastname@ → take first part
+    const parts = local.split(/[._\-]/);
+    const first = parts[0]?.trim() ?? '';
+    if (
+      first.length >= 2 &&
+      /^[a-z]+$/.test(first) &&          // only letters
+      !GENERIC_EMAIL_PREFIXES.has(first) && // not a generic prefix
+      first.length <= 20                 // not a domain fragment
+    ) {
+      return { name: first.charAt(0).toUpperCase() + first.slice(1), source: 'email_prefix' };
+    }
+  }
+
+  return { name: null, source: 'none' };
+}
+
+// ─── Greeting builder ────────────────────────────────────────────────────────
+// Always uses the best available name. Never "Dear Sir/Madam".
+// Falls back to "Hi there," only when absolutely no name source exists.
+
+export function buildGreeting(
+  contactName?: string | null,
+  email?: string | null,
+): string {
+  const { name } = extractFirstName(contactName, email);
+  if (name) return `Hi ${name},`;
+  return 'Hi there,';
+}
+
+/** True when no real first name was found — caller should prompt user to add one */
+export function greetingIsFallback(
+  contactName?: string | null,
+  email?: string | null,
+): boolean {
+  return extractFirstName(contactName, email).source === 'none';
 }
 
 // ─── Niche sanity check (Q5) ─────────────────────────────────────────────────
@@ -349,25 +449,23 @@ function pickFirstLine(
 ): { line: string; score: number; source: 'website' | 'news' | 'industry' } {
 
   // Tier 1 — real news / expansion found via search
+  // Re-frame in the AI's own voice, not quoting the news snippet
   if (recentActivity && recentActivity.length > 40) {
-    const line = `I noticed ${companyName} ${recentActivity.slice(0, 120).replace(/[.!?]\s*$/, '').toLowerCase()} — that usually brings a specific ops challenge with it.`;
-    return { line, score: 90, source: 'news' };
+    // Detect promotional/award/mission content and skip it
+    const promo = /award|winner|proud|mission|vision|celebrat|recogni[sz]|honor|honour|accolade|rated #|ranked #|best in|voted/i;
+    if (!promo.test(recentActivity)) {
+      const line = `${companyName} in ${city} — looks like there's been some recent activity there, which usually brings specific ops challenges with it.`;
+      return { line, score: 85, source: 'news' };
+    }
   }
 
-  // Tier 2 — scraped website description
-  if (websiteDesc && websiteDesc.length > 60) {
-    const clean = websiteDesc.slice(0, 140).replace(/[.!?]\s*$/, '');
-    const line = `I was looking at ${companyName}'s website — ${clean.toLowerCase().startsWith('we ') || clean.toLowerCase().startsWith('you ') ? clean : `you ${clean.slice(0, 120)}`}.`;
-    return { line: line.slice(0, 230), score: 75, source: 'website' };
-  }
-
-  // Tier 3 — staff count signal
+  // Tier 2 — staff count signal (concrete, no website quoting)
   if (staffCount) {
     const line = `${companyName} in ${city} has ${staffCount} — at that scale, back-office coordination usually becomes a daily friction point.`;
     return { line, score: 60, source: 'website' };
   }
 
-  // Tier 4 — industry template (always has company name + city, never "most X")
+  // Tier 3 — industry template (always company name + city, never "I came across" or "I was looking at")
   const tpl = profile.firstLineTemplates[idx % profile.firstLineTemplates.length]!;
   return { line: tpl(companyName, city), score: 40, source: 'industry' };
 }
@@ -461,8 +559,16 @@ export async function researchProspect(params: {
     ?? profile.ctaOptions[0]!;
   const ctaSentence = ctaRaw.replace(/\{company\}/g, companyName).replace(/\{city\}/g, city);
 
-  // ── Greeting (Q1 — prospect's first name or "Hi there,") ─────────────────
-  const greeting = buildGreeting(contactName);
+  // ── Problem sentence — rotate by emailIndex for variety across bulk sends ─
+  const problemAngles = profile.problemAngles;
+  const problemSentence = problemAngles[emailIndex % problemAngles.length]!;
+
+  // ── Greeting — try contact name first, then email prefix ──────────────────
+  const greeting = buildGreeting(contactName, undefined);
+
+  // ── Generic email flag ────────────────────────────────────────────────────
+  // (email not available in async path — caller sets this via lead.email)
+  const isGenericEmail = false; // overridden by caller after research
 
   // ── Sign-off — caller overrides this with profile footer ─────────────────
   const firstName = senderName.split(' ')[0] || senderName;
@@ -481,10 +587,11 @@ export async function researchProspect(params: {
     greeting,
     firstLine,
     subjectLine,
-    problemSentence: profile.problemSentence,
+    problemSentence,
     pryroSentence:   profile.pryroSentence,
     ctaSentence,
     signOff,
+    isGenericEmail,
     personalizationScore,
     dataSource,
   };
@@ -522,7 +629,12 @@ export function researchProspectSync(params: {
     ?? profile.ctaOptions[0]!;
   const ctaSentence = ctaRaw.replace(/\{company\}/g, companyName).replace(/\{city\}/g, city);
 
-  const greeting = buildGreeting(contactName);
+  // ── Problem sentence — rotate by emailIndex for variety ──────────────────
+  const problemAngles = profile.problemAngles;
+  const problemSentence = problemAngles[emailIndex % problemAngles.length]!;
+
+  // ── Greeting — contact name first, then email prefix ─────────────────────
+  const greeting = buildGreeting(contactName, undefined);
 
   const firstName = senderName.split(' ')[0] || senderName;
   const signOff = senderPhone
@@ -538,10 +650,11 @@ export function researchProspectSync(params: {
     greeting,
     firstLine,
     subjectLine,
-    problemSentence: profile.problemSentence,
+    problemSentence,
     pryroSentence:   profile.pryroSentence,
     ctaSentence,
     signOff,
+    isGenericEmail: false, // caller sets via lead.email
     personalizationScore,
     dataSource,
   };

@@ -12,7 +12,7 @@
 import { NextRequest }         from 'next/server';
 import { createClient }        from '../../../../supabase/server';
 import { createServiceClient } from '../../../../supabase/service';
-import { researchProspectSync } from '@/utils/prospect-researcher';
+import { researchProspectSync, isGenericEmailAddress, extractFirstName } from '@/utils/prospect-researcher';
 import { buildPersonalizedEmail } from '@/utils/personalized-email-builder';
 
 export const runtime    = 'nodejs';
@@ -180,20 +180,25 @@ export async function POST(request: NextRequest) {
         const name = cleanName(lead.company_name);
 
         try {
+          // Resolve contact name from contact_name field or email prefix
+          const { name: resolvedContactName } = extractFirstName(lead.contact_name, lead.email);
+          const genericEmail = isGenericEmailAddress(lead.email);
+
           // Build prospect signals (sync — no web calls in bulk for speed)
           const signals = researchProspectSync({
             companyName:    name,
             niche:          lead.niche,
             location:       lead.location,
             companyContext: lead.company_context,
-            contactName:    lead.contact_name ?? null,
+            contactName:    resolvedContactName,
             senderName,
             senderPhone,
             emailIndex:     idx,
           });
 
-          // Always override signOff with the full profile footer
-          signals.signOff = profileSignOff;
+          // Stamp correct values from lead data
+          signals.signOff      = profileSignOff;
+          signals.isGenericEmail = genericEmail;
 
           const result = await buildPersonalizedEmail(
             { companyName: name, niche: lead.niche, location: lead.location, companyContext: lead.company_context, website: lead.website, signals, senderName, senderPhone, customPainPoint, emailIndex: idx },
@@ -205,16 +210,18 @@ export async function POST(request: NextRequest) {
 
           send('email', {
             email: {
-              lead_id: lead.id,
-              lead_email: lead.email,
-              company_name: name,
-              subject: result.subject,
-              body: result.body,
-              model: result.model,
-              isFallback: result.model === 'template',
+              lead_id:            lead.id,
+              lead_email:         lead.email,
+              company_name:       name,
+              subject:            result.subject,
+              body:               result.body,
+              model:              result.model,
+              isFallback:         result.model === 'template',
+              isGenericEmail:     genericEmail,
+              greetingIsFallback: !resolvedContactName,
               personalizationScore: result.personalizationScore,
-              qualityScore: result.qualityScore,
-              dataSource: result.dataSource,
+              qualityScore:       result.qualityScore,
+              dataSource:         result.dataSource,
             },
             done,
             total: leads.length,
@@ -225,23 +232,26 @@ export async function POST(request: NextRequest) {
           fallbackCount++;
           done++;
 
-          // Emergency fallback — greeting first, no commission mention, full footer
+          // Emergency fallback — name from contact field or email prefix, no commission
           const city     = (lead.location || 'your city').split(',')[0]?.trim() || 'your city';
-          const greeting = lead.contact_name
-            ? `Hi ${lead.contact_name.trim().split(' ')[0]!.charAt(0).toUpperCase() + lead.contact_name.trim().split(' ')[0]!.slice(1).toLowerCase()},`
-            : 'Hi there,';
+          const { name: fbName } = extractFirstName(lead.contact_name, lead.email);
+          const fbGreeting = fbName ? `Hi ${fbName},` : 'Hi there,';
+          const genericEmail = isGenericEmailAddress(lead.email);
+
           send('email', {
             email: {
-              lead_id: lead.id,
-              lead_email: lead.email,
-              company_name: name,
-              subject: `Quick question about ${name}'s setup`,
-              body: `${greeting}\n\n${name} in ${city} — at your scale, managing operations across separate tools usually starts to create daily friction.\n\nPryro is an ERP that consolidates finance, inventory, HR, and CRM into one system.\n\nWould a 10-minute call be worth it to see if it fits how you run ${name}?\n\n${profileSignOff}`,
-              model: 'template',
-              isFallback: true,
-              personalizationScore: 40,
-              qualityScore: 65,
-              dataSource: 'template',
+              lead_id:            lead.id,
+              lead_email:         lead.email,
+              company_name:       name,
+              subject:            `${name} — still running ops manually?`,
+              body:               `${fbGreeting}\n\n${name} in ${city} — at this scale, managing operations across separate tools usually starts costing more time than the team can afford.\n\nPryro is an ERP that consolidates finance, inventory, HR, and CRM into one system.\n\nWould a 10-minute call be worth it to see if it fits how you run ${name}?\n\n${profileSignOff}`,
+              model:              'template',
+              isFallback:         true,
+              isGenericEmail:     genericEmail,
+              greetingIsFallback: !fbName,
+              personalizationScore: genericEmail ? 30 : 40,
+              qualityScore:       genericEmail ? 55 : 65,
+              dataSource:         'template',
             },
             done,
             total: leads.length,

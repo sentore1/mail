@@ -226,6 +226,7 @@ export default function EmailWriterModule({ userId, preloadedLead, onGoToProfile
           company_context: selectedLead.company_context,
           website:         (selectedLead as any).website ?? null,
           contact_name:    (selectedLead as any).contact_name ?? null,
+          email:           selectedLead.email ?? null,
         },
         yourCompany,
         yourService,
