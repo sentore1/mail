@@ -95,7 +95,6 @@ const HARD_BANNED: string[] = [
   'act now',
   'click here',
   'buy now',
-  'free trial',
   'guaranteed results',
   'no obligation',
   'risk-free',
@@ -108,6 +107,23 @@ const HARD_BANNED: string[] = [
   'yours faithfully',
   'yours sincerely',
   'best wishes',
+  // Website-quoting openers — robotic, low open rate
+  'i was looking at your website',
+  'i came across your website',
+  "i came across your site",
+  'i noticed on your website',
+  'i saw on your website',
+  'according to your website',
+  'based on your website',
+  'your website mentions',
+  'i visited your website',
+  'i found on your website',
+  'i was looking at the website',
+  'i came across the website',
+  "i'm looking at your website",
+  'after looking at your website',
+  'after visiting your website',
+  'while looking at your website',
 ];
 
 const SOFT_BANNED: string[] = [
@@ -128,6 +144,16 @@ const GENERIC_OPENERS = [
   /^i hope/i,
   /^hope (this|you)/i,
   /^as a (leading|top|trusted)/i,
+  // Website-quoting openers — robotic and low-converting
+  /^i (was looking at|came across|noticed on|saw on|visited|found on) (your|the|their) (website|site|page|web presence)/i,
+  /^(after|while) (looking at|visiting|browsing) (your|the|their) (website|site|page)/i,
+  /^according to your (website|site|page)/i,
+  /^based on your (website|site|page)/i,
+  /^your (website|site) (says|mentions|states|shows|indicates)/i,
+  // Promotional / award content (from website scraping)
+  /^(congratulations|we are proud|we are pleased|we are thrilled|we are excited)/i,
+  /^(award|winner|proud|honor|honour|recogni[sz]|accolade|rated #|ranked #|best in|voted)/i,
+  /^(our mission|our vision|our commitment|we are dedicated|we are committed)/i,
 ];
 
 // ─── Weak subject patterns (Q2) ──────────────────────────────────────────────
@@ -142,6 +168,16 @@ const WEAK_SUBJECTS = [
   /^hello$/i,
   /^hi$/i,
   /^(checking|touching|circling)/i,
+  // Support-ticket / help-desk patterns (low open rate)
+  /\b(billing|invoice|payment|stock|inventory|payroll)\s+question\s*$/i,
+  /^quick question (for|about) .+['']s (admin|billing|ops|team|management) team/i,
+  /\b(fix|solution|update)\s+worth\s+\d+\s*(min|minute)/i,
+  /\ban? (admin|ops|billing|hr)\s+fix\s+worth/i,
+  // Generic announcement / description styles
+  /^introducing\s+/i,
+  /^announcement/i,
+  /^update\s*(for|from|about)/i,
+  /^(new|free)\s+(tool|software|platform|product|service|solution|feature)/i,
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -173,12 +209,33 @@ function personalizationScore(subject: string, body: string, companyName: string
   const full = (subject + ' ' + body).toLowerCase();
   const cn   = companyName.toLowerCase();
 
-  if (full.includes(cn))                                score += 30; // company name present
-  if (/\b(clinic|hotel|pharmacy|travel|school|logistics|retail|restaurant|lodge)\b/i.test(full)) score += 15;
-  if (/\b(billing|stock|expiry|payroll|booking|commission|margin|inventory)\b/i.test(full)) score += 20;
-  if (/\b(kampala|nairobi|lagos|accra|kigali|dar es salaam|africa|asia|india|ghana|nigeria|kenya|uganda)\b/i.test(full)) score += 10;
-  if ((full.match(/\?/g) || []).length >= 1)             score += 10;
-  if (!/dear sir|dear madam|to whom/i.test(full))        score += 15;
+  // Company name in both subject AND body = maximum signal
+  if (subject.toLowerCase().includes(cn) && full.includes(cn)) score += 25;
+  else if (full.includes(cn))                                   score += 15;
+
+  // Specific industry term (shows sector awareness)
+  if (/\b(clinic|hospital|pharmacy|hotel|travel|school|logistics|retail|restaurant|lodge|dispensary|veterinary)\b/i.test(full)) score += 12;
+
+  // Operational pain point (shows domain knowledge)
+  const painWords = ['billing', 'stock', 'expiry', 'payroll', 'booking', 'commission', 'margin', 'inventory', 'reconcil', 'scheduling', 'fee collect', 'driver', 'trip billing', 'food cost', 'supplier'];
+  const painHits = painWords.filter(w => full.includes(w)).length;
+  score += Math.min(painHits * 8, 24); // up to 24 points for operational specificity
+
+  // City / location reference (shows geographic personalisation)
+  if (/\b(kampala|nairobi|lagos|accra|kigali|dar es salaam|africa|asia|india|ghana|nigeria|kenya|uganda|rwanda|tanzania|uganda|rwanda|johannesburg|cape town|lusaka|harare|addis|abuja|cairo|abidjan|dakar)\b/i.test(full)) score += 12;
+
+  // Question present (human-sounding)
+  if ((full.match(/\?/g) || []).length >= 1) score += 8;
+
+  // No generic salutation (+ve signal)
+  if (!/dear sir|dear madam|to whom/i.test(full)) score += 10;
+
+  // Named greeting (Hi [Name], not "Hi there,")
+  if (/^hi [a-z]{2,},/im.test(body) && !/^hi there,/im.test(body)) score += 9;
+
+  // Free trial mention = strong positive signal (Pryro-specific)
+  if (/free trial|try it free|start.*free|pryro\.com/i.test(full)) score += 8;
+
   return Math.min(score, 100);
 }
 
@@ -251,7 +308,15 @@ export function checkEmailQuality(params: {
 
   // ── 3. Subject line (hard block if weak) ─────────────────────────────────
   const isWeakSubject = WEAK_SUBJECTS.some(re => re.test(subject)) || subject.split(/\s+/).length < 3;
-  const isStrongSubject = /\?$/.test(subject) || /\b(you|your)\b/i.test(subject) || /quick question|worth \d+ min/i.test(subject);
+  const isStrongSubject = (
+    /\?$/.test(subject) ||                               // ends with ?
+    /\b(you|your)\b/i.test(subject) ||                   // personal
+    /still (managing|using|tracking|separate|manual)/i.test(subject) || // implies current pain
+    /— (is|are|how|do|does|still|why)\b/i.test(subject) || // em-dash question format
+    /\b(how long|how many|how much)\b/i.test(subject) || // operational question
+    /still\b.*\?/i.test(subject) ||                      // "still X?" pattern
+    /in one place\?/i.test(subject)                      // consolidation question
+  );
   const subjectStrength: 'weak' | 'ok' | 'strong' = isWeakSubject ? 'weak' : isStrongSubject ? 'strong' : 'ok';
 
   if (isWeakSubject) {

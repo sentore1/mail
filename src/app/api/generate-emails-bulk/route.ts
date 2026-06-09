@@ -12,7 +12,7 @@
 import { NextRequest }         from 'next/server';
 import { createClient }        from '../../../../supabase/server';
 import { createServiceClient } from '../../../../supabase/service';
-import { researchProspectSync } from '@/utils/prospect-researcher';
+import { researchProspectSync, isGenericEmailAddress, extractFirstName, cleanCompanyName, getNicheProfile } from '@/utils/prospect-researcher';
 import { buildPersonalizedEmail } from '@/utils/personalized-email-builder';
 
 export const runtime    = 'nodejs';
@@ -137,21 +137,31 @@ export async function POST(request: NextRequest) {
       : `Best regards,\n\n${senderName}\nPryro`;
   }
 
-  // ── AI provider ──────────────────────────────────────────────────────────
+  // ── AI provider — load from ai_settings ─────────────────────────────────
+  // Do NOT filter by is_connected — that field is set by a mock test many users skip.
+  // A saved, active key is sufficient to attempt AI generation.
   let aiProvider: { provider: string; api_key: string; active_model: string } | null = null;
+  let aiDiagnosticMsg = 'no_provider';
   try {
     const { data } = await serviceSupabase
       .from('ai_settings')
-      .select('provider, api_key, active_model')
+      .select('provider, api_key, active_model, is_connected')
       .eq('user_id', user.id)
       .eq('is_active', true)
-      .eq('is_connected', true)
       .limit(1);
     if (data?.length) {
       const p = data[0];
       if (p.api_key && p.provider && p.active_model) {
         aiProvider = { provider: p.provider, api_key: p.api_key, active_model: p.active_model };
+        aiDiagnosticMsg = `${p.provider}/${p.active_model}`;
+        console.log(`[bulk-gen] ✅ AI provider loaded: ${aiDiagnosticMsg}`);
+      } else {
+        aiDiagnosticMsg = 'ai_settings row found but missing key/provider/model';
+        console.warn(`[bulk-gen] ⚠️ ${aiDiagnosticMsg}`);
       }
+    } else {
+      aiDiagnosticMsg = 'no active AI provider configured — go to AI Settings to add one';
+      console.warn(`[bulk-gen] ⚠️ ${aiDiagnosticMsg}`);
     }
   } catch { /* no AI */ }
 
@@ -164,36 +174,65 @@ export async function POST(request: NextRequest) {
         catch { /* client gone */ }
       };
 
-      send('start', { total: leads.length, aiEnabled: !!aiProvider, provider: aiProvider ? `${aiProvider.provider}/${aiProvider.active_model}` : 'template' });
+      send('start', {
+        total: leads.length,
+        aiEnabled: !!aiProvider,
+        provider: aiProvider ? aiDiagnosticMsg : null,
+        aiDiagnostic: aiProvider ? null : aiDiagnosticMsg,
+      });
 
       let aiCount = 0, fallbackCount = 0, done = 0;
 
       for (let idx = 0; idx < leads.length; idx++) {
         const lead = leads[idx]!;
 
-        if (isJunk(lead.company_name)) {
+        // Clean and validate company name before anything else
+        const nameResult = cleanCompanyName(lead.company_name);
+        if (!nameResult.valid) {
           done++;
-          send('skipped', { company_name: lead.company_name, done, total: leads.length });
+          send('skipped', {
+            company_name: lead.company_name,
+            reason: nameResult.reason || 'Invalid company name',
+            done,
+            total: leads.length,
+          });
           continue;
         }
 
-        const name = cleanName(lead.company_name);
+        const name = nameResult.cleaned;
 
         try {
+          // Resolve contact name from contact_name field or email prefix
+          const { name: resolvedContactName } = extractFirstName(lead.contact_name, lead.email);
+          const genericEmail = isGenericEmailAddress(lead.email);
+
           // Build prospect signals (sync — no web calls in bulk for speed)
           const signals = researchProspectSync({
             companyName:    name,
             niche:          lead.niche,
             location:       lead.location,
             companyContext: lead.company_context,
-            contactName:    lead.contact_name ?? null,
+            contactName:    resolvedContactName,
             senderName,
             senderPhone,
             emailIndex:     idx,
           });
 
-          // Always override signOff with the full profile footer
-          signals.signOff = profileSignOff;
+          // Stamp correct values from lead data
+          signals.signOff        = profileSignOff;
+          signals.isGenericEmail = genericEmail;
+
+          // Re-build greeting with the actual lead email so prefix extraction works
+          if (resolvedContactName) {
+            signals.greeting = `Hi ${resolvedContactName},`;
+          } else if (lead.email && !genericEmail) {
+            const { name: emailName } = extractFirstName(null, lead.email);
+            signals.greeting = emailName ? `Hi ${emailName},` : 'Hi there,';
+          } else {
+            signals.greeting = 'Hi there,';
+          }
+
+          console.log(`[bulk-gen] Generating for "${name}" | ai=${!!aiProvider} | greeting="${signals.greeting}" | niche=${lead.niche}`);
 
           const result = await buildPersonalizedEmail(
             { companyName: name, niche: lead.niche, location: lead.location, companyContext: lead.company_context, website: lead.website, signals, senderName, senderPhone, customPainPoint, emailIndex: idx },
@@ -205,43 +244,57 @@ export async function POST(request: NextRequest) {
 
           send('email', {
             email: {
-              lead_id: lead.id,
-              lead_email: lead.email,
-              company_name: name,
-              subject: result.subject,
-              body: result.body,
-              model: result.model,
-              isFallback: result.model === 'template',
+              lead_id:            lead.id,
+              lead_email:         lead.email,
+              company_name:       name,
+              subject:            result.subject,
+              body:               result.body,
+              model:              result.model,
+              isFallback:         result.model === 'template',
+              isGenericEmail:     genericEmail,
+              greetingIsFallback: !resolvedContactName,
               personalizationScore: result.personalizationScore,
-              qualityScore: result.qualityScore,
-              dataSource: result.dataSource,
+              qualityScore:       result.qualityScore,
+              dataSource:         result.dataSource,
             },
             done,
             total: leads.length,
           });
 
         } catch (err: any) {
-          console.error(`[bulk-gen] Failed for "${name}":`, err?.message);
+          console.error(`[bulk-gen] ❌ Failed for "${name}":`, err?.message);
           fallbackCount++;
           done++;
 
-          // Emergency fallback — greeting first, no commission mention, full footer
-          const city     = (lead.location || 'your city').split(',')[0]?.trim() || 'your city';
-          const greeting = lead.contact_name
-            ? `Hi ${lead.contact_name.trim().split(' ')[0]!.charAt(0).toUpperCase() + lead.contact_name.trim().split(' ')[0]!.slice(1).toLowerCase()},`
-            : 'Hi there,';
+          // Emergency fallback uses the niche-specific sentences — not a generic ERP blurb
+          const city      = (lead.location || 'your city').split(',')[0]?.trim() || 'your city';
+          const { name: fbName } = extractFirstName(lead.contact_name, lead.email);
+          const fbGreeting = fbName ? `Hi ${fbName},` : 'Hi there,';
+          const genericEmail = isGenericEmailAddress(lead.email);
+          const nicheProfile = getNicheProfile(lead.niche);
+          const fbSubjectFn  = nicheProfile.subjectTemplates[0]!;
+          const fbSubject    = fbSubjectFn(name, city);
+          const fbFirstLine  = nicheProfile.firstLineTemplates[0]?.(name, city) ?? `${name} in ${city} — managing operations manually starts to cost more time than expected at this scale.`;
+          const fbProblem    = nicheProfile.problemAngles[0] ?? nicheProfile.problemSentence;
+          const fbPryro      = nicheProfile.pryroSentence;
+          const fbCta        = (nicheProfile.ctaOptions[0] ?? `Would a 10-minute call be worth it to see if Pryro fits how you run ${name}?`)
+            .replace(/\{company\}/g, name).replace(/\{city\}/g, city);
+
           send('email', {
             email: {
-              lead_id: lead.id,
-              lead_email: lead.email,
-              company_name: name,
-              subject: `Quick question about ${name}'s setup`,
-              body: `${greeting}\n\n${name} in ${city} — at your scale, managing operations across separate tools usually starts to create daily friction.\n\nPryro is an ERP that consolidates finance, inventory, HR, and CRM into one system.\n\nWould a 10-minute call be worth it to see if it fits how you run ${name}?\n\n${profileSignOff}`,
-              model: 'template',
-              isFallback: true,
-              personalizationScore: 40,
-              qualityScore: 65,
-              dataSource: 'template',
+              lead_id:            lead.id,
+              lead_email:         lead.email,
+              company_name:       name,
+              subject:            fbSubject,
+              body:               `${fbGreeting}\n\n${fbFirstLine}\n\n${fbProblem} ${fbPryro}\n\n${fbCta}\n\n${profileSignOff}`,
+              model:              'template',
+              isFallback:         true,
+              isGenericEmail:     genericEmail,
+              greetingIsFallback: !fbName,
+              personalizationScore: genericEmail ? 30 : 45,
+              qualityScore:       genericEmail ? 55 : 68,
+              dataSource:         'template',
+              fallbackReason:     err?.message?.slice(0, 120) ?? 'generation error',
             },
             done,
             total: leads.length,
