@@ -47,151 +47,202 @@ export interface GeneratedEmail {
 interface AIProvider { provider: string; api_key: string; active_model: string; }
 
 async function callAI(p: AIProvider, system: string, user: string): Promise<string> {
-  const body = { temperature: 0.75, max_tokens: 420 };  // 0.75 for more variation across bulk sends
+  const body = { temperature: 0.75, max_tokens: 420 };
 
-  if (p.provider === 'openai') {
-    const r = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.api_key}` },
-      body: JSON.stringify({ model: p.active_model || 'gpt-4o-mini', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...body }),
-      signal: AbortSignal.timeout(12000),
-    });
-    if (!r.ok) throw new Error(`OpenAI ${r.status}`);
-    return (await r.json()).choices[0].message.content;
+  // Helper: delay for rate limit backoff
+  const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+  // Helper: single attempt to one provider
+  async function attempt(): Promise<string> {
+    if (p.provider === 'openai') {
+      const r = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.api_key}` },
+        body: JSON.stringify({ model: p.active_model || 'gpt-4o-mini', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...body }),
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!r.ok) throw Object.assign(new Error(`OpenAI ${r.status}`), { status: r.status });
+      return (await r.json()).choices[0].message.content;
+    }
+
+    if (p.provider === 'groq') {
+      const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.api_key}` },
+        body: JSON.stringify({ model: p.active_model || 'llama-3.3-70b-versatile', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...body }),
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!r.ok) throw Object.assign(new Error(`Groq ${r.status}`), { status: r.status });
+      return (await r.json()).choices[0].message.content;
+    }
+
+    if (p.provider === 'anthropic') {
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': p.api_key, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: p.active_model || 'claude-3-5-haiku-20241022', max_tokens: 420, system, messages: [{ role: 'user', content: user }], temperature: 0.6 }),
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!r.ok) throw Object.assign(new Error(`Anthropic ${r.status}`), { status: r.status });
+      return (await r.json()).content[0].text;
+    }
+
+    if (p.provider === 'gemini') {
+      const r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${p.active_model || 'gemini-1.5-flash'}:generateContent?key=${p.api_key}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: system + '\n\n' + user }] }], generationConfig: { temperature: 0.6, maxOutputTokens: 420 } }),
+          signal: AbortSignal.timeout(12000) }
+      );
+      if (!r.ok) throw Object.assign(new Error(`Gemini ${r.status}`), { status: r.status });
+      return (await r.json()).candidates[0].content.parts[0].text;
+    }
+
+    if (p.provider === 'mistral') {
+      const r = await fetch('https://api.mistral.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.api_key}` },
+        body: JSON.stringify({ model: p.active_model || 'mistral-small', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...body }),
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!r.ok) throw Object.assign(new Error(`Mistral ${r.status}`), { status: r.status });
+      return (await r.json()).choices[0].message.content;
+    }
+
+    throw new Error(`Unknown provider: ${p.provider}`);
   }
 
-  if (p.provider === 'groq') {
-    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.api_key}` },
-      body: JSON.stringify({ model: p.active_model || 'llama-3.3-70b-versatile', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...body }),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!r.ok) throw new Error(`Groq ${r.status}`);
-    return (await r.json()).choices[0].message.content;
+  // Retry loop with exponential backoff for 429 rate limits
+  let lastError: Error = new Error('Unknown');
+  for (let attempt_n = 0; attempt_n < 3; attempt_n++) {
+    try {
+      return await attempt();
+    } catch (err: any) {
+      lastError = err;
+      const status = err?.status ?? 0;
+      if (status === 429) {
+        // Rate limited — wait with exponential backoff: 2s, 6s, 14s
+        const delayMs = (Math.pow(2, attempt_n + 1) + attempt_n) * 1000;
+        console.warn(`[callAI] Rate limited by ${p.provider} (attempt ${attempt_n + 1}/3) — waiting ${delayMs}ms`);
+        await wait(delayMs);
+        continue;
+      }
+      // Non-429 error — don't retry
+      throw err;
+    }
   }
-
-  if (p.provider === 'anthropic') {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': p.api_key, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: p.active_model || 'claude-3-5-haiku-20241022', max_tokens: 420, system, messages: [{ role: 'user', content: user }], temperature: 0.6 }),
-      signal: AbortSignal.timeout(12000),
-    });
-    if (!r.ok) throw new Error(`Anthropic ${r.status}`);
-    return (await r.json()).content[0].text;
-  }
-
-  if (p.provider === 'gemini') {
-    const r = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${p.active_model || 'gemini-1.5-flash'}:generateContent?key=${p.api_key}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: system + '\n\n' + user }] }], generationConfig: { temperature: 0.6, maxOutputTokens: 420 } }),
-        signal: AbortSignal.timeout(12000) }
-    );
-    if (!r.ok) throw new Error(`Gemini ${r.status}`);
-    return (await r.json()).candidates[0].content.parts[0].text;
-  }
-
-  if (p.provider === 'mistral') {
-    const r = await fetch('https://api.mistral.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.api_key}` },
-      body: JSON.stringify({ model: p.active_model || 'mistral-small', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...body }),
-      signal: AbortSignal.timeout(12000),
-    });
-    if (!r.ok) throw new Error(`Mistral ${r.status}`);
-    return (await r.json()).choices[0].message.content;
-  }
-
-  throw new Error(`Unknown provider: ${p.provider}`);
+  throw lastError;
 }
 
-// ─── System prompt (all rules including greeting + footer) ───────────────────
+// ─── System prompt — proven cold email structure ─────────────────────────────
 
 function buildSystemPrompt(signals: ProspectSignals): string {
-  return `You are writing a cold B2B email on behalf of someone at Pryro.
+  return `You are a cold email specialist writing a highly personalized outreach email on behalf of someone at Pryro.
 
-WHAT PRYRO ACTUALLY IS (use these real facts — never invent features):
-Pryro is a complete cloud ERP platform that serves businesses worldwide. Its real modules are:
-  - Financial Management: invoicing, budgets, forecasting, cash flow tracking, proposals, quotations
-  - Inventory Management: real-time stock tracking, multi-warehouse, supplier management, analytics
-  - HR & Payroll: attendance tracking, payroll processing, benefits administration, scheduling
-  - Project Management: tasks, time tracking, timesheets, resource management, progress reports
-  - CRM: customer relationships, pipeline, invoicing integration
-  - AI-powered Analytics: real-time dashboards, business intelligence, instant insights
+ABOUT PRYRO (facts only — never invent, never list everything):
+Pryro is a cloud ERP at pryro.com. Key modules: Financial Management, Inventory Management, HR & Payroll, Project Management, CRM, AI Analytics. Free trial available. Trusted by 64,000+ businesses worldwide. 1–2 week implementation.
 
-PRYRO'S REAL CREDIBILITY (you may reference ONE naturally — do not list them all):
-  - Free trial available (pryro.com)
-  - 1–2 week implementation
-  - 99.9% uptime guarantee
-  - Trusted by 64,000+ businesses worldwide
+The prospect works in: ${signals.niche || 'business'}.
+Write ONLY about what a ${signals.niche || 'business'} actually does. Never mix industries.
 
-The business type being emailed is: ${signals.niche || 'business'}. Write ONLY about what a ${signals.niche || 'business'} actually does. Do NOT mix up industries.
+YOUR TASK:
+Write a cold email that feels like a message from one professional to another — not a marketing email, not a support ticket, not a newsletter. The prospect should think "this person actually understands my world."
 
-PERMANENT RULES — every single rule is non-negotiable:
+MANDATORY EMAIL STRUCTURE (follow exactly, no deviation):
 
-RULE 1 — GREETING (first line, mandatory):
-Use this exact greeting: "${signals.greeting}"
-Copy it verbatim. One line. Followed by a blank line.
-This is the ONLY allowed greeting format.
-PERMANENTLY BANNED: "Dear Sir/Madam", "To Whom It May Concern", "Hello there", "Dear [Name]".
-If the greeting is "Hi there," — use it as-is. Do not invent a name. Do not change it.
-The greeting is provided by the system and must be used exactly as given.
+Line 1: Greeting — use this verbatim: "${signals.greeting}"
+[blank line]
+Paragraph 1 (ONE sentence, max 20 words): Opening hook — a genuine insight about what running a ${signals.niche || 'business'} in ${(signals.location || 'their region').split(',')[0]?.trim()} actually involves right now. This must feel like real sector knowledge, not a generic observation. Never start with a compliment. Never mention their website. Never say "I was looking at..."
+[blank line]
+Paragraph 2 (TWO sentences, each max 20 words):
+  Sentence 1: Their most likely pain point, stated plainly. Include one social proof line like "teams like yours typically cut admin time once everything runs from one place."
+  Sentence 2: Introduce Pryro in one natural sentence. Name ONLY the single most relevant module for their sector. End with: "— free trial at pryro.com."
+[blank line]
+Paragraph 3 (ONE sentence): A soft, low-friction CTA question. Easy to answer in 5 seconds. Examples: "Would it be worth a quick 10-minute look?" or "Open to seeing how it works for ${signals.companyName}?"
+[blank line]
+Footer — copy VERBATIM, no changes.
 
-RULE 2 — FIRST OBSERVATION (paragraph 1, line 1):
-Must name the company AND their city.
-Written entirely in your own words — never a quote or paraphrase from their website.
-Must feel like a genuine human insight, not a script opener.
-BANNED openers: "Most companies", "Many businesses", "Most clinics", "at this stage almost always", "clinics at this stage", "I was looking at your website", "I came across your website", "I noticed on your website".
+SUBJECT LINE RULES:
+Under 6 words. Reads like a message from a colleague.
+Formats that work: "Quick question — ${signals.companyName}", "${signals.companyName} + Pryro?", a specific sector observation, or a direct question about their pain point.
+NEVER: clickbait, salesy phrases, support-ticket titles, "partnership", "opportunity", "ERP solution", "introduction".
 
-RULE 3 — SUBJECT LINE (under 8 words):
-Sharp specific question or bold observation naming this company's exact pain point.
-Must contain the company name OR a specific operational problem.
-BANNED: "partnership", "collaboration", "opportunity", "proposal", "introduction", "follow-up", "ERP", "synergy", "question for [team]", "fix worth [time]".
+TONE RULES:
+Short sentences. Natural language. One professional to another.
+BANNED WORDS (instant disqualification): streamline, leverage, empower, optimize, cutting-edge, revolutionary, game-changing, seamlessly, robust, scalable, innovative, transform, synergy, excited to share, pleased to inform, i hope this email finds you well, i wanted to reach out, i am reaching out, touching base, circling back, best-in-class, world-class, industry-leading, state-of-the-art, we help companies like yours, unlock potential, drive growth, scale your business, warm regards, yours sincerely, kindly revert, referral commission.
 
-RULE 4 — STRUCTURE AND LENGTH:
-  Line 1: Greeting (verbatim from Rule 1)
-  Blank line
-  P1 (MAXIMUM 2 sentences, each under 20 words): Specific observation about this company.
-  Blank line
-  P2 (EXACTLY 2 sentences, each under 20 words): One problem sentence. One Pryro module sentence.
-  Blank line
-  P3 (EXACTLY 1 sentence): CTA question ending with ?
-  Blank line
-  Footer (verbatim, no changes)
-Total body words (not counting footer): under 100.
-NEVER write 3 or 4 sentences in a single paragraph.
+LENGTH: Entire body under 100 words (not counting footer). Every sentence under 20 words. Maximum 2 sentences per paragraph. Scannable on mobile in under 30 seconds.
 
-RULE 5 — PRYRO SENTENCE (P2, sentence 2):
-ONE sentence only. Name the SPECIFIC Pryro module for this industry.
-End with a brief mention of the free trial.
-BANNED: listing multiple modules, "best-in-class", "innovative", "cutting-edge", "seamless", "robust", "referral commission", "20-30%".
-GOOD: "Pryro's HR & Payroll module handles attendance and payroll in one place — there's a free trial if you want to test it on your own numbers."
-
-RULE 6 — CTA (P3, one sentence):
-One soft question ending with ?
-MUST naturally reference Pryro's free trial.
-BANNED: "Let's schedule a call", "Book a demo", "Let me know if interested", "Please revert".
-
-RULE 7 — FOOTER:
-Copy the footer below VERBATIM after P3. Blank line before it. No changes.
-
-RULE 8 — PERMANENTLY BANNED PHRASES (instant disqualification):
-i hope this email finds you well | i wanted to reach out | i am reaching out | touching base | circling back | checking in | kindly revert | leverage | synergy | game-changer | cutting-edge | revolutionary | disruptive | world-class | industry-leading | state-of-the-art | innovative solution | seamless | robust | best-in-class | we help companies like yours | unlock potential | drive growth | scale your business | warm regards | yours sincerely | best wishes | streamline | optimize | empower | transform | referral commission | 20-30% | 20–30% | i was looking at your website | i came across your website | based on your website | your website mentions | should have been automated a long time ago | easy to miss until an audit | clinics at this stage almost always | businesses at this stage | companies at this stage | at this stage almost always hit the same wall
-
-RULE 9 — INDUSTRY ACCURACY:
-Write ONLY about what a ${signals.niche || 'business'} does. Never mix in unrelated industry language.
-
-RULE 10 — COMPANY NAME:
-Use the company name exactly as provided: "${signals.companyName}"
-Do not add, remove, or change any characters. Do not add "(Ltd)", "(Inc)", etc.
-If the company name looks incomplete or contains special characters, still use it as-is.
-
-OUTPUT FORMAT (respond with exactly this structure):
+OUTPUT FORMAT — respond with exactly this:
 SUBJECT: [subject line]
 BODY:
 [email body]`;
+}
+
+// ─── Follow-up sequence builder ───────────────────────────────────────────────
+// Generates 3 follow-ups on the same thread, each shorter than the last,
+// each approaching the pain point from a different angle.
+
+export interface FollowUpEmail {
+  dayOffset: number;   // 3, 7, or 14
+  subject: string;     // "Re: [original subject]" — same thread
+  body: string;
+}
+
+export function buildFollowUpPrompt(
+  signals: ProspectSignals,
+  originalSubject: string,
+  followUpNumber: 1 | 2 | 3,
+): string {
+  const configs = {
+    1: {
+      day: 3,
+      angle: 'approach the same pain point from the angle of time cost — how many hours per month is this taking their team',
+      cta: 'Soft curiosity question, e.g. "Still worth a quick look?"',
+      maxWords: 60,
+    },
+    2: {
+      day: 7,
+      angle: 'approach from the angle of risk — what happens when things fall through the cracks when systems are disconnected',
+      cta: 'Slightly more direct but still low commitment, e.g. "Want me to show you how it works for a ${signals.niche || "business"} your size?"',
+      maxWords: 45,
+    },
+    3: {
+      day: 14,
+      angle: 'approach from a competitor or peer angle — others in this sector are solving this, offer to share how',
+      cta: 'Most direct so far but never pushy, e.g. "Happy to share a quick example if useful?"',
+      maxWords: 35,
+    },
+  };
+
+  const cfg = configs[followUpNumber];
+
+  return `Write follow-up #${followUpNumber} (day ${cfg.day}) on the same email thread for this cold email sequence.
+
+Context:
+- Company: ${signals.companyName}
+- Sector: ${signals.niche || 'business'}
+- City: ${(signals.location || 'their city').split(',')[0]?.trim()}
+- Original subject: "${originalSubject}"
+- Greeting: "${signals.greeting}"
+
+Rules for this follow-up:
+1. Subject: start with "Re: ${originalSubject}" — same thread, builds on the previous email
+2. Greeting: use "${signals.greeting}" verbatim
+3. Angle for this follow-up: ${cfg.angle}
+4. CTA style: ${cfg.cta}
+5. Max words: ${cfg.maxWords} (shorter than the previous email)
+6. Same tone rules apply: no banned words, natural language, one professional to another
+7. Do NOT repeat the previous email's content word-for-word — different angle, different sentences
+8. End with the footer verbatim
+
+Footer:
+${signals.signOff}
+
+OUTPUT FORMAT:
+SUBJECT: Re: ${originalSubject}
+BODY:
+[follow-up body]`;
 }
 
 // ─── User prompt ──────────────────────────────────────────────────────────────
@@ -200,37 +251,39 @@ function buildUserPrompt(params: EmailGenerationParams): string {
   const { signals, customPainPoint } = params;
 
   let ctx = `Company: ${signals.companyName}
-Industry: ${signals.niche || 'Business'}
+Sector: ${signals.niche || 'Business'}
 City: ${(signals.location || 'your city').split(',')[0]?.trim()}
+Relevant Pryro module for this sector: ${signals.pryroSentence}
 `;
 
-  if (signals.websiteDescription) ctx += `\nBackground context about their business (use this to understand what they do — DO NOT quote or paraphrase this text in the email):\n"${signals.websiteDescription.slice(0, 300)}"\n`;
-  if (signals.recentActivity)     ctx += `\nRecent activity (use this as context — write in your own words, do NOT quote it directly):\n"${signals.recentActivity.slice(0, 180)}"\n`;
-  if (signals.techMentions.length > 0) ctx += `\nTools detected on their site: ${signals.techMentions.join(', ')}\n`;
-  if (signals.staffCount)         ctx += `\nStaff count: ${signals.staffCount}\n`;
-  if (customPainPoint)            ctx += `\nSpecific pain point to address: ${customPainPoint}\n`;
+  if (signals.websiteDescription) ctx += `\nBusiness context (understand what they do — DO NOT quote or paraphrase in the email):\n"${signals.websiteDescription.slice(0, 300)}"\n`;
+  if (signals.recentActivity)     ctx += `\nRecent activity (write in your own words, DO NOT quote directly):\n"${signals.recentActivity.slice(0, 180)}"\n`;
+  if (signals.techMentions.length > 0) ctx += `\nTools they may use: ${signals.techMentions.join(', ')}\n`;
+  if (signals.staffCount)         ctx += `\nSize signal: ${signals.staffCount}\n`;
+  if (customPainPoint)            ctx += `\nSpecific pain point: ${customPainPoint}\n`;
 
   return `${ctx}
-Greeting to use as first line (copy exactly):
-${signals.greeting}
+WRITE THE EMAIL NOW using the mandatory structure.
 
-Suggested observation line after greeting (use this or write a better one — must follow Rule 2):
+Greeting (copy verbatim): ${signals.greeting}
+
+Opening hook idea (rewrite in your own words — must be a genuine sector insight):
 "${signals.firstLine}"
 
-Problem angle for THIS email — use this as the basis but write it in fresh language, not the same sentence as any other email you have written for this industry:
+Pain point angle for THIS email (write fresh — not word-for-word):
 "${signals.problemSentence}"
 
-How Pryro fixes it (use this exact sentence — do NOT add commission mention):
+Pryro solution sentence (use this, add "— free trial at pryro.com" at the end):
 "${signals.pryroSentence}"
 
-CTA to end with (use this or write a better one — must be a soft question ending with ?):
+CTA idea (make it easy to answer in 5 seconds):
 "${signals.ctaSentence}"
 
-${signals.isGenericEmail ? `⚠ NOTE: The recipient email address appears to be a generic address (info@, contact@, etc.). This means the email may not reach a decision-maker. Write the email as if addressing whoever manages operations or admin — do NOT reference that you are writing to a generic inbox.\n` : ''}
-Footer to copy VERBATIM after the CTA paragraph (blank line, then this, no changes):
+${signals.isGenericEmail ? `NOTE: This is a generic inbox (info@, contact@, etc). Address whoever handles operations. Do not mention the generic address.\n` : ''}
+Footer (copy VERBATIM, no changes):
 ${signals.signOff}
 
-Write the email now. Follow all 9 rules exactly. The problem paragraph MUST be written in fresh language — do not copy the problem angle sentence word-for-word.`;
+Write the email now. Subject line first. Then body. Follow the mandatory structure exactly. Under 100 words in the body.`;
 }
 
 // ─── Parse AI response ────────────────────────────────────────────────────────

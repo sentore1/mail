@@ -165,6 +165,50 @@ export async function POST(request: NextRequest) {
     }
   } catch { /* no AI */ }
 
+  // ── Pre-send SMTP health check ───────────────────────────────────────────
+  // Run a quick live auth test before touching any leads.
+  // If all accounts are broken, stream an error immediately.
+  let smtpHealthy = false;
+  try {
+    const healthRes = await fetch(
+      `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/smtp-test`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // Forward the auth cookie so the test route can identify the user
+          Cookie: request.headers.get('cookie') ?? '',
+        },
+        body: JSON.stringify({}),
+      }
+    );
+    const health = await healthRes.json();
+    smtpHealthy = health.success && health.working > 0;
+
+    if (!smtpHealthy) {
+      // Stream an actionable error back instead of silently failing 78 emails
+      const enc = new TextEncoder();
+      const errStream = new ReadableStream({
+        start(c) {
+          const firstResult = health.results?.[0];
+          c.enqueue(enc.encode(`event: smtp_error\ndata: ${JSON.stringify({
+            error: firstResult?.title ?? 'SMTP connection failed',
+            detail: firstResult?.detail ?? health.error ?? 'Could not connect to your Gmail account.',
+            fix: firstResult?.fix ?? 'Check your App Password and port settings in SMTP Manager.',
+            code: firstResult?.code ?? 'UNKNOWN',
+          })}\n\n`));
+          c.close();
+        },
+      });
+      return new Response(errStream, {
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
+      });
+    }
+  } catch {
+    // Health check itself failed — proceed anyway, let the actual sends report errors
+    smtpHealthy = true;
+  }
+
   // ── SSE stream ────────────────────────────────────────────────────────────
   const stream = new ReadableStream({
     async start(controller) {
@@ -234,6 +278,12 @@ export async function POST(request: NextRequest) {
 
           console.log(`[bulk-gen] Generating for "${name}" | ai=${!!aiProvider} | greeting="${signals.greeting}" | niche=${lead.niche}`);
 
+          // Small delay between AI calls to avoid Groq/OpenAI rate limits on free tier
+          // Skip delay for first email and when no AI provider is configured
+          if (aiProvider && idx > 0) {
+            await new Promise(r => setTimeout(r, 600)); // 600ms = ~100 req/min max
+          }
+
           const result = await buildPersonalizedEmail(
             { companyName: name, niche: lead.niche, location: lead.location, companyContext: lead.company_context, website: lead.website, signals, senderName, senderPhone, customPainPoint, emailIndex: idx },
             aiProvider,
@@ -269,7 +319,7 @@ export async function POST(request: NextRequest) {
           // Emergency fallback uses the niche-specific sentences — not a generic ERP blurb
           const city      = (lead.location || 'your city').split(',')[0]?.trim() || 'your city';
           const { name: fbName } = extractFirstName(lead.contact_name, lead.email);
-          const fbGreeting = fbName ? `Hi ${fbName},` : 'Hi there,';
+          const fbGreeting = fbName ? `Hi ${fbName},` : 'Hi Sir/Madam,';
           const genericEmail = isGenericEmailAddress(lead.email);
           const nicheProfile = getNicheProfile(lead.niche);
           const fbSubjectFn  = nicheProfile.subjectTemplates[0]!;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Plus, Mail, Trash2, CheckCircle, XCircle, AlertCircle, Settings } from "lucide-react";
+import { Plus, Mail, Trash2, CheckCircle, XCircle, AlertCircle, Settings, Loader2, Zap, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "../../../supabase/client";
 
@@ -22,6 +22,20 @@ export default function SMTPManager({ userId }: SMTPManagerProps) {
   const [capacity, setCapacity] = useState({ total: 0, used: 0, remaining: 0 });
   const [showAddForm, setShowAddForm] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResults, setTestResults] = useState<{
+    success: boolean;
+    summary: string;
+    results: Array<{
+      accountEmail: string;
+      success: boolean;
+      code?: string;
+      title?: string;
+      detail?: string;
+      fix?: string;
+      latencyMs?: number;
+    }>;
+  } | null>(null);
   
   const [formData, setFormData] = useState({
     provider: "Gmail",
@@ -70,6 +84,31 @@ export default function SMTPManager({ userId }: SMTPManagerProps) {
     const totalCapacity = merged.reduce((sum: number, acc: any) => sum + acc.daily_limit, 0);
     const totalUsed = merged.reduce((sum: number, acc: any) => sum + (acc.sent_today || 0), 0);
     setCapacity({ total: totalCapacity, used: totalUsed, remaining: totalCapacity - totalUsed });
+  };
+
+  const testConnection = async (accountId?: string) => {
+    setTesting(true);
+    setTestResults(null);
+    try {
+      const res = await fetch('/api/smtp-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(accountId ? { accountId } : {}),
+      });
+      const data = await res.json();
+      setTestResults(data);
+      if (data.success) {
+        toast.success(`✅ ${data.working} of ${data.total} SMTP account(s) are working`);
+      } else {
+        toast.error(`SMTP test failed — ${data.results?.[0]?.title ?? 'Connection error'}`);
+      }
+      // Refresh to reflect any status changes
+      await loadAccounts();
+    } catch (err) {
+      toast.error('Test failed — could not reach the server');
+    } finally {
+      setTesting(false);
+    }
   };
 
   const updateDailyLimit = async (accountId: string, newLimit: number) => {
@@ -263,14 +302,69 @@ export default function SMTPManager({ userId }: SMTPManagerProps) {
             Manage your Gmail accounts for sending emails
           </p>
         </div>
-        <button
-          onClick={() => setShowAddForm(!showAddForm)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <Plus size={16} />
-          Add Account
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => testConnection()}
+            disabled={testing || accounts.length === 0}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
+            title="Test all SMTP accounts"
+          >
+            {testing ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
+            {testing ? 'Testing…' : 'Test Connection'}
+          </button>
+          <button
+            onClick={() => setShowAddForm(!showAddForm)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Plus size={16} />
+            Add Account
+          </button>
+        </div>
       </div>
+
+      {/* Test Results Panel */}
+      {testResults && (
+        <div className={`rounded-xl border p-4 ${testResults.success ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+          <div className="flex items-start gap-3 mb-3">
+            {testResults.success
+              ? <CheckCircle size={18} className="text-green-600 mt-0.5 flex-shrink-0" />
+              : <XCircle size={18} className="text-red-600 mt-0.5 flex-shrink-0" />}
+            <div className="flex-1">
+              <p className={`text-sm font-semibold ${testResults.success ? 'text-green-800' : 'text-red-800'}`}>
+                {testResults.summary}
+              </p>
+            </div>
+            <button onClick={() => setTestResults(null)} className="text-gray-400 hover:text-gray-600 text-xs">✕</button>
+          </div>
+          {testResults.results?.map((r, i) => (
+            <div key={i} className={`rounded-lg p-3 mb-2 last:mb-0 ${r.success ? 'bg-white border border-green-200' : 'bg-white border border-red-200'}`}>
+              <div className="flex items-center gap-2 mb-1">
+                {r.success
+                  ? <CheckCircle size={14} className="text-green-500 flex-shrink-0" />
+                  : <AlertTriangle size={14} className="text-red-500 flex-shrink-0" />}
+                <span className="text-sm font-medium text-gray-900">{r.accountEmail}</span>
+                {r.success && r.latencyMs && (
+                  <span className="text-xs text-gray-400 ml-auto">{r.latencyMs}ms</span>
+                )}
+                {!r.success && r.code && (
+                  <span className="text-xs font-mono px-1.5 py-0.5 bg-red-100 text-red-700 rounded ml-auto">{r.code}</span>
+                )}
+              </div>
+              {!r.success && (
+                <>
+                  {r.title && <p className="text-sm font-semibold text-red-700 mt-1">{r.title}</p>}
+                  {r.detail && <p className="text-xs text-gray-600 mt-1">{r.detail}</p>}
+                  {r.fix && (
+                    <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+                      <strong>How to fix:</strong> {r.fix}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Capacity Overview */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -503,6 +597,15 @@ export default function SMTPManager({ userId }: SMTPManagerProps) {
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => testConnection(account.id)}
+                      disabled={testing}
+                      className="text-xs px-2 py-1 rounded border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50"
+                      title="Test this account's SMTP connection"
+                    >
+                      {testing ? <Loader2 size={11} className="animate-spin inline" /> : <Zap size={11} className="inline" />}
+                      {' '}Test
+                    </button>
                     {/* Only allow deleting own accounts */}
                     {account.user_id === userId && (
                       <button

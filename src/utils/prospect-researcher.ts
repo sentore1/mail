@@ -451,6 +451,10 @@ const INVALID_COMPANY_NAMES = new Set([
   'untitled', 'n/a', 'na', 'test', 'example', 'sample', 'demo',
   'unknown', 'company', 'business', 'organization', 'organisation',
   'null', 'undefined', 'none', 'placeholder', 'your company',
+  // Junk scraped names from the logs
+  'pain', 'skin', 'contacts us', 'contact us', 'appointments',
+  'medical assistance', 'list of medical facilities', 'mis/ur',
+  'about', 'home', 'index', 'services', 'products',
 ]);
 
 export interface CompanyNameResult {
@@ -472,6 +476,7 @@ export function cleanCompanyName(raw: string): CompanyNameResult {
   // Strip leading junk patterns
   name = name.replace(/^\[.*?\]\s*/, '');  // [PDF], [DOC], etc.
   name = name.replace(/^https?:\/\/\S+/, '');  // URLs
+  name = name.replace(/^[&+,\s]+/, '');    // leading & or + or comma
 
   // Strip trailing junk
   name = name.replace(/\s*[-–—|/]\s*$/, '');   // trailing dash, pipe, slash
@@ -497,6 +502,16 @@ export function cleanCompanyName(raw: string): CompanyNameResult {
   // Check for single character or just numbers
   if (/^[a-z0-9]$/.test(lower)) {
     return { cleaned: name, valid: false, reason: 'Single character — not a valid company name' };
+  }
+
+  // Names that start with a conjunction or connector — scraped from page nav
+  if (/^(&|and |or |the |a |an )/i.test(name.trim())) {
+    return { cleaned: name, valid: false, reason: 'Starts with a connector — likely scraped page navigation, not a company name' };
+  }
+
+  // Names that contain "list of" — directory pages, not companies
+  if (/\blist of\b/i.test(name)) {
+    return { cleaned: name, valid: false, reason: '"list of" — this is a directory page, not a company name' };
   }
 
   // Still contains HTML entities or URL fragments after cleaning
@@ -604,10 +619,10 @@ export function buildGreeting(
 ): string {
   const { name } = extractFirstName(contactName, email);
   if (name) return `Hi ${name},`;
-  return 'Hi there,';
+  return 'Hi Sir/Madam,';
 }
 
-/** True when no real first name was found — caller should prompt user to add one */
+/** True when no real first name was found */
 export function greetingIsFallback(
   contactName?: string | null,
   email?: string | null,
@@ -650,6 +665,49 @@ export function sanitizeNicheForCompany(companyName: string, detectedNiche: stri
       return 'ngo';
   }
   return detectedNiche ?? 'generic';
+}
+
+// ─── Context cleaner — strips contact page junk before using as email context ─
+// Removes: addresses, phone numbers, email addresses in the text, "CONTACT DETAILS",
+// "Contact us for", all-caps lines, lines that are purely numbers/codes.
+// Only keeps sentences that describe what the business DOES.
+
+function cleanContextForEmail(raw: string): string | null {
+  if (!raw || raw.length < 20) return null;
+
+  // Remove common contact page boilerplate
+  const stripped = raw
+    .replace(/CONTACT\s+(US|DETAILS?)[^.]*[.\n]/gi, ' ')
+    .replace(/contact us for[^.]*\./gi, ' ')
+    .replace(/\b\d{6,}\b/g, ' ')               // long numbers (phone, zip, etc.)
+    .replace(/\b\d{3}[\s\-]\d{3,4}[\s\-]\d{3,4}\b/g, ' ')  // phone patterns
+    .replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, ' ')  // email addresses in text
+    .replace(/\b(P\.?O\.?\s*Box|Plot|Street|Road|Avenue|Lane|Drive|Blvd)\b[^.]*\./gi, ' ')
+    .replace(/[A-Z\s]{10,}/g, ' ')              // all-caps blocks (navigation, headers)
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Keep only sentences that look like business descriptions
+  const sentences = stripped.split(/[.!?]/).filter(s => {
+    const l = s.toLowerCase().trim();
+    return (
+      s.trim().length > 30 &&
+      s.trim().length < 250 &&
+      !l.includes('cookie') &&
+      !l.includes('privacy') &&
+      !l.includes('copyright') &&
+      !l.includes('all rights reserved') &&
+      !l.includes('contact us') &&
+      !l.includes('follow us') &&
+      !l.includes('subscribe') &&
+      (l.includes('we ') || l.includes('our ') || l.includes('provide') ||
+       l.includes('offer') || l.includes('speciali') || l.includes('service') ||
+       l.includes('product') || l.includes('help') || l.includes('deliver'))
+    );
+  });
+
+  const result = sentences.slice(0, 2).map(s => s.trim()).join('. ');
+  return result.length > 30 ? result.slice(0, 300) : null;
 }
 
 // ─── Website content fetcher ─────────────────────────────────────────────────
@@ -777,8 +835,9 @@ export async function researchProspect(params: {
   }
 
   // Also use existing company_context if website failed
+  // Strip contact-page junk before using as context
   if (!websiteDesc && companyContext && companyContext.length > 50) {
-    websiteDesc = companyContext.slice(0, 300);
+    websiteDesc = cleanContextForEmail(companyContext);
   }
 
   // ── Build first line ─────────────────────────────────────────────────────
@@ -853,7 +912,9 @@ export function researchProspectSync(params: {
   const city    = (location || 'your city').split(',')[0]?.trim() || 'your city';
   const profile = getNicheProfile(niche);
 
-  const websiteDesc = companyContext && companyContext.length > 50 ? companyContext.slice(0, 300) : null;
+  const websiteDesc = companyContext && companyContext.length > 50
+    ? cleanContextForEmail(companyContext)
+    : null;
 
   const { line: firstLine, score: personalizationScore, source: dataSource } = pickFirstLine(
     companyName, city, profile, websiteDesc, null, null, emailIndex

@@ -177,35 +177,7 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // Block personal email providers — cold B2B outreach should never go to Gmail, Yahoo, etc.
-        const emailDomain = email.to.split('@')[1]?.toLowerCase() ?? '';
-        const PERSONAL_DOMAINS = new Set([
-          'gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.uk', 'yahoo.fr',
-          'yahoo.co.in', 'yahoo.ca', 'yahoo.com.au', 'hotmail.com', 'hotmail.co.uk',
-          'hotmail.fr', 'outlook.com', 'live.com', 'msn.com', 'icloud.com',
-          'me.com', 'mac.com', 'aol.com', 'protonmail.com', 'proton.me',
-          'yandex.com', 'yandex.ru', 'mail.ru', 'inbox.ru', 'list.ru',
-          'zoho.com', 'fastmail.com', 'tutanota.com', 'gmx.com', 'gmx.net',
-          'web.de', 'libero.it', 'virgilio.it',
-        ]);
-        if (PERSONAL_DOMAINS.has(emailDomain)) {
-          results.failed++;
-          results.errors.push(`${email.to}: skipped — personal email provider (not a business address)`);
-          await serviceSupabase.from("sent_emails").insert({
-            user_id: user.id, lead_id: email.leadId || null, campaign_id: campaignId,
-            to_email: email.to, subject: email.subject, body: email.body,
-            sent_at: new Date().toISOString(), status: "failed",
-            bounce_reason: `Email not sent — personal email provider (${emailDomain})`,
-          });
-          if (email.leadId) {
-            await serviceSupabase.from("leads")
-              .update({ status: "invalid_email", updated_at: new Date().toISOString() })
-              .eq("id", email.leadId);
-          }
-          continue;
-        }
-
-        // Block obviously fake/placeholder local parts
+        // Block obviously fake/placeholder local parts only
         const localPart = email.to.split('@')[0]?.toLowerCase() ?? '';
         const FAKE_LOCALS = new Set([
           'johndoe', 'john.doe', 'john_doe', 'janedoe', 'jane.doe',
@@ -231,18 +203,18 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // Skip AI-predicted emails (confidence < 70 and not verified)
-        // These are guessed addresses that frequently bounce
+        // Only skip AI-predicted emails with very low confidence (below 40)
+        // Many scraped leads have confidence 50 which is acceptable
         const score = email.confidenceScore ?? 90;
         const verified = email.emailVerified ?? false;
-        if (!verified && score < 70) {
+        if (!verified && score < 40) {
           results.failed++;
-          results.errors.push(`${email.to}: skipped — AI-predicted email (low confidence)`);
+          results.errors.push(`${email.to}: skipped — very low confidence AI-predicted email`);
           await serviceSupabase.from("sent_emails").insert({
             user_id: user.id, lead_id: email.leadId || null, campaign_id: campaignId,
             to_email: email.to, subject: email.subject, body: email.body,
             sent_at: new Date().toISOString(), status: "failed",
-            bounce_reason: "Email not sent — AI-predicted address (unverified, low confidence)",
+            bounce_reason: "Email not sent — AI-predicted address (very low confidence)",
           });
           if (email.leadId) {
             await serviceSupabase.from("leads")
@@ -250,48 +222,26 @@ export async function POST(request: NextRequest) {
               .eq("id", email.leadId);
           }
           continue;
-        }        // Email verification — full SMTP probe to confirm the mailbox actually exists.
-        // Falls back gracefully to DNS-only if the server blocks probes.
+        }        // Email verification — skip SMTP probe (blocked on cloud hosts, causes false negatives)
+        // We only log and continue — we do not block sends based on verification results
         if (verifyEmails) {
-          const verification = await verifyEmail(email.to);
-          if (!verification.valid) {
-            results.failed++;
-            results.errors.push(`${email.to}: ${verification.detail ?? verification.reason}`);
-
-            // Log to sent_emails so CRM drawer shows it was skipped
-            await serviceSupabase.from("sent_emails").insert({
-              user_id: user.id,
-              lead_id: email.leadId || null,
-              campaign_id: campaignId,
-              to_email: email.to,
-              subject: email.subject,
-              body: email.body,
-              sent_at: new Date().toISOString(),
-              status: "failed",
-              bounce_reason: `Email not sent — ${verification.detail ?? verification.reason}`,
-            });
-
-            // Mark lead as invalid_email
-            if (email.leadId) {
-              await serviceSupabase
-                .from("leads")
-                .update({
-                  status: "invalid_email",
-                  email_verified: false,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq("id", email.leadId);
+          try {
+            const verification = await verifyEmail(email.to);
+            // Only hard-block confirmed disposable domains
+            if (verification.status === 'disposable') {
+              results.failed++;
+              results.errors.push(`${email.to}: disposable email domain — skipped`);
+              await serviceSupabase.from("sent_emails").insert({
+                user_id: user.id, lead_id: email.leadId || null, campaign_id: campaignId,
+                to_email: email.to, subject: email.subject, body: email.body,
+                sent_at: new Date().toISOString(), status: "failed",
+                bounce_reason: "Disposable email domain",
+              }).catch(() => {});
+              continue;
             }
-            continue;
-          }
-
-          // Email passed verification — mark as verified
-          if (email.leadId && verification.reason === 'valid') {
-            await serviceSupabase
-              .from("leads")
-              .update({ email_verified: true, updated_at: new Date().toISOString() })
-              .eq("id", email.leadId);
-          }
+            // For everything else (valid, catch_all, risky, unverifiable, invalid) — proceed to send
+            // The actual SMTP delivery will confirm whether the address works
+          } catch { /* verification failed — proceed anyway */ }
         }
 
         // Check remaining capacity before each send

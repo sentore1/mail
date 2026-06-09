@@ -156,78 +156,84 @@ export function decideFollowUpStyle(ctx: FollowUpContext): {
 // ── Style-specific prompt builders ────────────────────────────────────────────
 
 function buildSystemPrompt(style: FollowUpStyle, senderName: string, tone?: FollowUpTone): string {
-  return `You are ${senderName}, a sales executive at Pryro writing a short follow-up email.
+  return `You are ${senderName} writing a short follow-up email on behalf of Pryro.
 
-FORMAT RULES (follow exactly):
-1. Greeting: "Hi [Recipient Name]," or "Dear Sir/Madam,"
-2. Exactly 3 short sentences — no more
-3. End with: "Best regards,"
-4. Then the signature block:
-   [Sender Name]
-   Pryro
+This is a follow-up on a cold email thread. The prospect has not replied yet.
 
-CONTENT RULES:
-- Sentence 1: One-line reference to the previous email (e.g. "I wanted to follow up on the ERP proposal we shared on [date].")
-- Sentence 2: One short, open question (e.g. "Have you had a chance to review it, and is there any feedback or information you need from our side to move forward?")
-- Sentence 3: One polite fallback (e.g. "If your priorities have changed or the project timeline has shifted, a quick update would be greatly appreciated.")
-- Close: "Thank you, and I look forward to hearing from you."
-- DO NOT explain the product, DO NOT describe the demo, DO NOT add paragraphs
-- DO NOT use: "I hope this email finds you well", "just checking in", "circling back", "touching base"
-- DO NOT include HTML, bullet points, or markdown
+YOUR GOAL: Write one short, human follow-up that approaches the same pain point from a different angle than the previous email. Never repeat the same sentences.
 
-IMPORTANT: Write ONLY the email body starting from the greeting. Keep it under 6 lines total.`;
+MANDATORY STRUCTURE:
+Line 1: Greeting (provided — copy verbatim)
+Blank line
+Paragraph 1 (1–2 sentences, each under 20 words): A new angle on their operational pain — time cost, risk, or what peers in their sector are doing.
+Blank line
+Paragraph 2 (1 sentence): A soft CTA question that is easy to answer in 5 seconds.
+Blank line
+Footer (provided — copy verbatim, no changes)
+
+TONE: One professional to another. Short sentences. Natural language. No jargon.
+
+BANNED WORDS: streamline, leverage, empower, optimize, cutting-edge, revolutionary, game-changing, seamlessly, robust, scalable, innovative, transform, synergy, excited to share, pleased to inform, i hope this email finds you well, just checking in, circling back, touching base, per my last email, as discussed, kindly revert, best-in-class.
+
+NEVER: repeat the opening email word-for-word, pitch the product again, ask for a meeting, use "let me know if you're interested".
+
+MAX LENGTH: 50 words in the body (not counting footer). Scannable on mobile in under 15 seconds.
+
+OUTPUT FORMAT:
+SUBJECT: Re: [original subject]
+BODY:
+[email body]`;
 }
 
-// ── Strip HTML to clean plain text for AI ─────────────────────────────────
-function stripHtmlForAI(html: string): string {
-  return html
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<img[^>]*>/gi, "") // remove tracking pixels
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#\d+;/g, " ")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-}
-
-// ── Greeting — always "Dear Sir/Madam," ──────────────────────────────────────
-function resolveGreeting(): string {
-  return "Dear Sir/Madam,";
+// ── Greeting — updated to match new standard ─────────────────────────────────
+function resolveGreeting(contactName?: string | null): string {
+  if (contactName) {
+    const first = contactName.trim().split(/[\s,]+/)[0]?.trim() ?? '';
+    if (first.length >= 2 && first.length <= 15 && /^[a-zA-Z]+$/.test(first)) {
+      return `Hi ${first.charAt(0).toUpperCase() + first.slice(1).toLowerCase()},`;
+    }
+  }
+  return 'Hi Sir/Madam,';
 }
 
 function buildUserPrompt(ctx: FollowUpContext, style: FollowUpStyle): string {
   const senderName = ctx.senderName || ctx.yourCompany || "Sales Team";
-  const sentDate = new Date(ctx.sentAt).toLocaleDateString("en-US", { month: "long", day: "numeric" });
-  const phoneLine = ctx.senderPhone ? `\n${ctx.senderPhone}` : "";
-
+  const phoneLine  = ctx.senderPhone ? `\n${ctx.senderPhone}` : "";
   const signatureBlock = `Best regards,\n\n${senderName}\nPryro${phoneLine}`;
+  const greeting = resolveGreeting(ctx.contactName);
 
-  return `COMPANY: ${ctx.companyName}
-ORIGINAL EMAIL DATE: ${sentDate}
-SUBJECT: ${ctx.originalSubject}
-FOLLOW-UP NUMBER: ${ctx.followupNumber}
+  // Each follow-up approaches the pain point from a different angle
+  const angles: Record<number, string> = {
+    1: `Approach from the TIME COST angle: how many hours per month does this cost their team when these systems are separate?`,
+    2: `Approach from the RISK angle: what quietly goes wrong (errors, missed data, compliance gaps) when systems don't connect?`,
+    3: `Approach from the PEER angle: others in the ${ctx.niche || 'same sector'} have solved this — offer to share a brief example.`,
+  };
+  const angle = angles[Math.min(ctx.followupNumber, 3)] ?? angles[3];
 
-TASK: Write a short professional follow-up email.
+  const dayCopy: Record<number, string> = { 1: "day 3", 2: "day 7", 3: "day 14" };
+  const dayLabel = dayCopy[Math.min(ctx.followupNumber, 3)] ?? "day 14";
 
-FORMAT:
-- Greeting: "Dear Sir/Madam,"
-- 2 short paragraphs maximum
-  - Para 1: Brief reference to the previous email and a single clear question
-  - Para 2 (optional, FU #1 only): Polite call to action
-- No product pitching, no long explanations
-- Sign off with exactly:
+  return `FOLLOW-UP #${ctx.followupNumber} (${dayLabel} — same thread as original email)
 
+Company: ${ctx.companyName}
+Sector: ${ctx.niche || 'business'}
+City: ${ctx.location?.split(',')[0]?.trim() || 'their city'}
+Original subject: ${ctx.originalSubject}
+Original sent: ${new Date(ctx.sentAt).toLocaleDateString("en-US", { month: "long", day: "numeric" })}
+
+Angle for this follow-up: ${angle}
+
+Greeting (copy verbatim): ${greeting}
+
+CTA style for this follow-up:
+${ctx.followupNumber === 1 ? '"Would it be worth a quick 10-minute look?" or "Open to seeing how it works for ' + ctx.companyName + '?"' : ''}
+${ctx.followupNumber === 2 ? '"Want me to show you how it works for a ' + (ctx.niche || 'business') + ' your size?" — slightly more direct but still low commitment' : ''}
+${ctx.followupNumber >= 3 ? '"Happy to share a quick example if useful?" — most direct so far, never pushy' : ''}
+
+Footer (copy VERBATIM, no changes):
 ${signatureBlock}
 
-Output EXACTLY:
-SUBJECT: [subject line]
-BODY:
-[email starting from "Dear Sir/Madam,"]`;
+Write the follow-up now. Max 50 words in the body. Different sentences from the original email. Follow the mandatory structure.`;
 }
 
 // ── Template-based fallback (no AI required) ─────────────────────────────────
@@ -236,56 +242,50 @@ export function buildTemplateFollowUp(
   ctx: FollowUpContext,
   style: FollowUpStyle
 ): { subject: string; body: string } {
-  const { companyName, followupNumber, originalSubject, yourCompany, senderName, senderPhone } = ctx;
-  const sender = senderName || yourCompany || "Sales Team";
+  const { companyName, followupNumber, originalSubject, yourCompany, senderName, senderPhone, niche, contactName } = ctx;
+  const sender    = senderName || yourCompany || "Sales Team";
   const phoneLine = senderPhone ? `\n${senderPhone}` : "";
-  const sig = `Best regards,\n\n${sender}\nPryro${phoneLine}`;
+  const sig       = `Best regards,\n\n${sender}\nPryro${phoneLine}`;
+  const greeting  = resolveGreeting(contactName);
+  const sector    = niche || 'business';
 
-  const sentDate = ctx.sentAt
-    ? new Date(ctx.sentAt).toLocaleDateString("en-US", { month: "long", day: "numeric" })
-    : "recently";
-
-  const greeting = resolveGreeting();
-
-  // FU #1
+  // FU #1 — day 3 — time cost angle
   if (followupNumber === 1) {
     return {
       subject: `Re: ${originalSubject}`,
       body: `${greeting}
 
-I wanted to follow up on my email from ${sentDate} about Pryro, our ERP platform.
+Running a ${sector} means a lot of time spent moving data between systems that should talk to each other. Teams like yours typically get hours back each week once that's fixed.
 
-Have you had a chance to review it? I would love to know if it could be a good fit for ${companyName}.
-
-Would you be open to a quick 10-minute call?
+Worth a quick 10-minute look at how Pryro handles it — free trial at pryro.com.
 
 ${sig}`,
     };
   }
 
-  // FU #2
+  // FU #2 — day 7 — risk angle
   if (followupNumber === 2) {
     return {
       subject: `Re: ${originalSubject}`,
       body: `${greeting}
 
-Just following up once more on my previous email about Pryro.
+When billing, payroll, and operations run in separate tools, small errors compound quietly — usually only visible at month-end.
 
-If the timing is not right, that is completely fine — is there a better time to reconnect?
+Want me to show you how it works for a ${sector} your size?
 
 ${sig}`,
     };
   }
 
-  // FU #3
+  // FU #3 — day 14 — peer angle
   if (followupNumber === 3) {
     return {
       subject: `Re: ${originalSubject}`,
       body: `${greeting}
 
-I am reaching out one last time regarding Pryro and whether it could benefit ${companyName}.
+Other ${sector} teams in the region have started running everything from one place — cuts the month-end scramble significantly.
 
-Please let me know either way — I appreciate your time.
+Happy to share a quick example if useful?
 
 ${sig}`,
     };
@@ -297,9 +297,9 @@ ${sig}`,
       subject: `Re: ${originalSubject}`,
       body: `${greeting}
 
-This will be my last follow-up. If the timing ever becomes right, please do not hesitate to reach out.
+Last one from me — if the timing isn't right, completely understood.
 
-Wishing ${companyName} continued success.
+If priorities shift, pryro.com is always there for a free look.
 
 ${sig}`,
     };
@@ -310,9 +310,7 @@ ${sig}`,
     subject: `Closing the loop — ${companyName}`,
     body: `${greeting}
 
-I am closing the loop on my previous emails about Pryro.
-
-If your needs change in the future, feel free to get in touch — we would be happy to help.
+Closing the loop on my previous emails. If the timing ever becomes right, you can start a free trial anytime at pryro.com.
 
 ${sig}`,
   };
