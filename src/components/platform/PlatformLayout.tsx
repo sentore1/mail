@@ -19,6 +19,7 @@ import ABTestingModule from "./ABTestingModule";
 import CustomFieldsModule from "./CustomFieldsModule";
 import IntegrationsModule from "./IntegrationsModule";
 import WhatsAppNotificationsModule from "./WhatsAppNotificationsModule";
+import SenderProfileModule from "./SenderProfileModule";
 import { createClient } from "../../../supabase/client";
 import { useRouter } from "next/navigation";
 
@@ -141,6 +142,7 @@ export default function PlatformLayout({ userId, userEmail }: PlatformLayoutProp
               key={preloadedLead?.id || "email-writer"}
               userId={userId}
               preloadedLead={preloadedLead}
+              onGoToProfile={() => handleModuleChange("sender-profile")}
             />
           </LazyModule>
 
@@ -186,6 +188,10 @@ export default function PlatformLayout({ userId, userEmail }: PlatformLayoutProp
 
           <LazyModule active={activeModule === "whatsapp"}>
             <WhatsAppNotificationsModule userId={userId} />
+          </LazyModule>
+
+          <LazyModule active={activeModule === "sender-profile"}>
+            <SenderProfileModule userId={userId} />
           </LazyModule>
         </main>
       </div>

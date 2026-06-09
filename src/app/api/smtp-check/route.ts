@@ -1,79 +1,148 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "../../../../supabase/server";
-import { createServiceClient } from "../../../../supabase/service";
-import nodemailer from "nodemailer";
+/**
+ * SMTP CHECK API
+ * ──────────────
+ * Runs a DNS MX lookup + optional SMTP RCPT-TO probe to verify
+ * whether an email address is deliverable.
+ *
+ * Used by email-verifier.ts for:
+ *  - Step 3: Confirming SMTP reachability
+ *  - Catch-all detection (probe a random mailbox on the same domain)
+ *
+ * Falls back gracefully — if the SMTP probe cannot connect (firewall,
+ * timeout, etc.) we return { deliverable: null } rather than false.
+ */
 
-export async function GET(req: NextRequest) {
+import { NextRequest, NextResponse } from 'next/server';
+import * as dns from 'dns/promises';
+import * as net from 'net';
+
+export const runtime = 'nodejs';
+
+// ─── DNS MX lookup ────────────────────────────────────────────────────────────
+
+async function getMXRecords(domain: string): Promise<string[]> {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    const userId = user?.id ?? req.nextUrl.searchParams.get("userId");
-    const testSend = req.nextUrl.searchParams.get("test") === "1";
+    const records = await dns.resolveMx(domain);
+    return records
+      .sort((a, b) => a.priority - b.priority)
+      .map(r => r.exchange);
+  } catch {
+    return [];
+  }
+}
 
-    if (!userId) {
-      return NextResponse.json({
-        error: "Not logged in. Visit this URL while logged into the dashboard.",
-      }, { status: 401 });
-    }
+// ─── SMTP RCPT-TO probe ───────────────────────────────────────────────────────
+// Connects to the mail server, runs through EHLO → MAIL FROM → RCPT TO
+// and reads the response code without actually sending any email.
+// Returns true = mailbox exists, false = rejected, null = inconclusive.
 
-    const service = createServiceClient();
+function smtpProbe(mxHost: string, email: string, timeoutMs = 7000): Promise<boolean | null> {
+  return new Promise((resolve) => {
+    let buf = '';
+    let stage = 0;  // 0=greeting, 1=EHLO, 2=MAIL FROM, 3=RCPT TO
 
-    const { data: accounts, error } = await service
-      .from("smtp_accounts")
-      .select("id, email, status, sent_today, daily_limit, last_reset, user_name, password, host, port, user_id")
-      .eq("user_id", userId);
+    const timer = setTimeout(() => { socket.destroy(); resolve(null); }, timeoutMs);
 
-    if (error) {
-      return NextResponse.json({ error: error.message, code: error.code }, { status: 500 });
-    }
+    const socket = net.createConnection({ host: mxHost, port: 25 });
 
-    const now = new Date();
-    const todayMidnight = new Date();
-    todayMidnight.setHours(0, 0, 0, 0);
+    socket.on('error', () => { clearTimeout(timer); resolve(null); });
+    socket.on('timeout', () => { clearTimeout(timer); socket.destroy(); resolve(null); });
+    socket.setTimeout(timeoutMs);
 
-    // Optional: test SMTP connection for each account
-    const accountResults = [];
-    for (const a of (accounts ?? [])) {
-      let smtpTest: string | null = null;
-      if (testSend) {
-        try {
-          const transporter = nodemailer.createTransport({
-            host: a.host || 'smtp.gmail.com',
-            port: a.port || 587,
-            secure: (a.port || 587) === 465,
-            auth: { user: a.user_name || a.email, pass: a.password },
-            connectionTimeout: 8_000,
-            greetingTimeout: 8_000,
-          });
-          await transporter.verify();
-          smtpTest = "✅ Connection OK";
-        } catch (e: any) {
-          smtpTest = `❌ ${e.message}`;
+    const send = (cmd: string) => {
+      try { socket.write(cmd + '\r\n'); } catch { /* ignore */ }
+    };
+
+    const close = (result: boolean | null) => {
+      clearTimeout(timer);
+      try { send('QUIT'); } catch { /* ignore */ }
+      socket.destroy();
+      resolve(result);
+    };
+
+    socket.on('data', (data) => {
+      buf += data.toString();
+      const lines = buf.split('\r\n');
+      buf = lines.pop() ?? '';
+
+      for (const line of lines) {
+        if (!line) continue;
+        const code = parseInt(line.slice(0, 3), 10);
+
+        if (stage === 0 && code === 220) {
+          stage = 1;
+          send(`EHLO verify.pryro.com`);
+        } else if (stage === 1 && (code === 250 || code === 220)) {
+          stage = 2;
+          send(`MAIL FROM:<verify@pryro.com>`);
+        } else if (stage === 2 && code === 250) {
+          stage = 3;
+          send(`RCPT TO:<${email}>`);
+        } else if (stage === 3) {
+          if (code === 250 || code === 251) {
+            close(true);   // Mailbox accepted
+          } else if (code === 550 || code === 551 || code === 553 || code === 554) {
+            close(false);  // Hard reject — mailbox doesn't exist
+          } else if (code === 421 || code === 450 || code === 451 || code === 452) {
+            close(null);   // Soft reject — temporary, inconclusive
+          } else {
+            close(null);   // Unknown response
+          }
+          return;
+        } else if (code >= 500) {
+          close(null);  // Server error — inconclusive
+          return;
         }
       }
-      accountResults.push({
-        email: a.email,
-        status: a.status,
-        sent_today: a.sent_today,
-        daily_limit: a.daily_limit,
-        remaining: (a.daily_limit ?? 0) - (a.sent_today ?? 0),
-        last_reset: a.last_reset,
-        needs_reset: a.last_reset ? new Date(a.last_reset) < todayMidnight : true,
-        has_user_name: !!a.user_name,
-        user_name_value: a.user_name ?? "(missing — will use email)",
-        smtp_test: smtpTest,
+    });
+  });
+}
+
+// ─── Route handler ────────────────────────────────────────────────────────────
+
+export async function POST(request: NextRequest) {
+  try {
+    const { email } = await request.json() as { email: string };
+
+    if (!email || !email.includes('@')) {
+      return NextResponse.json({ deliverable: false, reason: 'Invalid format' }, { status: 400 });
+    }
+
+    const domain = email.split('@')[1]?.toLowerCase();
+    if (!domain) {
+      return NextResponse.json({ deliverable: false, reason: 'No domain' }, { status: 400 });
+    }
+
+    // Step 1: MX records
+    const mxHosts = await getMXRecords(domain);
+    if (mxHosts.length === 0) {
+      return NextResponse.json({
+        deliverable: false,
+        mx_found: false,
+        reason: `No MX records for ${domain}`,
       });
     }
 
+    // Step 2: Try SMTP probe on first MX host
+    // Many servers block port 25 from cloud environments — graceful fallback
+    const primaryMX = mxHosts[0]!;
+    const smtpResult = await smtpProbe(primaryMX, email, 6000).catch(() => null);
+
     return NextResponse.json({
-      success: true,
-      userId,
-      count: accounts?.length ?? 0,
-      serverTime: now.toISOString(),
-      tip: testSend ? null : "Add ?test=1 to test SMTP connections",
-      accounts: accountResults,
+      deliverable: smtpResult,   // true / false / null
+      mx_found: true,
+      mx_host: primaryMX,
+      reason: smtpResult === true
+        ? 'Mailbox confirmed reachable'
+        : smtpResult === false
+        ? 'Mailbox rejected by SMTP server'
+        : 'SMTP inconclusive — server may block probing',
     });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+
+  } catch (err: any) {
+    return NextResponse.json(
+      { deliverable: null, reason: err?.message || 'Check failed' },
+      { status: 500 }
+    );
   }
 }

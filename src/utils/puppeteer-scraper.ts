@@ -23,6 +23,17 @@ export interface ScrapedLead {
   source_url?: string;
   phone?: string;
   website?: string;
+  // Enrichment fields added by lead-enricher
+  detected_sector?: string;
+  sector_confidence?: 'high' | 'medium' | 'low';
+  sector_ambiguous?: boolean;
+  email_type?: 'personal' | 'role' | 'generic' | 'catch_all' | 'unknown';
+  email_is_generic?: boolean;
+  data_quality_score?: number;
+  services?: string[];
+  employees?: string | null;
+  founding_year?: string | null;
+  social_links?: Record<string, string>;
 }
 
 // ─── User agents ──────────────────────────────────────────────────────────────
@@ -1560,5 +1571,36 @@ export async function scrapeWithoutAPI(
     new Map(all.map(l => [l.email.toLowerCase(), l])).values()
   );
 
-  return deduped.slice(0, maxLeads);
+  // Enrich with sector classification + email type + quality score
+  const { buildRichLead, classifyEmailType } = await import('./lead-enricher');
+
+  const enriched = deduped.slice(0, maxLeads).map(lead => {
+    const city = lead.location?.split(',')[0]?.trim() ?? null;
+    const richLead = buildRichLead({
+      company_name:    lead.company_name,
+      email:           lead.email,
+      phone:           lead.phone ?? null,
+      website:         lead.website ?? null,
+      city,
+      niche:           lead.niche,
+      company_context: lead.company_context,
+      source_url:      lead.source_url ?? null,
+    });
+    const emailClass = classifyEmailType(lead.email);
+    return {
+      ...lead,
+      detected_sector:    richLead.detected_sector,
+      sector_confidence:  richLead.sector_confidence,
+      sector_ambiguous:   richLead.sector_ambiguous,
+      email_type:         emailClass.type,
+      email_is_generic:   emailClass.isGeneric,
+      data_quality_score: richLead.data_quality_score,
+      services:           richLead.services,
+      employees:          richLead.employees,
+      founding_year:      richLead.founding_year,
+      social_links:       richLead.social_links,
+    } as ScrapedLead;
+  });
+
+  return enriched;
 }
