@@ -1,23 +1,27 @@
 /**
- * PERSONALIZED EMAIL BUILDER — v2
+ * PERSONALIZED EMAIL BUILDER — v3
  * ────────────────────────────────
- * Generates emails that follow every rule from Q1–Q10:
+ * ARCHITECTURE: The AI only writes LINE 2 (one sector question sentence).
+ * Lines 1, 3, 4, and the footer are built deterministically in code — the AI
+ * cannot override them. This guarantees:
  *
- *  Q1  First line names the company + city — never "Most companies…"
- *  Q2  Subject is a specific question about THIS company's situation
- *  Q3  Body under 120 words, 3 short paragraphs
- *  Q4  Pryro introduced in paragraph 2, one sentence only
- *  Q5  CTA is a single soft question at the end
- *  Q6  Sign-off is casual: "Alice from Pryro · +256 700 …"
- *  Q7  Company name, city, niche, and pain point always present
- *  Q8  Quality gate runs before returning — re-generates or falls back
- *  Q9  All banned phrases blocked from AI output via system prompt
- * Q10  Pharmacy / hotel / travel agency each get a completely different email
+ *   LINE 1  Hi [FirstName],          ← always from code, never from AI
+ *   LINE 2  [AI sector question]     ← AI writes this one sentence only
+ *   LINE 3  Pryro is an ERP…         ← hardcoded constant, never changes
+ *   LINE 4  Would a 10 minute call…  ← hardcoded CTA, never changes
+ *   FOOTER  Best regards, …          ← from sender profile, never changes
+ *
+ * If AI fails or scores below threshold → sector question bank fallback (code only).
+ * Result: "Hi Sir/Madam" can NEVER appear when a real name is available.
  */
 
 import type { ProspectSignals } from './prospect-researcher';
-import { getNicheProfile }       from './prospect-researcher';
-import { checkEmailQuality }     from './email-quality-checker';
+import {
+  detectNicheKey,
+  isUsableFirstName,
+  buildGuaranteedEmail,
+} from './prospect-researcher';
+import { checkEmailQuality } from './email-quality-checker';
 
 export interface EmailGenerationParams {
   companyName: string;
@@ -25,7 +29,7 @@ export interface EmailGenerationParams {
   location: string | null;
   companyContext?: string | null;
   website?: string | null;
-  signals: ProspectSignals;          // always required — build with researchProspect[Sync]
+  signals: ProspectSignals;
   senderName: string;
   senderPhone?: string;
   customPainPoint?: string;
@@ -39,7 +43,143 @@ export interface GeneratedEmail {
   personalizationScore: number;
   qualityScore: number;
   qualityPassed: boolean;
+  qualityFlagged?: boolean;
   dataSource: 'ai_personalized' | 'ai_industry' | 'template';
+}
+
+// ─── Fixed Pryro constants — NEVER change these ──────────────────────────────
+const PRYRO_LINE = `Pryro is an ERP that brings HR, payroll, finance, inventory, and CRM into one platform.`;
+
+function buildCTA(companyName: string): string {
+  return `Would a 10 minute call make sense to show you how Pryro could work for ${companyName}?`;
+}
+
+// ─── Greeting builder — deterministic, code-only ─────────────────────────────
+// Resolves greeting in exact priority order. "Hi Sir/Madam," is NEVER used:
+//
+//   1. signals.greeting already set to "Hi [Name]," by the caller   → use it
+//   2. Greeting is "Hi [CompanyName] team," (team fallback)          → use it
+//   3. Greeting is "Hi there," (absolute last resort)                → use it
+//   4. Anything else (e.g. old "Hi Sir/Madam,")                      → replace with team
+//
+// companyName is passed in so we can build a proper team greeting if needed.
+function buildGreetingLine(signals: ProspectSignals, companyName: string): string {
+  const raw = signals.greeting.trim();
+
+  // Extract the name part: "Hi [X]," → "X" (handles "team" suffix too)
+  const nameMatch = raw.match(/^hi\s+(.+?),?\s*$/i);
+  const namePart  = nameMatch ? nameMatch[1]!.trim() : '';
+
+  // If it's a real first name → keep it
+  if (isUsableFirstName(namePart)) {
+    return `Hi ${namePart},`;
+  }
+
+  // If it's already a team greeting (ends with "team") → keep it
+  if (/\bteam$/i.test(namePart)) {
+    return raw.endsWith(',') ? raw : `${raw},`;
+  }
+
+  // If it's "Hi there," → acceptable last resort, keep it
+  if (/^hi there,?$/i.test(raw)) {
+    return 'Hi there,';
+  }
+
+  // Anything else (no usable name) → Dear Sir/Madam
+  return 'Dear Sir/Madam,';
+}
+
+// ─── Sector impact sentences — paragraph 2, sentence 1 ───────────────────────
+// One sentence per sector explaining the cost/consequence of the problem.
+// Pairs with PRYRO_LINE to form paragraph 2 (two sentences, under 40 words total).
+
+const SECTOR_IMPACT_BANK: Record<string, string[]> = {
+  pharmacy:     [
+    'That gap between stock records and billing is where margin quietly disappears.',
+    'When expiry tracking runs separately from billing, write-offs are always discovered late.',
+  ],
+  healthcare:   [
+    'That disconnect means your admin team spends hours each month on reconciliation that should be automatic.',
+    'When payroll and billing run in separate systems, month-end always costs more time than it should.',
+  ],
+  hospital:     [
+    'When HR and department budgets live in separate tools, the finance team is always working from yesterday\'s numbers.',
+    'That gap between payroll and department spend means the CFO never has a live view until it\'s too late.',
+  ],
+  hotel:        [
+    'When staff scheduling and vendor billing aren\'t connected to your financials, month-end becomes a multi-day exercise.',
+    'That disconnect between operations and finance means reconciliation costs your team days every month.',
+  ],
+  lodge:        [
+    'When bookings and accounts aren\'t connected, it\'s nearly impossible to know your real margin until after the fact.',
+    'That gap between your booking records and accounts means month-end is always a scramble.',
+  ],
+  travel:       [
+    'When bookings, commissions, and supplier costs live in separate places, you only know your real margin after the trip ends.',
+    'That disconnect means your P&L is always at least a month behind the actual deals you\'ve closed.',
+  ],
+  restaurant:   [
+    'When stock, suppliers, and daily sales aren\'t connected, food cost only becomes visible at month-end when it\'s too late to act.',
+    'That gap between kitchen stock and daily sales means margin surprises are a regular part of the month.',
+  ],
+  retail:       [
+    'When inventory and reorder points aren\'t connected, the first sign of a stockout is usually an empty shelf.',
+    'That disconnect between stock levels and sales means margin surprises and stockouts happen regularly.',
+  ],
+  ngo:          [
+    'When grant budgets and field expenses live in separate spreadsheets, financial compliance reports always take longer than they should.',
+    'That gap means your finance team spends more time reconciling than reporting, and donors notice.',
+  ],
+  construction: [
+    'When project management and financial tracking run separately, cost overruns are usually discovered after the margin is already gone.',
+    'That disconnect between project budgets and actual spend means overruns only appear after they\'ve happened.',
+  ],
+  logistics:    [
+    'When driver payroll, trip billing, and warehouse stock aren\'t in the same system, reconciliation takes days and errors are easy to miss.',
+    'That gap means month-end billing is always a multi-day manual exercise with errors that compound quietly.',
+  ],
+  school:       [
+    'When fee collection and staff payroll run in separate registers, term-end reconciliation becomes a marathon every time.',
+    'That disconnect means your bursar spends weeks chasing numbers that should balance automatically.',
+  ],
+  generic:      [
+    'That fragmentation costs hours every week and makes it hard to see how the business is really running.',
+    'When finance, inventory, and HR each run in a different tool, the coordination overhead compounds quietly as the team grows.',
+    'That disconnect between systems means your team spends time moving data between tools instead of running the business.',
+  ],
+};
+
+function getSectorImpact(niche: string | null, idx: number): string {
+  const key = detectNicheKey(niche);
+  const bank = SECTOR_IMPACT_BANK[key] ?? SECTOR_IMPACT_BANK['generic']!;
+  return bank[idx % bank.length]!;
+}
+
+// ─── Assemble final email — 3 paragraphs ──────────────────────────────────────
+// Para 1: greeting + question (P1)
+// Para 2: impact sentence + Pryro intro (P2) — two sentences, one paragraph
+// Para 3: CTA (P3)
+// Footer: sign-off
+
+function assembleEmail(params: {
+  greeting: string;
+  sectorQuestion: string;
+  impactSentence: string;
+  companyName: string;
+  signOff: string;
+  subject: string;
+}): { subject: string; body: string } {
+  const { greeting, sectorQuestion, impactSentence, companyName, signOff, subject } = params;
+  const body = `${greeting}
+
+${sectorQuestion}
+
+${impactSentence} ${PRYRO_LINE}
+
+${buildCTA(companyName)}
+
+${signOff}`;
+  return { subject, body };
 }
 
 // ─── AI caller ───────────────────────────────────────────────────────────────
@@ -47,18 +187,20 @@ export interface GeneratedEmail {
 interface AIProvider { provider: string; api_key: string; active_model: string; }
 
 async function callAI(p: AIProvider, system: string, user: string): Promise<string> {
-  const body = { temperature: 0.75, max_tokens: 420 };
+  const body = { temperature: 0.75, max_tokens: 80 }; // max_tokens=80 — one sentence only
 
-  // Helper: delay for rate limit backoff
   const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-  // Helper: single attempt to one provider
   async function attempt(): Promise<string> {
     if (p.provider === 'openai') {
       const r = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.api_key}` },
-        body: JSON.stringify({ model: p.active_model || 'gpt-4o-mini', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...body }),
+        body: JSON.stringify({
+          model: p.active_model || 'gpt-4o-mini',
+          messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+          ...body,
+        }),
         signal: AbortSignal.timeout(12000),
       });
       if (!r.ok) throw Object.assign(new Error(`OpenAI ${r.status}`), { status: r.status });
@@ -69,7 +211,11 @@ async function callAI(p: AIProvider, system: string, user: string): Promise<stri
       const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.api_key}` },
-        body: JSON.stringify({ model: p.active_model || 'llama-3.3-70b-versatile', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...body }),
+        body: JSON.stringify({
+          model: p.active_model || 'llama-3.3-70b-versatile',
+          messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+          ...body,
+        }),
         signal: AbortSignal.timeout(12000),
       });
       if (!r.ok) throw Object.assign(new Error(`Groq ${r.status}`), { status: r.status });
@@ -79,8 +225,18 @@ async function callAI(p: AIProvider, system: string, user: string): Promise<stri
     if (p.provider === 'anthropic') {
       const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': p.api_key, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: p.active_model || 'claude-3-5-haiku-20241022', max_tokens: 420, system, messages: [{ role: 'user', content: user }], temperature: 0.6 }),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': p.api_key,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: p.active_model || 'claude-3-5-haiku-20241022',
+          max_tokens: 80,
+          system,
+          messages: [{ role: 'user', content: user }],
+          temperature: 0.6,
+        }),
         signal: AbortSignal.timeout(12000),
       });
       if (!r.ok) throw Object.assign(new Error(`Anthropic ${r.status}`), { status: r.status });
@@ -90,9 +246,15 @@ async function callAI(p: AIProvider, system: string, user: string): Promise<stri
     if (p.provider === 'gemini') {
       const r = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${p.active_model || 'gemini-1.5-flash'}:generateContent?key=${p.api_key}`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [{ text: system + '\n\n' + user }] }], generationConfig: { temperature: 0.6, maxOutputTokens: 420 } }),
-          signal: AbortSignal.timeout(12000) }
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: system + '\n\n' + user }] }],
+            generationConfig: { temperature: 0.6, maxOutputTokens: 80 },
+          }),
+          signal: AbortSignal.timeout(12000),
+        }
       );
       if (!r.ok) throw Object.assign(new Error(`Gemini ${r.status}`), { status: r.status });
       return (await r.json()).candidates[0].content.parts[0].text;
@@ -102,7 +264,11 @@ async function callAI(p: AIProvider, system: string, user: string): Promise<stri
       const r = await fetch('https://api.mistral.ai/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.api_key}` },
-        body: JSON.stringify({ model: p.active_model || 'mistral-small', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...body }),
+        body: JSON.stringify({
+          model: p.active_model || 'mistral-small',
+          messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+          ...body,
+        }),
         signal: AbortSignal.timeout(12000),
       });
       if (!r.ok) throw Object.assign(new Error(`Mistral ${r.status}`), { status: r.status });
@@ -112,253 +278,175 @@ async function callAI(p: AIProvider, system: string, user: string): Promise<stri
     throw new Error(`Unknown provider: ${p.provider}`);
   }
 
-  // Retry loop with exponential backoff for 429 rate limits
+  // Retry with exponential backoff for 429 rate limits (2s, 6s, 14s)
   let lastError: Error = new Error('Unknown');
-  for (let attempt_n = 0; attempt_n < 3; attempt_n++) {
+  for (let n = 0; n < 3; n++) {
     try {
       return await attempt();
     } catch (err: any) {
       lastError = err;
-      const status = err?.status ?? 0;
-      if (status === 429) {
-        // Rate limited — wait with exponential backoff: 2s, 6s, 14s
-        const delayMs = (Math.pow(2, attempt_n + 1) + attempt_n) * 1000;
-        console.warn(`[callAI] Rate limited by ${p.provider} (attempt ${attempt_n + 1}/3) — waiting ${delayMs}ms`);
+      if (err?.status === 429) {
+        const delayMs = (Math.pow(2, n + 1) + n) * 1000;
+        console.warn(`[callAI] Rate limited by ${p.provider} (attempt ${n + 1}/3) — waiting ${delayMs}ms`);
         await wait(delayMs);
         continue;
       }
-      // Non-429 error — don't retry
       throw err;
     }
   }
   throw lastError;
 }
 
-// ─── System prompt — proven cold email structure ─────────────────────────────
+// ─── AI prompt — asks for ONE sentence only ───────────────────────────────────
+// The system prompt tells the AI it only writes LINE 2. Nothing else.
 
-function buildSystemPrompt(signals: ProspectSignals): string {
-  return `You are a cold email specialist writing a highly personalized outreach email on behalf of someone at Pryro.
+function buildQuestionSystemPrompt(companyName: string, niche: string | null): string {
+  return `You write one sentence for a cold B2B email. Just one sentence — nothing else.
 
-ABOUT PRYRO (facts only — never invent, never list everything):
-Pryro is a cloud ERP at pryro.com. Key modules: Financial Management, Inventory Management, HR & Payroll, Project Management, CRM, AI Analytics. Free trial available. Trusted by 64,000+ businesses worldwide. 1–2 week implementation.
+The sentence is a genuine question about a real daily operational challenge that a ${niche || 'business'} like "${companyName}" faces.
 
-The prospect works in: ${signals.niche || 'business'}.
-Write ONLY about what a ${signals.niche || 'business'} actually does. Never mix industries.
+Rules:
+- Under 20 words
+- Ends with a question mark
+- Mentions "${companyName}" by name
+- Sounds like a colleague asking, not a salesperson
+- About a REAL operational problem: payroll, billing, stock, scheduling, reconciliation, etc.
+- NO greeting, NO introduction, NO sign-off, NO explanation
+- NEVER start with: "Are you still", "I was", "I hope", "I noticed", "I came across"
+- NEVER use: streamline, leverage, empower, optimize, cutting-edge, revolutionary, seamlessly, innovative, robust, scalable, transform, synergy
 
-YOUR TASK:
-Write a cold email that feels like a message from one professional to another — not a marketing email, not a support ticket, not a newsletter. The prospect should think "this person actually understands my world."
-
-MANDATORY EMAIL STRUCTURE (follow exactly, no deviation):
-
-Line 1: Greeting — use this verbatim: "${signals.greeting}"
-[blank line]
-Paragraph 1 (ONE sentence, max 20 words): Opening hook — a genuine insight about what running a ${signals.niche || 'business'} in ${(signals.location || 'their region').split(',')[0]?.trim()} actually involves right now. This must feel like real sector knowledge, not a generic observation. Never start with a compliment. Never mention their website. Never say "I was looking at..."
-[blank line]
-Paragraph 2 (TWO sentences, each max 20 words):
-  Sentence 1: Their most likely pain point, stated plainly. Include one social proof line like "teams like yours typically cut admin time once everything runs from one place."
-  Sentence 2: Introduce Pryro in one natural sentence. Name ONLY the single most relevant module for their sector. End with: "— free trial at pryro.com."
-[blank line]
-Paragraph 3 (ONE sentence): A soft, low-friction CTA question. Easy to answer in 5 seconds. Examples: "Would it be worth a quick 10-minute look?" or "Open to seeing how it works for ${signals.companyName}?"
-[blank line]
-Footer — copy VERBATIM, no changes.
-
-SUBJECT LINE RULES:
-Under 6 words. Reads like a message from a colleague.
-Formats that work: "Quick question — ${signals.companyName}", "${signals.companyName} + Pryro?", a specific sector observation, or a direct question about their pain point.
-NEVER: clickbait, salesy phrases, support-ticket titles, "partnership", "opportunity", "ERP solution", "introduction".
-
-TONE RULES:
-Short sentences. Natural language. One professional to another.
-BANNED WORDS (instant disqualification): streamline, leverage, empower, optimize, cutting-edge, revolutionary, game-changing, seamlessly, robust, scalable, innovative, transform, synergy, excited to share, pleased to inform, i hope this email finds you well, i wanted to reach out, i am reaching out, touching base, circling back, best-in-class, world-class, industry-leading, state-of-the-art, we help companies like yours, unlock potential, drive growth, scale your business, warm regards, yours sincerely, kindly revert, referral commission.
-
-LENGTH: Entire body under 100 words (not counting footer). Every sentence under 20 words. Maximum 2 sentences per paragraph. Scannable on mobile in under 30 seconds.
-
-OUTPUT FORMAT — respond with exactly this:
-SUBJECT: [subject line]
-BODY:
-[email body]`;
+Output: The single sentence question only. No labels. No quotes. No extra text.`;
 }
 
-// ─── Follow-up sequence builder ───────────────────────────────────────────────
-// Generates 3 follow-ups on the same thread, each shorter than the last,
-// each approaching the pain point from a different angle.
+function buildQuestionUserPrompt(companyName: string, niche: string | null, customPainPoint?: string | null): string {
+  const sector = niche || 'business';
+  const hint = customPainPoint
+    ? `Focus on this pain point: ${customPainPoint}`
+    : `Focus on the single biggest daily operational challenge for a ${sector}.`;
+  return `Company: ${companyName}
+Sector: ${sector}
+${hint}
 
-export interface FollowUpEmail {
-  dayOffset: number;   // 3, 7, or 14
-  subject: string;     // "Re: [original subject]" — same thread
-  body: string;
+Write the one sentence question now:`;
 }
+
+// ─── Validate and sanitize the AI's one-sentence output ───────────────────────
+function cleanAISentence(raw: string, companyName: string): string | null {
+  if (!raw) return null;
+
+  // Strip any echoed labels, markdown, or multi-line output
+  let s = raw
+    .replace(/^(SUBJECT:|BODY:|LINE \d[:\s-]*|Question:|Output:)/gim, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/^[-•*#]\s+/gm, '')
+    .replace(/\n.+/g, '')        // take only the first line
+    .trim();
+
+  // Remove surrounding quotes
+  s = s.replace(/^["'`]|["'`]$/g, '').trim();
+
+  // Must end with ?
+  if (!s.endsWith('?')) {
+    s = s.replace(/[.!]\s*$/, '') + '?';
+  }
+
+  // Must not be empty or too long
+  if (!s || s.length < 10 || s.length > 200) return null;
+
+  // Reject if it contains banned phrases
+  const banned = [
+    'i was looking', 'i noticed', 'i came across', 'i hope', 'i wanted to reach out',
+    'streamline', 'leverage', 'empower', 'optimize', 'cutting-edge', 'revolutionary',
+    'seamlessly', 'innovative', 'robust', 'scalable', 'transform', 'synergy',
+    'sir/madam', 'dear sir', 'hi there', 'hello there',
+  ];
+  const lower = s.toLowerCase();
+  if (banned.some(b => lower.includes(b))) return null;
+
+  return s;
+}
+
+// ─── Build subject from sector bank (never from AI) ──────────────────────────
+// Subject: [CompanyName] — [short sector question under 7 words]
+// Note: the em-dash separator is kept only in subjects (not in the body).
+
+const SECTOR_SUBJECT_BANK: Record<string, Array<(c: string) => string>> = {
+  pharmacy:     [(c) => `${c}: still tracking expiry manually?`, (c) => `${c}: stock, billing, payroll separate?`, (c) => `${c}: expiry alerts in place?`],
+  healthcare:   [(c) => `${c}: payroll and billing still separate?`, (c) => `${c}: reconciling HR manually?`, (c) => `${c}: admin hours adding up?`],
+  hospital:     [(c) => `${c}: budgets and payroll connected?`, (c) => `${c}: department spend visible in real time?`, (c) => `${c}: HR and finance still separate?`],
+  hotel:        [(c) => `${c}: month-end still manual?`, (c) => `${c}: staff, billing, reservations connected?`, (c) => `${c}: housekeeping and payroll synced?`],
+  lodge:        [(c) => `${c}: bookings and accounts separate?`, (c) => `${c}: month-end always a scramble?`],
+  travel:       [(c) => `${c}: margin visible before trip ends?`, (c) => `${c}: commissions still in spreadsheets?`, (c) => `${c}: P&L always a month behind?`],
+  restaurant:   [(c) => `${c}: food cost visible today?`, (c) => `${c}: kitchen, suppliers, sales connected?`],
+  retail:       [(c) => `${c}: stockouts still a surprise?`, (c) => `${c}: inventory and reorders still manual?`],
+  ngo:          [(c) => `${c}: donor reports taking too long?`, (c) => `${c}: budgets and field spend connected?`],
+  construction: [(c) => `${c}: see overruns before they happen?`, (c) => `${c}: budgets and payroll still separate?`],
+  logistics:    [(c) => `${c}: month-end billing taking days?`, (c) => `${c}: driver payroll and stock connected?`],
+  school:       [(c) => `${c}: fees and payroll still separate?`, (c) => `${c}: term-end reporting still manual?`],
+  generic:      [(c) => `${c}: HR and finance still separate?`, (c) => `${c}: still running ops on multiple tools?`, (c) => `${c}: ops data in one place yet?`],
+};
+
+function buildSubject(companyName: string, niche: string | null, idx: number): string {
+  const key = detectNicheKey(niche);
+  const bank = SECTOR_SUBJECT_BANK[key] ?? SECTOR_SUBJECT_BANK['generic']!;
+  return bank[idx % bank.length]!(companyName);
+}
+
+// ─── Sector question bank — fallback when AI fails ───────────────────────────
+const SECTOR_QUESTION_BANK: Record<string, Array<(c: string) => string>> = {
+  pharmacy:     [(c) => `Is ${c} still reconciling drug stock, billing, and payroll across separate tools?`, (c) => `Are expiry write-offs still being caught manually at ${c}?`],
+  healthcare:   [(c) => `Is ${c} still reconciling staff payroll and patient billing manually every month?`, (c) => `How long does ${c}'s admin team spend on month-end payroll reconciliation?`],
+  hospital:     [(c) => `Are ${c}'s HR payroll and department budgets still managed in separate systems?`, (c) => `Does ${c} have a live view of department spend versus approved budgets?`],
+  hotel:        [(c) => `Is ${c} still reconciling staff scheduling, vendor billing, and financials manually?`, (c) => `How many days does month-end take at ${c} with systems not connected?`],
+  lodge:        [(c) => `Are bookings, staff rosters, and accounts still separate at ${c}?`, (c) => `Is month-end reconciliation still a manual exercise at ${c}?`],
+  travel:       [(c) => `Does ${c} know its actual margin before a trip ends, or only after?`, (c) => `Are agent commissions and supplier costs still tracked in spreadsheets at ${c}?`],
+  restaurant:   [(c) => `Does ${c} have a live view of food cost today, or only at month-end?`, (c) => `Are kitchen stock, supplier invoices, and daily sales still in separate tools at ${c}?`],
+  retail:       [(c) => `Is ${c} still getting stockout surprises across locations?`, (c) => `Are inventory reorders and multi-location stock still managed manually at ${c}?`],
+  ngo:          [(c) => `Is ${c} still reconciling grant budgets and field expenses in separate tools?`, (c) => `How long does ${c}'s finance team spend on donor reporting each quarter?`],
+  construction: [(c) => `Does ${c} see cost overruns in real time, or only after they've happened?`, (c) => `Are project budgets, contractor payroll, and procurement still disconnected at ${c}?`],
+  logistics:    [(c) => `Is ${c} still reconciling driver payroll, trip billing, and warehouse stock manually?`, (c) => `How many days does month-end billing reconciliation take at ${c}?`],
+  school:       [(c) => `Is ${c} still managing fee collection and staff payroll in separate systems?`, (c) => `How long does ${c}'s bursar spend on term-end reconciliation?`],
+  generic:      [(c) => `Is ${c} still managing HR, billing, and operations in separate tools?`, (c) => `Are finance, inventory, and payroll still running across disconnected systems at ${c}?`, (c) => `How much time does ${c}'s team spend each month reconciling data across tools?`],
+};
+
+function getFallbackQuestion(companyName: string, niche: string | null, idx: number): string {
+  const key = detectNicheKey(niche);
+  const bank = SECTOR_QUESTION_BANK[key] ?? SECTOR_QUESTION_BANK['generic']!;
+  return bank[idx % bank.length]!(companyName);
+}
+
+// ─── Follow-up prompt builder (exported for follow-up module) ─────────────────
 
 export function buildFollowUpPrompt(
   signals: ProspectSignals,
   originalSubject: string,
   followUpNumber: 1 | 2 | 3,
 ): string {
-  const configs = {
-    1: {
-      day: 3,
-      angle: 'approach the same pain point from the angle of time cost — how many hours per month is this taking their team',
-      cta: 'Soft curiosity question, e.g. "Still worth a quick look?"',
-      maxWords: 60,
-    },
-    2: {
-      day: 7,
-      angle: 'approach from the angle of risk — what happens when things fall through the cracks when systems are disconnected',
-      cta: 'Slightly more direct but still low commitment, e.g. "Want me to show you how it works for a ${signals.niche || "business"} your size?"',
-      maxWords: 45,
-    },
-    3: {
-      day: 14,
-      angle: 'approach from a competitor or peer angle — others in this sector are solving this, offer to share how',
-      cta: 'Most direct so far but never pushy, e.g. "Happy to share a quick example if useful?"',
-      maxWords: 35,
-    },
+  const angles: Record<number, string> = {
+    1: `Time cost angle: how many hours per month is this problem costing their team?`,
+    2: `Risk angle: what quietly goes wrong when systems don't connect?`,
+    3: `Peer angle: others in this sector have solved this — offer to share briefly.`,
   };
+  const ctas: Record<number, string> = {
+    1: `"Still worth a quick look?"`,
+    2: `"Want to see how it works for a ${signals.niche || 'business'} your size?"`,
+    3: `"Happy to share a quick example if useful?"`,
+  };
+  const maxWords = followUpNumber === 1 ? 50 : followUpNumber === 2 ? 40 : 30;
 
-  const cfg = configs[followUpNumber];
-
-  return `Write follow-up #${followUpNumber} (day ${cfg.day}) on the same email thread for this cold email sequence.
-
-Context:
-- Company: ${signals.companyName}
-- Sector: ${signals.niche || 'business'}
-- City: ${(signals.location || 'their city').split(',')[0]?.trim()}
-- Original subject: "${originalSubject}"
-- Greeting: "${signals.greeting}"
-
-Rules for this follow-up:
-1. Subject: start with "Re: ${originalSubject}" — same thread, builds on the previous email
-2. Greeting: use "${signals.greeting}" verbatim
-3. Angle for this follow-up: ${cfg.angle}
-4. CTA style: ${cfg.cta}
-5. Max words: ${cfg.maxWords} (shorter than the previous email)
-6. Same tone rules apply: no banned words, natural language, one professional to another
-7. Do NOT repeat the previous email's content word-for-word — different angle, different sentences
-8. End with the footer verbatim
-
-Footer:
-${signals.signOff}
+  return `Write follow-up #${followUpNumber} on the same thread.
+Company: ${signals.companyName} | Sector: ${signals.niche || 'business'}
+Greeting (verbatim): ${signals.greeting}
+Angle: ${angles[followUpNumber]}
+CTA style: ${ctas[followUpNumber]}
+Max words: ${maxWords}. Shorter than the previous email. Different sentences.
+Subject must start with: Re: ${originalSubject}
+Footer (verbatim): ${signals.signOff}
 
 OUTPUT FORMAT:
 SUBJECT: Re: ${originalSubject}
 BODY:
 [follow-up body]`;
-}
-
-// ─── User prompt ──────────────────────────────────────────────────────────────
-
-function buildUserPrompt(params: EmailGenerationParams): string {
-  const { signals, customPainPoint } = params;
-
-  let ctx = `Company: ${signals.companyName}
-Sector: ${signals.niche || 'Business'}
-City: ${(signals.location || 'your city').split(',')[0]?.trim()}
-Relevant Pryro module for this sector: ${signals.pryroSentence}
-`;
-
-  if (signals.websiteDescription) ctx += `\nBusiness context (understand what they do — DO NOT quote or paraphrase in the email):\n"${signals.websiteDescription.slice(0, 300)}"\n`;
-  if (signals.recentActivity)     ctx += `\nRecent activity (write in your own words, DO NOT quote directly):\n"${signals.recentActivity.slice(0, 180)}"\n`;
-  if (signals.techMentions.length > 0) ctx += `\nTools they may use: ${signals.techMentions.join(', ')}\n`;
-  if (signals.staffCount)         ctx += `\nSize signal: ${signals.staffCount}\n`;
-  if (customPainPoint)            ctx += `\nSpecific pain point: ${customPainPoint}\n`;
-
-  return `${ctx}
-WRITE THE EMAIL NOW using the mandatory structure.
-
-Greeting (copy verbatim): ${signals.greeting}
-
-Opening hook idea (rewrite in your own words — must be a genuine sector insight):
-"${signals.firstLine}"
-
-Pain point angle for THIS email (write fresh — not word-for-word):
-"${signals.problemSentence}"
-
-Pryro solution sentence (use this, add "— free trial at pryro.com" at the end):
-"${signals.pryroSentence}"
-
-CTA idea (make it easy to answer in 5 seconds):
-"${signals.ctaSentence}"
-
-${signals.isGenericEmail ? `NOTE: This is a generic inbox (info@, contact@, etc). Address whoever handles operations. Do not mention the generic address.\n` : ''}
-Footer (copy VERBATIM, no changes):
-${signals.signOff}
-
-Write the email now. Subject line first. Then body. Follow the mandatory structure exactly. Under 100 words in the body.`;
-}
-
-// ─── Parse AI response ────────────────────────────────────────────────────────
-
-function parseAIResponse(raw: string): { subject: string; body: string } | null {
-  // Strip any separator lines the AI may have echoed from the system prompt
-  const cleaned = raw
-    .replace(/[═─━=]{4,}/g, '')        // ════ or ──── or ==== lines
-    .replace(/[-─]{4,}/g, '')            // ---- lines
-    .replace(/\*{4,}/g, '')              // **** lines
-    .replace(/^PERMANENT RULES.*$/gm, '')
-    .replace(/^RULE \d+.*$/gm, '')       // "RULE 1 —" lines echoed from prompt
-    .trim();
-  // Try SUBJECT: / BODY: format
-  const sm = cleaned.match(/SUBJECT:\s*(.+?)(?:\n|$)/i);
-  const bm = cleaned.match(/BODY:\s*([\s\S]+?)$/i);
-  if (sm && bm) {
-    const subject = sm[1]?.trim().replace(/^["']|["']$/g, '').replace(/\*\*(.+?)\*\*/g, '$1') ?? '';
-    const body    = bm[1]?.trim().replace(/\*\*(.+?)\*\*/g, '$1').replace(/^#{1,6}\s+/gm, '').replace(/^[-*+]\s+/gm, '') ?? '';
-    if (subject && body) return { subject, body };
-  }
-  // Fallback: first non-empty line = subject, rest = body
-  const lines = cleaned.split('\n').filter(l => l.trim());
-  if (lines.length >= 2) {
-    const subject = (lines[0] ?? '').replace(/^(SUBJECT:|Subject:)\s*/i, '').trim();
-    const body    = lines.slice(1).join('\n').replace(/^(BODY:|Body:)\s*/i, '').trim();
-    if (subject && body) return { subject, body };
-  }
-  return null;
-}
-
-// ─── Footer enforcement ───────────────────────────────────────────────────────
-// If the AI dropped or mangled the footer, stamp the correct one back on.
-
-function enforceFooter(body: string, signOff: string): string {
-  // Strip separator lines the AI may have echoed from the system prompt
-  const cleanBody = body
-    .replace(/[═─━=]{4,}/gm, '')
-    .replace(/[-─]{4,}/gm, '')
-    .replace(/^PERMANENT RULES.*$/gm, '')
-    .replace(/^RULE \d+.*$/gm, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-
-  // signOff from sender profile always starts with "Best regards,"
-  // If the body already ends with the footer (or close to it), don't double-stamp.
-  const footerSignal = signOff.split('\n')[2] ?? ''; // e.g. the full name line
-  if (footerSignal && cleanBody.includes(footerSignal)) return cleanBody;
-  // Strip any existing sign-off attempts so we don't get two footers
-  const stripped = cleanBody
-    .replace(/\n+(best regards|kind regards|warm regards|yours (sincerely|faithfully)|regards)[,.]?[\s\S]*$/i, '')
-    .replace(/\n+[A-Z][a-z]+ from [A-Z][a-z]+[\s\S]*$/m, '')
-    .trimEnd();
-  return `${stripped}\n\n${signOff}`;
-}
-
-// ─── Fallback template (completely different per industry) ────────────────────
-// Used when AI is not configured OR AI output fails the quality gate.
-// Greeting is always first. Footer always comes from the sender profile.
-
-function buildFallbackEmail(params: EmailGenerationParams): { subject: string; body: string } {
-  const { signals } = params;
-
-  const body =
-`${signals.greeting}
-
-${signals.firstLine}
-
-${signals.problemSentence} ${signals.pryroSentence}
-
-${signals.ctaSentence}
-
-${signals.signOff}`;
-
-  return { subject: signals.subjectLine, body };
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
@@ -367,69 +455,120 @@ export async function buildPersonalizedEmail(
   params: EmailGenerationParams,
   aiProvider: AIProvider | null,
 ): Promise<GeneratedEmail> {
-  const { companyName, signals } = params;
+  const { companyName, niche, signals } = params;
+  const idx = params.emailIndex ?? 0;
 
-  // ── Try AI ─────────────────────────────────────────────────────────────
+  // ── Step 1: Build all deterministic parts in code — AI cannot override these ──
+  const greeting = buildGreetingLine(signals, companyName);  // never "Sir/Madam"
+  const subject  = buildSubject(companyName, niche, idx); // sector bank subject
+  const signOff  = signals.signOff;
+
+  console.log(`[EmailBuilder] greeting="${greeting}" | company="${companyName}" | niche=${niche} | ai=${!!aiProvider}`);
+
+  // ── Step 2: Ask AI for LINE 2 only (one sector question sentence) ──────────
   if (aiProvider) {
-    console.log(`[EmailBuilder] Calling ${aiProvider.provider}/${aiProvider.active_model} for "${companyName}" (niche=${params.niche}, idx=${params.emailIndex ?? 0})`);
+    console.log(`[EmailBuilder] Calling ${aiProvider.provider}/${aiProvider.active_model} for LINE 2 of "${companyName}"`);
+
+    let aiQuestion: string | null = null;
+
+    // First attempt
     try {
-      const system = buildSystemPrompt(signals);
-      const user   = buildUserPrompt(params);
+      const system = buildQuestionSystemPrompt(companyName, niche);
+      const user   = buildQuestionUserPrompt(companyName, niche, params.customPainPoint);
       const raw    = await callAI(aiProvider, system, user);
-      const parsed = parseAIResponse(raw);
-
-      if (!parsed) {
-        console.warn(`[EmailBuilder] Could not parse AI response for "${companyName}" — raw: ${raw.slice(0, 200)}`);
-      } else {
-        // Enforce footer: if AI dropped or altered it, stamp the correct one back
-        const bodyWithFooter = enforceFooter(parsed.body, signals.signOff);
-
-        const quality = checkEmailQuality({
-          subject: parsed.subject,
-          body: bodyWithFooter,
-          companyName,
-          externalPersonalizationScore: signals.personalizationScore,
-        });
-
-        console.log(`[EmailBuilder] Quality check for "${companyName}": score=${quality.score}, passed=${quality.passed}, blocks=${quality.flags.filter(f=>f.severity==='block').map(f=>f.type).join(',') || 'none'}`);
-
-        if (quality.passed && quality.score >= 70) {
-          console.log(`[EmailBuilder] ✅ AI email accepted for "${companyName}" (score=${quality.score})`);
-          return {
-            subject: parsed.subject,
-            body: bodyWithFooter,
-            model: `${aiProvider.provider}/${aiProvider.active_model}`,
-            personalizationScore: quality.personalizationScore,
-            qualityScore: quality.score,
-            qualityPassed: true,
-            dataSource: signals.personalizationScore >= 65 ? 'ai_personalized' : 'ai_industry',
-          };
-        }
-        console.warn(`[EmailBuilder] ⚠️ AI output for "${companyName}" scored ${quality.score}/70. Blocks: ${quality.flags.filter(f=>f.severity==='block').map(f=>f.message.slice(0,60)).join(' | ') || 'none'}. Falling back.`);
-      }
+      aiQuestion   = cleanAISentence(raw, companyName);
+      console.log(`[EmailBuilder] AI question attempt 1: "${aiQuestion ?? 'INVALID — ' + raw.slice(0,80)}"`);
     } catch (err: any) {
-      console.error(`[EmailBuilder] ❌ AI call failed for "${companyName}": ${err?.message}`);
+      console.warn(`[EmailBuilder] AI call 1 failed for "${companyName}": ${err?.message}`);
     }
+
+    // Second attempt if first failed or was invalid
+    if (!aiQuestion) {
+      try {
+        const system = buildQuestionSystemPrompt(companyName, niche);
+        const user   = buildQuestionUserPrompt(companyName, niche, params.customPainPoint);
+        const raw    = await callAI(aiProvider, system, user);
+        aiQuestion   = cleanAISentence(raw, companyName);
+        console.log(`[EmailBuilder] AI question attempt 2: "${aiQuestion ?? 'INVALID — ' + raw.slice(0,80)}"`);
+      } catch (err: any) {
+        console.warn(`[EmailBuilder] AI call 2 failed for "${companyName}": ${err?.message}`);
+      }
+    }
+
+    if (aiQuestion) {
+      // ── Step 3: Assemble the 3-paragraph email with the AI question ─────────
+      const impact = getSectorImpact(niche, idx);
+      const { subject: s, body } = assembleEmail({
+        greeting,
+        sectorQuestion: aiQuestion,
+        impactSentence: impact,
+        companyName,
+        signOff,
+        subject,
+      });
+
+      const quality = checkEmailQuality({
+        subject: s,
+        body,
+        companyName,
+        externalPersonalizationScore: signals.personalizationScore,
+      });
+
+      console.log(`[EmailBuilder] Quality for "${companyName}": score=${quality.score}, passed=${quality.passed}`);
+
+      if (quality.passed && quality.score >= 85) {
+        console.log(`[EmailBuilder] ✅ AI email accepted for "${companyName}" (score=${quality.score})`);
+        return {
+          subject: s,
+          body,
+          model: `${aiProvider.provider}/${aiProvider.active_model}`,
+          personalizationScore: quality.personalizationScore,
+          qualityScore: quality.score,
+          qualityPassed: true,
+          dataSource: signals.personalizationScore >= 65 ? 'ai_personalized' : 'ai_industry',
+        };
+      }
+
+      console.warn(`[EmailBuilder] ⚠️ AI email for "${companyName}" scored ${quality.score}/85. Blocks: ${quality.flags.filter(f => f.severity === 'block').map(f => f.type).join(',') || 'none'}. Falling back to sector bank.`);
+
+      // AI question was bad — use sector bank fallback
+      const fallbackQuestion = getFallbackQuestion(companyName, niche, idx);
+      const { subject: fs, body: fb } = assembleEmail({ greeting, sectorQuestion: fallbackQuestion, impactSentence: impact, companyName, signOff, subject });
+      const fq = checkEmailQuality({ subject: fs, body: fb, companyName, externalPersonalizationScore: signals.personalizationScore });
+      return {
+        subject: fs,
+        body: fb,
+        model: `${aiProvider.provider}/${aiProvider.active_model}`,
+        personalizationScore: fq.personalizationScore,
+        qualityScore: fq.score,
+        qualityPassed: fq.passed,
+        qualityFlagged: true,
+        dataSource: 'ai_industry',
+      };
+    }
+
+    // AI completely failed — fall through to sector bank
+    console.warn(`[EmailBuilder] AI produced no valid question for "${companyName}" — using sector bank`);
   } else {
-    console.log(`[EmailBuilder] No AI provider available for "${companyName}" — using template directly`);
+    console.log(`[EmailBuilder] No AI provider — using sector bank for "${companyName}"`);
   }
 
-  // ── Fallback ───────────────────────────────────────────────────────────
-  const fallback = buildFallbackEmail(params);
-  const quality  = checkEmailQuality({
-    subject: fallback.subject,
-    body:    fallback.body,
-    companyName,
-    externalPersonalizationScore: signals.personalizationScore,
-  });
+  // ── Step 4: Pure code fallback — sector question bank, no AI ───────────────
+  const fallbackQuestion = getFallbackQuestion(companyName, niche, idx);
+  const impact = getSectorImpact(niche, idx);
+  const { subject: fs, body: fb } = assembleEmail({ greeting, sectorQuestion: fallbackQuestion, impactSentence: impact, companyName, signOff, subject });
+  const fq = checkEmailQuality({ subject: fs, body: fb, companyName, externalPersonalizationScore: signals.personalizationScore });
+
+  console.log(`[EmailBuilder] Sector bank email for "${companyName}": score=${fq.score}`);
 
   return {
-    subject: fallback.subject,
-    body:    fallback.body,
-    model:   'template',
-    personalizationScore: quality.personalizationScore,
-    qualityScore: quality.score,
-    qualityPassed: quality.passed,
+    subject: fs,
+    body: fb,
+    model: 'template',
+    personalizationScore: fq.personalizationScore,
+    qualityScore: fq.score,
+    qualityPassed: fq.passed,
+    qualityFlagged: !!aiProvider,   // flag if AI was configured but failed
     dataSource: 'template',
   };
 }

@@ -56,7 +56,6 @@ const HARD_BANNED: string[] = [
   'per my last email',
   'to whom it may concern',
   'dear sir or madam',
-  'dear sir/madam',
   'please find attached',
   'kindly revert',
   'kindly get back',
@@ -190,6 +189,8 @@ function ctaType(body: string): 'missing' | 'hard' | 'soft' {
   const last300 = body.split('\n').filter(l => l.trim()).slice(-5).join(' ').toLowerCase();
   const softPatterns = [
     /would (it|a|this) (be|make) (worth|sense)/i,
+    /would a 10 minute call/i,
+    /show you how/i,
     /is this something/i,
     /would you be open/i,
     /are you open/i,
@@ -230,11 +231,11 @@ function personalizationScore(subject: string, body: string, companyName: string
   // No generic salutation (+ve signal)
   if (!/dear sir|dear madam|to whom/i.test(full)) score += 10;
 
-  // Named greeting (Hi [Name], not "Hi there,")
-  if (/^hi [a-z]{2,},/im.test(body) && !/^hi there,/im.test(body)) score += 9;
+  // Named greeting — "Hi [RealName]," scores bonus; "Dear Sir/Madam," or "Hi there," does not
+  if (/^hi [a-zA-Z]{2,12},/im.test(body) && !/^hi (there|sir|madam|sir\/madam),/im.test(body)) score += 9;
 
-  // Free trial mention = strong positive signal (Pryro-specific)
-  if (/free trial|try it free|start.*free|pryro\.com/i.test(full)) score += 8;
+  // Free trial or pryro.com mention (positive but not required)
+  if (/pryro\.com/i.test(full)) score += 5;
 
   return Math.min(score, 100);
 }

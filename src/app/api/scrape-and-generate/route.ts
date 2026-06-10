@@ -24,62 +24,22 @@ export const maxDuration = 300;
 
 // ─── AI helpers ───────────────────────────────────────────────────────────────
 
-function buildSystemMessage(senderName: string): string {
-  return `You write cold outreach emails for Pryro — an ERP platform. You follow a FIXED template exactly. Do not be creative. Do not add extra paragraphs. Do not change the structure. Fill in the blanks only.
+function buildSystemMessage(): string {
+  return `You write ONE sentence for a cold B2B email. Just one sentence — nothing else.
 
-FIXED EMAIL TEMPLATE — follow this word for word, only replace the variables:
+The sentence is a genuine question about a real daily operational challenge this type of business faces.
 
----
-Dear Sir/Madam,
+Rules:
+- Under 20 words
+- Ends with a question mark
+- Mentions the company name
+- Sounds like a colleague, not a salesperson
+- About a real operational problem: payroll, billing, stock, scheduling, reconciliation
+- NO greeting, NO introduction, NO sign-off
+- NEVER start with: "Are you still", "I was", "I hope", "I noticed"
+- NEVER use: streamline, leverage, empower, cutting-edge, revolutionary, seamlessly, innovative
 
-[COMPANY_NAME] and other [SECTOR] businesses often deal with manual workflows and fragmented tools that slow teams down.
-
-Pryro is an ERP that replaces those inefficiencies with one unified system — covering finance, inventory, HR, payroll, project management, and CRM.
-
-We also offer a 20–30% commission for every successfully referred client.
-
-Would you be open to a 10-minute call to see if it's relevant?
-
-Best regards,
-${senderName}
-Executive Sales
-Pryro
----
-
-VARIABLES TO FILL IN:
-- [COMPANY_NAME] = the exact company name provided
-- [SECTOR] = the industry/niche of the company (e.g. "pharmacy", "construction", "logistics", "retail", "hospitality")
-
-RULES — non-negotiable:
-- Start with "Dear Sir/Madam," — always
-- Use the exact company name in the first sentence
-- Name their sector naturally (e.g. "pharmacy businesses", "construction firms", "logistics companies")
-- Do NOT change any other wording
-- Do NOT add bullet points, extra paragraphs, or new ideas
-- Do NOT use: "I noticed", "reach out", "leverage", "streamline", "game-changer", "excited to"
-- The signature must be on separate lines exactly as shown
-
-SUBJECT LINE RULES:
-Write ONE subject line that is honest, direct, and humble. It must make the recipient curious enough to open without sounding like a sales pitch.
-
-Use ONE of these patterns — fill in the actual company name or sector:
-- "[Company name] — a quick question about your back-office setup"
-- "How [sector] businesses are cutting admin time in half this year"
-- "[Company name], are you still running [sector] ops on separate tools?"
-- "Something worth 10 minutes for [company name]"
-- "A simple fix for [sector] teams losing hours to admin every week"
-- "[Company name] — this might be relevant to your team"
-
-Subject rules:
-- 8 to 14 words
-- Use the actual company name OR actual sector — not both
-- Honest, humble, direct — not clickbait, not salesy
-- No exclamation marks, no ALL CAPS
-- Never use: "ERP", "Partnership", "Opportunity", "Synergy", "Streamline", "Leverage", "Quick question", "Following up"
-
-Respond ONLY in this exact format:
-SUBJECT: [subject line]
-BODY: [email body]`;
+Output: The single sentence question only. No labels. No quotes. No extra text.`;
 }
 
 // ── Niche-specific content ────────────────────────────────────────────────────
@@ -131,25 +91,40 @@ const SUBJECT_PATTERNS_BULK = [
 ];
 
 // ── Direct email builder — no AI, exact template every time ──────────────────
+const PRYRO_LINE = `Pryro is an ERP that brings HR, payroll, finance, inventory, and CRM into one platform.`;
+
 function buildDirectEmail(
   companyName: string,
   niche: string | null,
   senderName: string,
-  idx: number
+  idx: number,
+  contactName?: string | null,
+  email?: string | null,
 ): { subject: string; body: string } {
   const company = decodeHtmlEntities(companyName);
-  const { sectorName, painPoint, pryroValue } = getNicheContent(niche);
+  const { sectorName, painPoint } = getNicheContent(niche);
   const patternFn = SUBJECT_PATTERNS_BULK[idx % SUBJECT_PATTERNS_BULK.length]!;
   const subject = patternFn(company, sectorName);
 
+  // Resolve greeting
+  let greeting: string;
+  const firstName = resolveFirstName(contactName, email);
+  if (firstName) {
+    greeting = `Hi ${firstName},`;
+  } else {
+    greeting = 'Dear Sir/Madam,';
+  }
+
+  const cta = `Would a 10 minute call make sense to show you how Pryro could work for ${company}?`;
+
   const body =
-`Dear Sir/Madam,
+`${greeting}
 
-${company} is in the ${sectorName} sector, where ${painPoint} is a common challenge.
+Is ${company} still managing ${sectorName} operations across separate tools?
 
-Pryro is an ERP that replaces those inefficiencies with one unified system. It ${pryroValue} and we offer a 20-30% commission for every successfully referred client.
+That kind of fragmentation costs hours every week and makes it hard to see how the business is really running. ${PRYRO_LINE}
 
-Would you be open to a 10-minute call to see if it is relevant?
+${cta}
 
 Best regards,
 ${senderName}
@@ -157,6 +132,42 @@ Executive Sales
 Pryro`;
 
   return { subject, body };
+}
+
+// ── Resolve first name for greeting ──────────────────────────────────────────
+const GENERIC_PREFIXES = new Set([
+  'info','contact','hello','hi','mail','support','help','admin','office',
+  'team','sales','reception','general','enquiry','enquiries','bookings',
+  'booking','hr','marketing','accounts','billing','feedback','service',
+  'media','press','shop','store','news','noreply','no-reply',
+]);
+
+function resolveFirstName(contactName?: string | null, email?: string | null): string | null {
+  // Try contact_name field first
+  if (contactName) {
+    const parts = contactName.trim().split(/[\s,./]+/);
+    for (const part of parts) {
+      const p = part.replace(/^(dr|prof|mr|mrs|ms|miss|rev|eng)\.*\s*/i, '').trim();
+      if (p.length >= 2 && p.length <= 12 && /^[a-zA-Z]+$/.test(p)) {
+        return p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
+      }
+    }
+  }
+  // Try email prefix
+  if (email) {
+    const local = email.split('@')[0]?.toLowerCase() ?? '';
+    if (GENERIC_PREFIXES.has(local)) return null;
+    if (/[._\-]/.test(local)) {
+      const first = local.split(/[._\-]/)[0] ?? '';
+      if (first.length >= 2 && first.length <= 12 && /^[a-z]+$/.test(first)) {
+        return first.charAt(0).toUpperCase() + first.slice(1);
+      }
+    }
+    if (/^[a-z]+$/.test(local) && local.length >= 2 && local.length <= 12) {
+      return local.charAt(0).toUpperCase() + local.slice(1);
+    }
+  }
+  return null;
 }
 
 async function callAI(
@@ -317,7 +328,7 @@ export async function POST(request: NextRequest) {
     }
   } catch { /* use default */ }
 
-  const SYSTEM_MESSAGE = buildSystemMessage(senderName);
+  const SYSTEM_MESSAGE = buildSystemMessage();
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -370,7 +381,9 @@ export async function POST(request: NextRequest) {
           lead.company_name,
           lead.niche,
           senderName,
-          idx
+          idx,
+          lead.contact_name ?? null,
+          lead.email ?? null,
         );
 
         emailCount++;

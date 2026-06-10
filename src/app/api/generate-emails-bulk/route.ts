@@ -12,7 +12,7 @@
 import { NextRequest }         from 'next/server';
 import { createClient }        from '../../../../supabase/server';
 import { createServiceClient } from '../../../../supabase/service';
-import { researchProspectSync, isGenericEmailAddress, extractFirstName, cleanCompanyName, getNicheProfile } from '@/utils/prospect-researcher';
+import { researchProspectSync, isGenericEmailAddress, extractFirstName, cleanCompanyName, isUsableFirstName, buildGuaranteedEmail } from '@/utils/prospect-researcher';
 import { buildPersonalizedEmail } from '@/utils/personalized-email-builder';
 
 export const runtime    = 'nodejs';
@@ -267,13 +267,20 @@ export async function POST(request: NextRequest) {
           signals.isGenericEmail = genericEmail;
 
           // Re-build greeting with the actual lead email so prefix extraction works
-          if (resolvedContactName) {
+          if (resolvedContactName && isUsableFirstName(resolvedContactName)) {
+            // Tier 1: real first name
             signals.greeting = `Hi ${resolvedContactName},`;
           } else if (lead.email && !genericEmail) {
+            // Try extracting a name from the non-generic email prefix
             const { name: emailName } = extractFirstName(null, lead.email);
-            signals.greeting = emailName ? `Hi ${emailName},` : 'Hi there,';
+            if (emailName && isUsableFirstName(emailName)) {
+              signals.greeting = `Hi ${emailName},`;
+            } else {
+              signals.greeting = 'Dear Sir/Madam,';
+            }
           } else {
-            signals.greeting = 'Hi there,';
+            // Generic prefix or no email
+            signals.greeting = 'Dear Sir/Madam,';
           }
 
           console.log(`[bulk-gen] Generating for "${name}" | ai=${!!aiProvider} | greeting="${signals.greeting}" | niche=${lead.niche}`);
@@ -301,6 +308,7 @@ export async function POST(request: NextRequest) {
               body:               result.body,
               model:              result.model,
               isFallback:         result.model === 'template',
+              qualityFlagged:     result.qualityFlagged ?? false,
               isGenericEmail:     genericEmail,
               greetingIsFallback: !resolvedContactName,
               personalizationScore: result.personalizationScore,
@@ -316,31 +324,32 @@ export async function POST(request: NextRequest) {
           fallbackCount++;
           done++;
 
-          // Emergency fallback uses the niche-specific sentences — not a generic ERP blurb
-          const city      = (lead.location || 'your city').split(',')[0]?.trim() || 'your city';
+          // Emergency fallback — always use the guaranteed 4-line structure
           const { name: fbName } = extractFirstName(lead.contact_name, lead.email);
-          const fbGreeting = fbName ? `Hi ${fbName},` : 'Hi Sir/Madam,';
+          const fbIsUsable = fbName && isUsableFirstName(fbName);
           const genericEmail = isGenericEmailAddress(lead.email);
-          const nicheProfile = getNicheProfile(lead.niche);
-          const fbSubjectFn  = nicheProfile.subjectTemplates[0]!;
-          const fbSubject    = fbSubjectFn(name, city);
-          const fbFirstLine  = nicheProfile.firstLineTemplates[0]?.(name, city) ?? `${name} in ${city} — managing operations manually starts to cost more time than expected at this scale.`;
-          const fbProblem    = nicheProfile.problemAngles[0] ?? nicheProfile.problemSentence;
-          const fbPryro      = nicheProfile.pryroSentence;
-          const fbCta        = (nicheProfile.ctaOptions[0] ?? `Would a 10-minute call be worth it to see if Pryro fits how you run ${name}?`)
-            .replace(/\{company\}/g, name).replace(/\{city\}/g, city);
+
+          const guaranteed = buildGuaranteedEmail({
+            firstName:       fbIsUsable ? fbName! : 'Sir/Madam',
+            companyName:     name,
+            niche:           lead.niche,
+            emailIndex:      idx,
+            signOff:         profileSignOff,
+            useTeamGreeting: false,
+          });
 
           send('email', {
             email: {
               lead_id:            lead.id,
               lead_email:         lead.email,
               company_name:       name,
-              subject:            fbSubject,
-              body:               `${fbGreeting}\n\n${fbFirstLine}\n\n${fbProblem} ${fbPryro}\n\n${fbCta}\n\n${profileSignOff}`,
+              subject:            guaranteed.subject,
+              body:               guaranteed.body,
               model:              'template',
               isFallback:         true,
+              qualityFlagged:     false,
               isGenericEmail:     genericEmail,
-              greetingIsFallback: !fbName,
+              greetingIsFallback: !fbIsUsable,
               personalizationScore: genericEmail ? 30 : 45,
               qualityScore:       genericEmail ? 55 : 68,
               dataSource:         'template',
