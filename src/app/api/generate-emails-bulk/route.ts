@@ -322,18 +322,11 @@ export async function POST(request: NextRequest) {
 
           // Re-build greeting with the actual lead email so prefix extraction works
           if (resolvedContactName && isUsableFirstName(resolvedContactName)) {
-            // Tier 1: real first name
             signals.greeting = `Hi ${resolvedContactName},`;
           } else if (lead.email && !genericEmail) {
-            // Try extracting a name from the non-generic email prefix
             const { name: emailName } = extractFirstName(null, lead.email);
-            if (emailName && isUsableFirstName(emailName)) {
-              signals.greeting = `Hi ${emailName},`;
-            } else {
-              signals.greeting = 'Dear Sir/Madam,';
-            }
+            signals.greeting = (emailName && isUsableFirstName(emailName)) ? `Hi ${emailName},` : 'Dear Sir/Madam,';
           } else {
-            // Generic prefix or no email
             signals.greeting = 'Dear Sir/Madam,';
           }
 

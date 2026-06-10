@@ -195,8 +195,7 @@ function resolveGreeting(contactName?: string | null, companyName?: string): str
       return `Hi ${clean.charAt(0).toUpperCase() + clean.slice(1).toLowerCase()},`;
     }
   }
-  // No usable first name → Dear Sir/Madam
-  if (companyName) return 'Dear Sir/Madam,';
+  // No usable first name → Dear Sir/Madam (never company name)
   return 'Dear Sir/Madam,';
 }
 

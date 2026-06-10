@@ -599,7 +599,7 @@ export function buildGuaranteedEmail(params: {
   const subject   = getSectorSubject(niche, companyName, emailIndex);
   const question  = getSectorQuestion(niche, companyName, emailIndex);
   const cta       = `Would a 10 minute call make sense to show you how Pryro could work for ${companyName}?`;
-  const greeting  = useTeamGreeting ? `Hi ${firstName} team,` : (firstName === 'Sir/Madam' ? 'Dear Sir/Madam,' : `Hi ${firstName},`);
+  const greeting  = firstName === 'Sir/Madam' || useTeamGreeting ? 'Dear Sir/Madam,' : `Hi ${firstName},`;
 
   const body = `${greeting}
 
@@ -806,7 +806,7 @@ export function buildGreeting(
   const { name } = extractFirstName(contactName, email);
   if (name) return `Hi ${name},`;
 
-  // Tier 2 — no usable name found → Dear Sir/Madam
+  // Tier 2 — no usable name found → Dear Sir/Madam (no company name)
   return 'Dear Sir/Madam,';
 }
 
