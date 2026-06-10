@@ -133,14 +133,7 @@ export async function POST(request: NextRequest) {
     if (data?.full_name) {
       senderName  = data.full_name;
       senderPhone = data.phone || bodySenderPhone || '';
-
-      // Build the professional footer exactly as renderFooter() does:
-      //   Best regards,
-      //
-      //   Alice UMUBYEYI
-      //   Executive Sales
-      //   Pryro
-      //   0790038006
+      // Multi-line professional footer
       const footerLines = ['Best regards,', ''];
       footerLines.push(data.full_name);
       if (data.job_title)    footerLines.push(data.job_title);
@@ -170,9 +163,8 @@ export async function POST(request: NextRequest) {
   }
   if (!senderName) senderName = 'Sales Team';
 
-  // Build minimal footer if profile load failed
+  // Build multi-line footer if profile load failed
   if (!profileSignOff) {
-    const firstName = senderName.split(' ')[0] || senderName;
     profileSignOff = senderPhone
       ? `Best regards,\n\n${senderName}\nPryro\n${senderPhone}`
       : `Best regards,\n\n${senderName}\nPryro`;

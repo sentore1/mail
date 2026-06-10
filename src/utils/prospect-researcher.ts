@@ -587,25 +587,75 @@ const PRYRO_DESCRIPTION = `Pryro is an ERP that brings HR, payroll, finance, inv
 // ─── Build the guaranteed 4-line email ────────────────────────────────────────
 
 export function buildGuaranteedEmail(params: {
-  firstName: string;         // usable name OR the cleaned company name (for team greeting)
+  firstName: string;
   companyName: string;
   niche: string | null;
   emailIndex: number;
   signOff: string;
-  useTeamGreeting?: boolean; // when true, uses "Hi [firstName] team," instead of "Hi [firstName],"
+  useTeamGreeting?: boolean;
 }): { subject: string; body: string } {
   const { firstName, companyName, niche, emailIndex, signOff, useTeamGreeting } = params;
 
-  const subject   = getSectorSubject(niche, companyName, emailIndex);
-  const question  = getSectorQuestion(niche, companyName, emailIndex);
-  const cta       = `Would a 10 minute call make sense to show you how Pryro could work for ${companyName}?`;
-  const greeting  = firstName === 'Sir/Madam' || useTeamGreeting ? 'Dear Sir/Madam,' : `Hi ${firstName},`;
+  const subject  = getSectorSubject(niche, companyName, emailIndex);
+  const greeting = firstName === 'Sir/Madam' || useTeamGreeting ? 'Dear Sir/Madam,' : `Hi ${firstName},`;
+
+  // Sector-specific observation (peer-level industry statement)
+  const nicheKey = detectNicheKey(niche);
+  const observations: Record<string, string[]> = {
+    pharmacy:     ['Most pharmacy teams say drug expiry write-offs are invisible until they hit the monthly count.'],
+    healthcare:   ['Most healthcare finance teams say getting payroll and patient billing to match at month-end still takes days of manual work.'],
+    hospital:     ['Most hospital finance leads say tracking real-time department spend against approved budgets is nearly impossible due to payroll lag.'],
+    hotel:        ['Most hospitality ops leads say month-end reconciliation still takes days because scheduling, billing, and finance never sync automatically.'],
+    lodge:        ['Most lodge operators say knowing their real occupancy margin before month-end is difficult when bookings and accounts are separate.'],
+    travel:       ['Most travel agency owners say they only find out their actual margin on a booking after the trip ends.'],
+    restaurant:   ['Most restaurant operators say food cost is only visible at month-end. By which point the margin problem has already happened.'],
+    retail:       ['Most retail ops managers say stockouts are only caught when a shelf is empty. By then the sale is already gone.'],
+    ngo:          ['Most NGO finance leads say pulling together grant budget versus actual spend for a donor report still takes the better part of a week.'],
+    construction: ['Most construction finance managers say cost overruns are only visible in the P&L after the margin is already gone.'],
+    logistics:    ['Most logistics ops leads say matching driver payroll to trip logs at month-end still takes days of manual cross-referencing.'],
+    school:       ['Most school bursars say term-end reconciliation between fee collection and staff payroll still takes the better part of two weeks.'],
+    generic:      ['Most operations leads say the hours lost to moving data between finance, HR, and inventory systems are invisible until they add up at quarter-end.'],
+  };
+  const outcomes: Record<string, string[]> = {
+    pharmacy:     ['We connect stock, billing, and payroll into one view so your team catches expiry issues before they become write-offs.'],
+    healthcare:   ['We connect HR and patient billing into one live view so your admin team stops reconciling manually every month-end.'],
+    hospital:     ['We connect HR payroll and department budgets so your finance team sees real-time spend against approved limits, not last month\'s.'],
+    hotel:        ['We connect scheduling, vendor billing, and financials so month-end reconciliation goes from five days to same-day.'],
+    lodge:        ['We connect bookings, staff costs, and accounts so your real occupancy margin is visible before month-end, not after.'],
+    travel:       ['We connect bookings, commissions, and supplier costs so your margin on every deal is visible before the trip ends.'],
+    restaurant:   ['We connect kitchen stock and daily sales so food cost is a live number your chef sees every morning, not a month-end surprise.'],
+    retail:       ['We connect inventory and reorder points to sales data so stockouts trigger an alert, not an empty shelf.'],
+    ngo:          ['We connect grant budgets, field expenses, and payroll so your donor report takes hours instead of a week.'],
+    construction: ['We connect project budgets, contractor payroll, and procurement so cost overruns show up before they show up in the P&L.'],
+    logistics:    ['We connect driver payroll, trip logs, and billing so month-end reconciliation goes from days to hours.'],
+    school:       ['We connect fee collection and staff payroll so your bursar\'s numbers balance automatically instead of needing two weeks of chasing.'],
+    generic:      ['We connect finance, inventory, and HR into one live view so your team stops moving data between tools and starts running the business.'],
+  };
+  const ctas: Record<string, string> = {
+    pharmacy: 'Open to seeing the 2-minute workflow we use to fix this?',
+    healthcare: 'Open to seeing the 2-minute workflow we use to fix this?',
+    hospital: 'Open to seeing how we do it for a hospital your size?',
+    hotel: 'Open to a 2-minute look at how it works for a property your size?',
+    lodge: 'Open to seeing the 2-minute walkthrough we do for lodges?',
+    travel: 'Open to seeing how we surface margin before a trip ends?',
+    restaurant: 'Open to seeing the live food cost view your chef would use daily?',
+    retail: 'Open to seeing how the stockout alert works in practice?',
+    ngo: 'Open to seeing how the donor report pulls together in one click?',
+    construction: 'Open to seeing how the real-time budget view works on a live project?',
+    logistics: 'Open to seeing how the reconciliation looks when it runs automatically?',
+    school: 'Open to seeing how the term-end reconciliation works when it\'s automated?',
+    generic: 'Open to seeing the 2-minute workflow we use to fix this?',
+  };
+
+  const obs     = (observations[nicheKey] ?? observations['generic']!)[emailIndex % (observations[nicheKey]?.length ?? 1)]!;
+  const outcome = (outcomes[nicheKey]    ?? outcomes['generic']!)   [emailIndex % (outcomes[nicheKey]?.length    ?? 1)]!;
+  const cta     = ctas[nicheKey] ?? ctas['generic']!;
 
   const body = `${greeting}
 
-${question}
+${obs}
 
-${PRYRO_DESCRIPTION}
+${outcome}
 
 We also offer a 20-30% commission for every successfully referred client.
 

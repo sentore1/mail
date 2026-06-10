@@ -600,8 +600,8 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2 min-w-0">
-                            {isHighPriority && <Flame size={13} className="text-orange-500 shrink-0" title="Clicked link — high intent" />}
-                            {isOpened && !isHighPriority && <Eye size={12} className="text-amber-500 shrink-0" title="Opened email" />}
+                            {isHighPriority && <Flame size={13} className="text-orange-500 shrink-0" />}
+                            {isOpened && !isHighPriority && <Eye size={12} className="text-amber-500 shrink-0" />}
                             <div className="min-w-0">
                               <p className="text-sm font-semibold text-gray-900 truncate">{thread.companyName}</p>
                               <p className="text-[11px] text-gray-400 truncate">{thread.leadEmail}{thread.niche ? ` · ${thread.niche}` : ""}</p>

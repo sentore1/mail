@@ -155,165 +155,199 @@ export function decideFollowUpStyle(ctx: FollowUpContext): {
 
 // ── Style-specific prompt builders ────────────────────────────────────────────
 
+// ── Company name cleaner ──────────────────────────────────────────────────────
+// Strips legal suffixes and bracket content before use in follow-up greetings.
+function cleanCompanyNameForGreeting(raw: string): string {
+  let name = raw
+    .replace(/\s*\([^)]*\)\s*/g, ' ')                                              // (NW), (Pvt), etc.
+    .replace(/\b(Private Limited|Pvt\.?\s*Ltd\.?|Public Limited Company)\b\.?\s*/gi, '')
+    .replace(/\b(Ltd|Limited|Inc|LLC|LLP|PLC|Corp|Corporation|NW|Pty|Pvt)\b\.?\s*/gi, ' ')
+    .replace(/\s*[-–—|/]\s*$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return name || raw.trim();
+}
+
+// ── Greeting — always company team, never first name ─────────────────────────
+// Follow-ups go to scraped contacts who often have no real first name.
+// Using "Hi [Company] team," is always safe, professional, and correct.
+function resolveGreeting(contactName?: string | null, companyName?: string): string {
+  const cleaned = cleanCompanyNameForGreeting(companyName || 'there');
+  return `Hi ${cleaned} team,`;
+}
+
+// ── Signature builder — multi-line, pulled from sender profile ────────────────
+function buildSignature(senderName: string, senderPhone?: string): string {
+  const phone = senderPhone?.trim() || '';
+  return phone
+    ? `Best regards,\n\n${senderName}\nPryro\n${phone}`
+    : `Best regards,\n\n${senderName}\nPryro`;
+}
+
 function buildSystemPrompt(style: FollowUpStyle, senderName: string, tone?: FollowUpTone): string {
-  return `You are ${senderName} writing a short follow-up email on behalf of Pryro.
+  return `You write short follow-up emails for Pryro, an ERP platform.
 
-This is a follow-up on a cold email thread. The prospect has not replied yet.
+CRITICAL RULES — no exceptions:
+1. Greeting is ALWAYS "Hi [Company] team," — never a first name, never Sir/Madam, never Dear
+2. Subject is ALWAYS "Re: [original subject]" so it threads in the inbox
+3. Never repeat the original email body — take a completely different angle
+4. Never mention: free trial, pryro.com, commission, referral, percent, Sir/Madam, cutting-edge, revolutionary, streamline, leverage, empower, synergy, "I wanted to reach out", "I hope this finds you well", "Teams like yours"
+5. Signature is ALWAYS the multi-line block provided — never change it
 
-YOUR GOAL: Write one short, human follow-up that approaches the same pain point from a different angle than the previous email. Never repeat the same sentences.
-
-MANDATORY STRUCTURE:
-Line 1: Greeting (provided — copy verbatim)
-Blank line
-Paragraph 1 (1–2 sentences, each under 20 words): A new angle on their operational pain — time cost, risk, or what peers in their sector are doing.
-Blank line
-Paragraph 2 (1 sentence): A soft CTA question that is easy to answer in 5 seconds.
-Blank line
-Footer (provided — copy verbatim, no changes)
-
-TONE: One professional to another. Short sentences. Natural language. No jargon.
-
-BANNED WORDS: streamline, leverage, empower, optimize, cutting-edge, revolutionary, game-changing, seamlessly, robust, scalable, innovative, transform, synergy, excited to share, pleased to inform, i hope this email finds you well, just checking in, circling back, touching base, per my last email, as discussed, kindly revert, best-in-class.
-
-NEVER: repeat the opening email word-for-word, pitch the product again, ask for a meeting, use "let me know if you're interested".
-
-MAX LENGTH: 50 words in the body (not counting footer). Scannable on mobile in under 15 seconds.
+STAGE RULES:
+- Stage 1 (Day 3): Gentle bump — reference previous email, ask if timing was bad, one low-friction question. Under 50 words.
+- Stage 2 (Day 7): New angle — acknowledge busy inbox, share ONE specific operational outcome for their sector (not features), ask for 10 minutes. Under 60 words.
+- Stage 3 (Day 14): Final — very short and warm, leave door open, end with "Pryro is here when the time is right". Under 40 words.
 
 OUTPUT FORMAT:
 SUBJECT: Re: [original subject]
 BODY:
-[email body]`;
-}
+[greeting]
 
-// ── Greeting — never "Sir/Madam" ─────────────────────────────────────────────
-// Priority: contact name → company team fallback
-function resolveGreeting(contactName?: string | null, companyName?: string): string {
-  if (contactName) {
-    const first = contactName.trim().split(/[\s,./]+/)[0]?.trim() ?? '';
-    const clean = first.replace(/^(dr|prof|mr|mrs|ms|miss|rev|eng)\.*\s*/i, '').trim();
-    if (clean.length >= 2 && clean.length <= 12 && /^[a-zA-Z]+$/.test(clean)) {
-      return `Hi ${clean.charAt(0).toUpperCase() + clean.slice(1).toLowerCase()},`;
-    }
-  }
-  // No usable first name → Dear Sir/Madam (never company name)
-  return 'Dear Sir/Madam,';
+[follow-up body]
+
+[signature block]`;
 }
 
 function buildUserPrompt(ctx: FollowUpContext, style: FollowUpStyle): string {
   const senderName = ctx.senderName || ctx.yourCompany || "Sales Team";
-  const phoneLine  = ctx.senderPhone ? `\n${ctx.senderPhone}` : "";
-  const signatureBlock = `Best regards,\n\n${senderName}\nPryro${phoneLine}`;
-  const greeting = resolveGreeting(ctx.contactName, ctx.companyName);
+  const sig        = buildSignature(senderName, ctx.senderPhone);
+  const greeting   = resolveGreeting(null, ctx.companyName); // always company team
+  const cleanName  = cleanCompanyNameForGreeting(ctx.companyName);
+  const sector     = ctx.niche || 'business';
 
-  // Each follow-up approaches the pain point from a different angle
-  const angles: Record<number, string> = {
-    1: `Approach from the TIME COST angle: how many hours per month does this cost their team when these systems are separate?`,
-    2: `Approach from the RISK angle: what quietly goes wrong (errors, missed data, compliance gaps) when systems don't connect?`,
-    3: `Approach from the PEER angle: others in the ${ctx.niche || 'same sector'} have solved this — offer to share a brief example.`,
-  };
-  const angle = angles[Math.min(ctx.followupNumber, 3)] ?? angles[3];
-
-  const dayCopy: Record<number, string> = { 1: "day 3", 2: "day 7", 3: "day 14" };
-  const dayLabel = dayCopy[Math.min(ctx.followupNumber, 3)] ?? "day 14";
-
-  return `FOLLOW-UP #${ctx.followupNumber} (${dayLabel} — same thread as original email)
+  const stagePrompts: Record<number, string> = {
+    1: `Write a short gentle follow-up email. (STAGE 1 — Day 3)
 
 Company: ${ctx.companyName}
-Sector: ${ctx.niche || 'business'}
-City: ${ctx.location?.split(',')[0]?.trim() || 'their city'}
+Sector: ${sector}
 Original subject: ${ctx.originalSubject}
-Original sent: ${new Date(ctx.sentAt).toLocaleDateString("en-US", { month: "long", day: "numeric" })}
 
-Angle for this follow-up: ${angle}
+Rules:
+- Greeting must be exactly: ${greeting}
+- Open with reference to previous email: "Just following up on my email from a few days ago"
+- Ask if it landed at a bad time
+- End with one low-friction question like "Still open to a quick look?"
+- Under 50 words total body (not counting signature)
+- Subject: Re: ${ctx.originalSubject}
+- Never use Sir/Madam or first names
+- Never repeat original email content
 
-Greeting (copy verbatim): ${greeting}
+Signature to use (copy VERBATIM):
+${sig}`,
 
-CTA style for this follow-up:
-${ctx.followupNumber === 1 ? '"Would it be worth a quick 10-minute look?" or "Open to seeing how it works for ' + ctx.companyName + '?"' : ''}
-${ctx.followupNumber === 2 ? '"Want me to show you how it works for a ' + (ctx.niche || 'business') + ' your size?" — slightly more direct but still low commitment' : ''}
-${ctx.followupNumber >= 3 ? '"Happy to share a quick example if useful?" — most direct so far, never pushy' : ''}
+    2: `Write a follow-up from a completely new angle. (STAGE 2 — Day 7)
 
-Footer (copy VERBATIM, no changes):
-${signatureBlock}
+Company: ${ctx.companyName}
+Sector: ${sector}
+Original subject: ${ctx.originalSubject}
 
-Write the follow-up now. Max 50 words in the body. Different sentences from the original email. Follow the mandatory structure.`;
+Rules:
+- Greeting must be exactly: ${greeting}
+- Acknowledge inbox is busy: "I know inboxes get busy — wanted to try once more"
+- Share ONE new specific operational outcome Pryro delivers for ${sector} businesses — NOT in the first email, NOT a feature list
+- Example for hospitals: "Most hospital finance teams say getting payroll and department spend visible in one place stops the manual month-end reconciliation entirely"
+- End with exactly: "Worth 10 minutes to see if it fits?"
+- Under 60 words total body (not counting signature)
+- Subject: Re: ${ctx.originalSubject}
+- Never use Sir/Madam or first names
+
+Signature to use (copy VERBATIM):
+${sig}`,
+
+    3: `Write a final short break-up follow-up. (STAGE 3 — Day 14)
+
+Company: ${cleanName}
+Sector: ${sector}
+Original subject: ${ctx.originalSubject}
+
+Rules:
+- Greeting must be exactly: ${greeting}
+- Keep it very short and warm (under 40 words body)
+- Say this is the last follow-up without being cold or rude
+- Leave the door open genuinely
+- Mention ${cleanName} by name in the body
+- End with exactly: "Pryro is here when the time is right"
+- Subject: Re: ${ctx.originalSubject}
+- Never use Sir/Madam or first names
+
+Signature to use (copy VERBATIM):
+${sig}`,
+  };
+
+  const stage = Math.min(ctx.followupNumber, 3);
+  return stagePrompts[stage]!;
 }
 
-// ── Template-based fallback (no AI required) ─────────────────────────────────
+// ── Template-based follow-ups — 3 fixed stages, no AI needed ─────────────────
 
 export function buildTemplateFollowUp(
   ctx: FollowUpContext,
   style: FollowUpStyle
 ): { subject: string; body: string } {
-  const { companyName, followupNumber, originalSubject, yourCompany, senderName, senderPhone, niche, contactName } = ctx;
-  const sender    = senderName || yourCompany || "Sales Team";
-  const phoneLine = senderPhone ? `\n${senderPhone}` : "";
-  const sig       = `Best regards,\n\n${sender}\nPryro${phoneLine}`;
-  const greeting  = resolveGreeting(contactName, companyName);
-  const sector    = niche || 'business';
+  const { companyName, followupNumber, originalSubject, yourCompany, senderName, senderPhone, niche } = ctx;
+  const sender   = senderName || yourCompany || "Sales Team";
+  const sig      = buildSignature(sender, senderPhone);
+  const greeting = resolveGreeting(null, companyName); // always company team
+  const cleanName = cleanCompanyNameForGreeting(companyName);
+  const sector   = niche || 'business';
+  const subject  = `Re: ${originalSubject}`;
 
-  // FU #1 — day 3 — time cost angle
+  // ── FU #1 — Day 3 — Gentle bump ──────────────────────────────────────────
   if (followupNumber === 1) {
     return {
-      subject: `Re: ${originalSubject}`,
+      subject,
       body: `${greeting}
 
-Running a ${sector} means a lot of time spent moving data between systems that should talk to each other. Teams like yours typically get hours back each week once that's fixed.
+Just following up on my email from a few days ago — did it land at a bad time?
 
-Worth a quick 10-minute look at how Pryro handles it — free trial at pryro.com.
+Still open to a quick look?
 
 ${sig}`,
     };
   }
 
-  // FU #2 — day 7 — risk angle
+  // ── FU #2 — Day 7 — New angle ─────────────────────────────────────────────
   if (followupNumber === 2) {
+    const sectorOutcomes: Record<string, string> = {
+      hospital:     'Most hospital finance teams say the biggest win from Pryro is getting payroll and department spend visible in one place instead of reconciling manually every month.',
+      healthcare:   'Most healthcare admin teams say the biggest win from Pryro is eliminating the manual reconciliation between staff payroll and patient billing at month-end.',
+      pharmacy:     'Most pharmacy teams say the biggest win from Pryro is catching drug expiry issues automatically before they become write-offs.',
+      hotel:        'Most hospitality ops teams say the biggest win from Pryro is getting staff scheduling, vendor billing, and financials into one view instead of three.',
+      travel:       'Most travel agency teams say the biggest win from Pryro is seeing booking margin before a trip ends instead of weeks after.',
+      restaurant:   'Most restaurant operators say the biggest win from Pryro is having food cost as a live daily number instead of a month-end surprise.',
+      retail:       'Most retail teams say the biggest win from Pryro is stockout alerts replacing the empty-shelf discovery.',
+      ngo:          'Most NGO finance teams say the biggest win from Pryro is cutting donor report preparation from a week to a single afternoon.',
+      logistics:    'Most logistics ops teams say the biggest win from Pryro is month-end driver payroll reconciliation going from days to hours.',
+      school:       'Most school bursars say the biggest win from Pryro is fee collection and staff payroll balancing automatically instead of needing two weeks of chasing.',
+      construction: 'Most construction finance managers say the biggest win from Pryro is cost overruns showing up in the system before they show up in the P&L.',
+    };
+    const nicheKey = Object.keys(sectorOutcomes).find(k => (niche || '').toLowerCase().includes(k)) || 'generic';
+    const outcome = sectorOutcomes[nicheKey] ||
+      `Most ${sector} teams say the biggest win from Pryro is getting HR, finance, and operations into one live view instead of reconciling manually every month.`;
+
     return {
-      subject: `Re: ${originalSubject}`,
+      subject,
       body: `${greeting}
 
-When billing, payroll, and operations run in separate tools, small errors compound quietly — usually only visible at month-end.
+I know inboxes get busy — wanted to try once more.
 
-Want me to show you how it works for a ${sector} your size?
+${outcome}
+
+Worth 10 minutes to see if it fits?
 
 ${sig}`,
     };
   }
 
-  // FU #3 — day 14 — peer angle
-  if (followupNumber === 3) {
-    return {
-      subject: `Re: ${originalSubject}`,
-      body: `${greeting}
-
-Other ${sector} teams in the region have started running everything from one place — cuts the month-end scramble significantly.
-
-Happy to share a quick example if useful?
-
-${sig}`,
-    };
-  }
-
-  // FU #4 — final bump
-  if (followupNumber === 4) {
-    return {
-      subject: `Re: ${originalSubject}`,
-      body: `${greeting}
-
-Last one from me — if the timing isn't right, completely understood.
-
-If priorities shift, pryro.com is always there for a free look.
-
-${sig}`,
-    };
-  }
-
-  // FU #5+ — closing the loop
+  // ── FU #3 — Day 14 — Final ────────────────────────────────────────────────
   return {
-    subject: `Closing the loop — ${companyName}`,
+    subject,
     body: `${greeting}
 
-Closing the loop on my previous emails. If the timing ever becomes right, you can start a free trial anytime at pryro.com.
+Last follow-up from me — keeping it short.
+
+If consolidating HR, finance, and operations ever becomes a priority at ${cleanName}, Pryro is here when the time is right.
 
 ${sig}`,
   };

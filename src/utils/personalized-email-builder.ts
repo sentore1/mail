@@ -1,18 +1,14 @@
 /**
- * PERSONALIZED EMAIL BUILDER — v3
+ * PERSONALIZED EMAIL BUILDER — v4
  * ────────────────────────────────
- * ARCHITECTURE: The AI only writes LINE 2 (one sector question sentence).
- * Lines 1, 3, 4, and the footer are built deterministically in code — the AI
- * cannot override them. This guarantees:
+ * NEW STRUCTURE (4 elements, under 100 words):
  *
- *   LINE 1  Hi [FirstName],          ← always from code, never from AI
- *   LINE 2  [AI sector question]     ← AI writes this one sentence only
- *   LINE 3  Pryro is an ERP…         ← hardcoded constant, never changes
- *   LINE 4  Would a 10 minute call…  ← hardcoded CTA, never changes
- *   FOOTER  Best regards, …          ← from sender profile, never changes
- *
- * If AI fails or scores below threshold → sector question bank fallback (code only).
- * Result: "Hi Sir/Madam" can NEVER appear when a real name is available.
+ *   GREETING   Hi [Name] / Dear Sir/Madam,
+ *   LINE 1     Confident industry observation — peer-level, not a rhetorical question
+ *   LINE 2     Outcome sentence — what Pryro delivers, not a feature list
+ *   LINE 3     Commission line
+ *   CTA        Low-friction interest ask — "Open to seeing this?" not "Book a call"
+ *   SIGNATURE  One line: Name — Pryro | Phone
  */
 
 import type { ProspectSignals } from './prospect-researcher';
@@ -47,318 +43,183 @@ export interface GeneratedEmail {
   dataSource: 'ai_personalized' | 'ai_industry' | 'template';
 }
 
-// ─── Fixed Pryro constants — NEVER change these ──────────────────────────────
-const PRYRO_LINE = `Pryro is an ERP that brings HR, payroll, finance, inventory, and CRM into one platform.`;
-
-function buildCTA(companyName: string): string {
-  return `Would a 10 minute call make sense to show you how Pryro could work for ${companyName}?`;
-}
-
-// ─── Greeting builder — deterministic, code-only ─────────────────────────────
-// Priority order:
-//   1. signals.greeting = "Hi [RealName],"  → keep it
-//   2. signals.greeting = "Dear Sir/Madam," → pass through unchanged
-//   3. anything else                        → Dear Sir/Madam,
-function buildGreetingLine(signals: ProspectSignals, companyName: string): string {
+// ─── Greeting builder ─────────────────────────────────────────────────────────
+function buildGreetingLine(signals: ProspectSignals): string {
   const raw = signals.greeting.trim();
-
-  // Pass through "Dear Sir/Madam," unchanged
   if (/^dear sir\/madam,?$/i.test(raw)) return 'Dear Sir/Madam,';
-
-  // Extract name from "Hi [X],"
-  const nameMatch = raw.match(/^hi\s+(.+?),?\s*$/i);
-  const namePart  = nameMatch ? nameMatch[1]!.trim() : '';
-
-  // If it's a real first name → keep it
-  if (isUsableFirstName(namePart)) return `Hi ${namePart},`;
-
-  // Anything else → Dear Sir/Madam
+  const m = raw.match(/^hi\s+(.+?),?\s*$/i);
+  const name = m ? m[1]!.trim() : '';
+  if (isUsableFirstName(name)) return `Hi ${name},`;
   return 'Dear Sir/Madam,';
 }
 
-// ─── Sector impact sentences — paragraph 2, sentence 1 ───────────────────────
-// One sentence per sector explaining the cost/consequence of the problem.
-// Pairs with PRYRO_LINE to form paragraph 2 (two sentences, under 40 words total).
+// ─── One-line signature builder ───────────────────────────────────────────────
+// Format: "Alice Umubyeyi — Pryro | 0790038006"
+// Strips the old multi-line block down to one clean phone-typed line.
+export function buildOneLineSignature(senderName: string, senderPhone?: string): string {
+  const phone = senderPhone?.trim() || '';
+  if (phone) return `${senderName} — Pryro | ${phone}`;
+  return `${senderName} — Pryro`;
+}
 
-const SECTOR_IMPACT_BANK: Record<string, string[]> = {
-  pharmacy:     [
-    'That gap between stock records and billing is where margin quietly disappears.',
-    'When expiry tracking runs separately from billing, write-offs are always discovered late.',
+// ─── Sector observation bank (LINE 1) ────────────────────────────────────────
+// Confident industry statements — NOT rhetorical questions.
+// Sound like a peer who works in this space, not a salesperson reading a script.
+
+const SECTOR_OBSERVATION_BANK: Record<string, string[]> = {
+  pharmacy: [
+    'Most pharmacy teams say drug expiry write-offs are invisible until they hit the monthly count. By then the margin is already gone.',
+    'Pharmacy billing errors almost always trace back to stock records and invoicing systems that never talk to each other.',
   ],
-  healthcare:   [
-    'That disconnect means your admin team spends hours each month on reconciliation that should be automatic.',
-    'When payroll and billing run in separate systems, month-end always costs more time than it should.',
+  healthcare: [
+    'Most healthcare finance teams say getting payroll and patient billing to match at month-end still takes days of manual work.',
+    'Reconciling staff attendance, payroll, and patient billing across separate systems is one of those problems that never fully goes away.',
   ],
-  hospital:     [
-    'When HR and department budgets live in separate tools, the finance team is always working from yesterday\'s numbers.',
-    'That gap between payroll and department spend means the CFO never has a live view until it\'s too late.',
+  hospital: [
+    'Most hospital finance leads say tracking real-time department spend against approved budgets is nearly impossible due to payroll lag.',
+    'When HR and department procurement run in separate systems, the CFO is always working from last month\'s numbers.',
   ],
-  hotel:        [
-    'When staff scheduling and vendor billing aren\'t connected to your financials, month-end becomes a multi-day exercise.',
-    'That disconnect between operations and finance means reconciliation costs your team days every month.',
+  hotel: [
+    'Most hospitality ops leads say month-end reconciliation still takes three to five days because scheduling, billing, and finance never sync automatically.',
+    'When housekeeping rosters, vendor invoices, and payroll each live in a different system, the numbers never match on the first pass.',
   ],
-  lodge:        [
-    'When bookings and accounts aren\'t connected, it\'s nearly impossible to know your real margin until after the fact.',
-    'That gap between your booking records and accounts means month-end is always a scramble.',
+  lodge: [
+    'Most lodge operators say knowing their real occupancy margin before month-end is genuinely difficult when bookings and accounts are in separate places.',
+    'When staff rosters and supplier bills are not connected to accounts, month-end is always a scramble to match numbers that should already balance.',
   ],
-  travel:       [
-    'When bookings, commissions, and supplier costs live in separate places, you only know your real margin after the trip ends.',
-    'That disconnect means your P&L is always at least a month behind the actual deals you\'ve closed.',
+  travel: [
+    'Most travel agency owners say they only find out their actual margin on a booking after the trip ends, sometimes weeks later.',
+    'When agent commissions, supplier costs, and client bookings live in separate spreadsheets, the P&L is always a month behind the real picture.',
   ],
-  restaurant:   [
-    'When stock, suppliers, and daily sales aren\'t connected, food cost only becomes visible at month-end when it\'s too late to act.',
-    'That gap between kitchen stock and daily sales means margin surprises are a regular part of the month.',
+  restaurant: [
+    'Most restaurant operators say food cost is only visible at month-end. By which point the margin problem has already happened.',
+    'When kitchen stock, supplier invoices, and daily sales do not connect, food cost surprises are just part of running the month.',
   ],
-  retail:       [
-    'When inventory and reorder points aren\'t connected, the first sign of a stockout is usually an empty shelf.',
-    'That disconnect between stock levels and sales means margin surprises and stockouts happen regularly.',
+  retail: [
+    'Most retail ops managers say stockouts are only caught when a shelf is empty. By then the sale and the customer are already gone.',
+    'When inventory and reorder points are not connected to sales data, stockout surprises become a regular cost of doing business.',
   ],
-  ngo:          [
-    'When grant budgets and field expenses live in separate spreadsheets, financial compliance reports always take longer than they should.',
-    'That gap means your finance team spends more time reconciling than reporting, and donors notice.',
+  ngo: [
+    'Most NGO finance leads say pulling together grant budget versus actual spend for a donor report still takes the better part of a week.',
+    'When field expenses, grant budgets, and payroll each live in a separate spreadsheet, financial compliance reports are always late.',
   ],
   construction: [
-    'When project management and financial tracking run separately, cost overruns are usually discovered after the margin is already gone.',
-    'That disconnect between project budgets and actual spend means overruns only appear after they\'ve happened.',
+    'Most construction finance managers say cost overruns are only visible in the P&L after the margin is already gone.',
+    'When project budgets, contractor payroll, and procurement are tracked in separate systems, the budget view is always backward-looking.',
   ],
-  logistics:    [
-    'When driver payroll, trip billing, and warehouse stock aren\'t in the same system, reconciliation takes days and errors are easy to miss.',
-    'That gap means month-end billing is always a multi-day manual exercise with errors that compound quietly.',
+  logistics: [
+    'Most logistics ops leads say matching driver payroll to trip logs at month-end still takes days of manual cross-referencing.',
+    'When driver records, fuel costs, and client billing are not in the same system, month-end reconciliation is always a multi-day exercise.',
   ],
-  school:       [
-    'When fee collection and staff payroll run in separate registers, term-end reconciliation becomes a marathon every time.',
-    'That disconnect means your bursar spends weeks chasing numbers that should balance automatically.',
+  school: [
+    'Most school bursars say term-end reconciliation between fee collection and staff payroll still takes the better part of two weeks.',
+    'When fee registers and payroll run in separate systems, the numbers almost never balance automatically. Someone always has to chase the difference.',
   ],
-  generic:      [
-    'That fragmentation costs hours every week and makes it hard to see how the business is really running.',
-    'When finance, inventory, and HR each run in a different tool, the coordination overhead compounds quietly as the team grows.',
-    'That disconnect between systems means your team spends time moving data between tools instead of running the business.',
+  generic: [
+    'Most operations leads say the hours lost to moving data between finance, HR, and inventory systems are invisible until they add up at quarter-end.',
+    'When finance, inventory, and HR each run in a different tool, the coordination overhead grows quietly until it becomes a full-time job.',
+    'Most teams only see the real cost of fragmented back-office tools when month-end arrives and the numbers do not match.',
   ],
 };
 
-function getSectorImpact(niche: string | null, idx: number): string {
+// ─── Sector outcome bank (LINE 2) ────────────────────────────────────────────
+// Outcome sentences — what the prospect gets, not what features Pryro has.
+// Always describes a before → after operational change.
+
+const SECTOR_OUTCOME_BANK: Record<string, string[]> = {
+  pharmacy: [
+    'We connect stock, billing, and payroll into one view so your team catches expiry issues before they become write-offs.',
+    'We link your drug stock and billing data so margin leaks from expiry and billing errors show up before month-end.',
+  ],
+  healthcare: [
+    'We connect HR and patient billing into one live view so your admin team stops reconciling manually every month-end.',
+    'We sync staff payroll and billing so your team spends month-end reviewing numbers instead of chasing them.',
+  ],
+  hospital: [
+    'We connect HR payroll and department budgets so your finance team sees real-time spend against approved limits, not last month\'s.',
+    'We give your CFO a live view of department spend versus approved budget so overruns surface in days not months.',
+  ],
+  hotel: [
+    'We connect scheduling, vendor billing, and financials so month-end reconciliation goes from five days to same-day.',
+    'We sync your ops and finance data so your team stops moving numbers between systems every single month.',
+  ],
+  lodge: [
+    'We connect bookings, staff costs, and accounts so your real occupancy margin is visible before month-end, not after.',
+    'We link bookings and accounts so month-end stops being a reconciliation exercise and starts being a five-minute check.',
+  ],
+  travel: [
+    'We connect bookings, commissions, and supplier costs so your margin on every deal is visible before the trip ends.',
+    'We sync client records, supplier invoices, and agent commissions so your P&L reflects today\'s deals, not last month\'s.',
+  ],
+  restaurant: [
+    'We connect kitchen stock and daily sales so food cost is a live number your chef sees every morning, not a month-end surprise.',
+    'We link supplier invoices and daily sales so food cost variance shows up the day it happens, not at month-end.',
+  ],
+  retail: [
+    'We connect inventory and reorder points to sales data so stockouts trigger an alert, not an empty shelf.',
+    'We sync stock levels and supplier reorders so your team gets a system warning before a customer finds an empty shelf.',
+  ],
+  ngo: [
+    'We connect grant budgets, field expenses, and payroll so your donor report takes hours instead of a week.',
+    'We give your finance team one live view of grant spend versus budget so compliance reports write themselves.',
+  ],
+  construction: [
+    'We connect project budgets, contractor payroll, and procurement so cost overruns show up in the system before they show up in the P&L.',
+    'We sync project management and financial tracking so your team sees budget versus actuals in real time, not at month-end.',
+  ],
+  logistics: [
+    'We connect driver payroll, trip logs, and billing so month-end reconciliation goes from days to hours.',
+    'We link driver records and client billing so the numbers that go into payroll and the numbers that go into invoicing come from the same source.',
+  ],
+  school: [
+    'We connect fee collection and staff payroll so your bursar\'s numbers balance automatically instead of needing two weeks of chasing.',
+    'We sync fee registers and payroll so term-end reconciliation becomes a one-day check instead of a two-week exercise.',
+  ],
+  generic: [
+    'We connect finance, inventory, and HR into one live view so your team stops moving data between tools and starts running the business.',
+    'We give your ops and finance teams one system instead of three so the coordination overhead disappears.',
+    'We connect your back-office tools into one live view so month-end stops being a reconciliation exercise.',
+  ],
+};
+
+// ─── Sector CTA bank (low-friction, interest-based) ──────────────────────────
+// Ask for permission, not calendar time. Prospect can say yes with one word.
+
+const SECTOR_CTA_BANK: Record<string, string[]> = {
+  pharmacy:     ['Open to seeing the 2-minute workflow we use to fix this?', 'Worth a quick look at how it works for a pharmacy your size?'],
+  healthcare:   ['Open to seeing the 2-minute workflow we use to fix this?', 'Does this match what your admin team runs into every month-end?'],
+  hospital:     ['Open to seeing how we do it for a hospital your size?', 'Worth a quick look at the live dashboard your CFO would see?'],
+  hotel:        ['Open to a 2-minute look at how it works for a property your size?', 'Does this match what your ops team deals with every month-end?'],
+  lodge:        ['Open to seeing the 2-minute walkthrough we do for lodges?', 'Worth a quick look at how other lodges use it?'],
+  travel:       ['Open to seeing how we surface margin before a trip ends?', 'Does this sound like what your team runs into on every booking?'],
+  restaurant:   ['Open to seeing the live food cost view your chef would use daily?', 'Does this sound like what happens every month-end at your place?'],
+  retail:       ['Open to seeing how the stockout alert works in practice?', 'Worth a quick look at how other retailers use it?'],
+  ngo:          ['Open to seeing how the donor report pulls together in one click?', 'Does this match what your finance team deals with each quarter?'],
+  construction: ['Open to seeing how the real-time budget view works on a live project?', 'Does this match what your project managers run into every month?'],
+  logistics:    ['Open to seeing how the reconciliation looks when it runs automatically?', 'Does this match what your ops team goes through every month-end?'],
+  school:       ['Open to seeing how the term-end reconciliation works when it\'s automated?', 'Does this sound like what your bursar runs into every term?'],
+  generic:      ['Open to seeing the 2-minute workflow we use to fix this?', 'Worth a quick look at how it works for a business your size?', 'Does this sound familiar?'],
+};
+
+function getSectorObservation(niche: string | null, idx: number): string {
   const key = detectNicheKey(niche);
-  const bank = SECTOR_IMPACT_BANK[key] ?? SECTOR_IMPACT_BANK['generic']!;
+  const bank = SECTOR_OBSERVATION_BANK[key] ?? SECTOR_OBSERVATION_BANK['generic']!;
   return bank[idx % bank.length]!;
 }
 
-// ─── Assemble final email — 3 paragraphs ──────────────────────────────────────
-// Para 1: greeting + question (P1)
-// Para 2: impact sentence + Pryro intro (P2) — two sentences, one paragraph
-// Para 3: CTA (P3)
-// Footer: sign-off
-
-function assembleEmail(params: {
-  greeting: string;
-  sectorQuestion: string;
-  impactSentence: string;
-  companyName: string;
-  signOff: string;
-  subject: string;
-}): { subject: string; body: string } {
-  const { greeting, sectorQuestion, impactSentence, companyName, signOff, subject } = params;
-  const body = `${greeting}
-
-${sectorQuestion}
-
-${impactSentence} ${PRYRO_LINE}
-
-We also offer a 20-30% commission for every successfully referred client.
-
-${buildCTA(companyName)}
-
-${signOff}`;
-  return { subject, body };
+function getSectorOutcome(niche: string | null, idx: number): string {
+  const key = detectNicheKey(niche);
+  const bank = SECTOR_OUTCOME_BANK[key] ?? SECTOR_OUTCOME_BANK['generic']!;
+  return bank[idx % bank.length]!;
 }
 
-// ─── AI caller ───────────────────────────────────────────────────────────────
-
-interface AIProvider { provider: string; api_key: string; active_model: string; }
-
-async function callAI(p: AIProvider, system: string, user: string): Promise<string> {
-  const body = { temperature: 0.75, max_tokens: 80 }; // max_tokens=80 — one sentence only
-
-  const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-  async function attempt(): Promise<string> {
-    if (p.provider === 'openai') {
-      const r = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.api_key}` },
-        body: JSON.stringify({
-          model: p.active_model || 'gpt-4o-mini',
-          messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-          ...body,
-        }),
-        signal: AbortSignal.timeout(12000),
-      });
-      if (!r.ok) throw Object.assign(new Error(`OpenAI ${r.status}`), { status: r.status });
-      return (await r.json()).choices[0].message.content;
-    }
-
-    if (p.provider === 'groq') {
-      const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.api_key}` },
-        body: JSON.stringify({
-          model: p.active_model || 'llama-3.3-70b-versatile',
-          messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-          ...body,
-        }),
-        signal: AbortSignal.timeout(12000),
-      });
-      if (!r.ok) throw Object.assign(new Error(`Groq ${r.status}`), { status: r.status });
-      return (await r.json()).choices[0].message.content;
-    }
-
-    if (p.provider === 'anthropic') {
-      const r = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': p.api_key,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: p.active_model || 'claude-3-5-haiku-20241022',
-          max_tokens: 80,
-          system,
-          messages: [{ role: 'user', content: user }],
-          temperature: 0.6,
-        }),
-        signal: AbortSignal.timeout(12000),
-      });
-      if (!r.ok) throw Object.assign(new Error(`Anthropic ${r.status}`), { status: r.status });
-      return (await r.json()).content[0].text;
-    }
-
-    if (p.provider === 'gemini') {
-      const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${p.active_model || 'gemini-1.5-flash'}:generateContent?key=${p.api_key}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: system + '\n\n' + user }] }],
-            generationConfig: { temperature: 0.6, maxOutputTokens: 80 },
-          }),
-          signal: AbortSignal.timeout(12000),
-        }
-      );
-      if (!r.ok) throw Object.assign(new Error(`Gemini ${r.status}`), { status: r.status });
-      return (await r.json()).candidates[0].content.parts[0].text;
-    }
-
-    if (p.provider === 'mistral') {
-      const r = await fetch('https://api.mistral.ai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.api_key}` },
-        body: JSON.stringify({
-          model: p.active_model || 'mistral-small',
-          messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-          ...body,
-        }),
-        signal: AbortSignal.timeout(12000),
-      });
-      if (!r.ok) throw Object.assign(new Error(`Mistral ${r.status}`), { status: r.status });
-      return (await r.json()).choices[0].message.content;
-    }
-
-    throw new Error(`Unknown provider: ${p.provider}`);
-  }
-
-  // Retry with exponential backoff for 429 rate limits (2s, 6s, 14s)
-  let lastError: Error = new Error('Unknown');
-  for (let n = 0; n < 3; n++) {
-    try {
-      return await attempt();
-    } catch (err: any) {
-      lastError = err;
-      if (err?.status === 429) {
-        const delayMs = (Math.pow(2, n + 1) + n) * 1000;
-        console.warn(`[callAI] Rate limited by ${p.provider} (attempt ${n + 1}/3) — waiting ${delayMs}ms`);
-        await wait(delayMs);
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw lastError;
+function getSectorCTA(niche: string | null, idx: number): string {
+  const key = detectNicheKey(niche);
+  const bank = SECTOR_CTA_BANK[key] ?? SECTOR_CTA_BANK['generic']!;
+  return bank[idx % bank.length]!;
 }
 
-// ─── AI prompt — asks for ONE sentence only ───────────────────────────────────
-// The system prompt tells the AI it only writes LINE 2. Nothing else.
-
-function buildQuestionSystemPrompt(companyName: string, niche: string | null): string {
-  return `You write one sentence for a cold B2B email. Just one sentence — nothing else.
-
-The sentence is a genuine question about a real daily operational challenge that a ${niche || 'business'} like "${companyName}" faces.
-
-Rules:
-- Under 20 words
-- Ends with a question mark
-- Mentions "${companyName}" by name
-- Sounds like a colleague asking, not a salesperson
-- About a REAL operational problem: payroll, billing, stock, scheduling, reconciliation, etc.
-- NO greeting, NO introduction, NO sign-off, NO explanation
-- NEVER start with: "Are you still", "I was", "I hope", "I noticed", "I came across"
-- NEVER use: streamline, leverage, empower, optimize, cutting-edge, revolutionary, seamlessly, innovative, robust, scalable, transform, synergy
-
-Output: The single sentence question only. No labels. No quotes. No extra text.`;
-}
-
-function buildQuestionUserPrompt(companyName: string, niche: string | null, customPainPoint?: string | null): string {
-  const sector = niche || 'business';
-  const hint = customPainPoint
-    ? `Focus on this pain point: ${customPainPoint}`
-    : `Focus on the single biggest daily operational challenge for a ${sector}.`;
-  return `Company: ${companyName}
-Sector: ${sector}
-${hint}
-
-Write the one sentence question now:`;
-}
-
-// ─── Validate and sanitize the AI's one-sentence output ───────────────────────
-function cleanAISentence(raw: string, companyName: string): string | null {
-  if (!raw) return null;
-
-  // Strip any echoed labels, markdown, or multi-line output
-  let s = raw
-    .replace(/^(SUBJECT:|BODY:|LINE \d[:\s-]*|Question:|Output:)/gim, '')
-    .replace(/\*\*(.+?)\*\*/g, '$1')
-    .replace(/^[-•*#]\s+/gm, '')
-    .replace(/\n.+/g, '')        // take only the first line
-    .trim();
-
-  // Remove surrounding quotes
-  s = s.replace(/^["'`]|["'`]$/g, '').trim();
-
-  // Must end with ?
-  if (!s.endsWith('?')) {
-    s = s.replace(/[.!]\s*$/, '') + '?';
-  }
-
-  // Must not be empty or too long
-  if (!s || s.length < 10 || s.length > 200) return null;
-
-  // Reject if it contains banned phrases
-  const banned = [
-    'i was looking', 'i noticed', 'i came across', 'i hope', 'i wanted to reach out',
-    'streamline', 'leverage', 'empower', 'optimize', 'cutting-edge', 'revolutionary',
-    'seamlessly', 'innovative', 'robust', 'scalable', 'transform', 'synergy',
-    'sir/madam', 'dear sir', 'hi there', 'hello there',
-  ];
-  const lower = s.toLowerCase();
-  if (banned.some(b => lower.includes(b))) return null;
-
-  return s;
-}
-
-// ─── Build subject from sector bank (never from AI) ──────────────────────────
-// Subject: [CompanyName] — [short sector question under 7 words]
-// Note: the em-dash separator is kept only in subjects (not in the body).
-
+// ─── Subject bank ─────────────────────────────────────────────────────────────
 const SECTOR_SUBJECT_BANK: Record<string, Array<(c: string) => string>> = {
   pharmacy:     [
     (c) => `Is ${c} still tracking drug expiry manually?`,
@@ -426,30 +287,158 @@ function buildSubject(companyName: string, niche: string | null, idx: number): s
   return bank[idx % bank.length]!(companyName);
 }
 
-// ─── Sector question bank — fallback when AI fails ───────────────────────────
-const SECTOR_QUESTION_BANK: Record<string, Array<(c: string) => string>> = {
-  pharmacy:     [(c) => `Is ${c} still reconciling drug stock, billing, and payroll across separate tools?`, (c) => `Are expiry write-offs still being caught manually at ${c}?`],
-  healthcare:   [(c) => `Is ${c} still reconciling staff payroll and patient billing manually every month?`, (c) => `How long does ${c}'s admin team spend on month-end payroll reconciliation?`],
-  hospital:     [(c) => `Are ${c}'s HR payroll and department budgets still managed in separate systems?`, (c) => `Does ${c} have a live view of department spend versus approved budgets?`],
-  hotel:        [(c) => `Is ${c} still reconciling staff scheduling, vendor billing, and financials manually?`, (c) => `How many days does month-end take at ${c} with systems not connected?`],
-  lodge:        [(c) => `Are bookings, staff rosters, and accounts still separate at ${c}?`, (c) => `Is month-end reconciliation still a manual exercise at ${c}?`],
-  travel:       [(c) => `Does ${c} know its actual margin before a trip ends, or only after?`, (c) => `Are agent commissions and supplier costs still tracked in spreadsheets at ${c}?`],
-  restaurant:   [(c) => `Does ${c} have a live view of food cost today, or only at month-end?`, (c) => `Are kitchen stock, supplier invoices, and daily sales still in separate tools at ${c}?`],
-  retail:       [(c) => `Is ${c} still getting stockout surprises across locations?`, (c) => `Are inventory reorders and multi-location stock still managed manually at ${c}?`],
-  ngo:          [(c) => `Is ${c} still reconciling grant budgets and field expenses in separate tools?`, (c) => `How long does ${c}'s finance team spend on donor reporting each quarter?`],
-  construction: [(c) => `Does ${c} see cost overruns in real time, or only after they've happened?`, (c) => `Are project budgets, contractor payroll, and procurement still disconnected at ${c}?`],
-  logistics:    [(c) => `Is ${c} still reconciling driver payroll, trip billing, and warehouse stock manually?`, (c) => `How many days does month-end billing reconciliation take at ${c}?`],
-  school:       [(c) => `Is ${c} still managing fee collection and staff payroll in separate systems?`, (c) => `How long does ${c}'s bursar spend on term-end reconciliation?`],
-  generic:      [(c) => `Is ${c} still managing HR, billing, and operations in separate tools?`, (c) => `Are finance, inventory, and payroll still running across disconnected systems at ${c}?`, (c) => `How much time does ${c}'s team spend each month reconciling data across tools?`],
-};
+// ─── Assemble final email ─────────────────────────────────────────────────────
+// Structure: greeting → observation → outcome → commission → CTA → one-line sig
 
-function getFallbackQuestion(companyName: string, niche: string | null, idx: number): string {
-  const key = detectNicheKey(niche);
-  const bank = SECTOR_QUESTION_BANK[key] ?? SECTOR_QUESTION_BANK['generic']!;
-  return bank[idx % bank.length]!(companyName);
+function assembleEmail(params: {
+  greeting: string;
+  observation: string;
+  outcome: string;
+  cta: string;
+  signOff: string;
+  subject: string;
+}): { subject: string; body: string } {
+  const { greeting, observation, outcome, cta, signOff, subject } = params;
+  const body = `${greeting}
+
+${observation}
+
+${outcome}
+
+We also offer a 20-30% commission for every successfully referred client.
+
+${cta}
+
+${signOff}`;
+  return { subject, body };
 }
 
-// ─── Follow-up prompt builder (exported for follow-up module) ─────────────────
+// ─── AI caller ───────────────────────────────────────────────────────────────
+
+interface AIProvider { provider: string; api_key: string; active_model: string; }
+
+async function callAI(p: AIProvider, system: string, user: string): Promise<string> {
+  const body = { temperature: 0.75, max_tokens: 80 };
+  const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+  async function attempt(): Promise<string> {
+    if (p.provider === 'openai') {
+      const r = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.api_key}` },
+        body: JSON.stringify({ model: p.active_model || 'gpt-4o-mini', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...body }),
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!r.ok) throw Object.assign(new Error(`OpenAI ${r.status}`), { status: r.status });
+      return (await r.json()).choices[0].message.content;
+    }
+    if (p.provider === 'groq') {
+      const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.api_key}` },
+        body: JSON.stringify({ model: p.active_model || 'llama-3.3-70b-versatile', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...body }),
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!r.ok) throw Object.assign(new Error(`Groq ${r.status}`), { status: r.status });
+      return (await r.json()).choices[0].message.content;
+    }
+    if (p.provider === 'anthropic') {
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': p.api_key, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: p.active_model || 'claude-3-5-haiku-20241022', max_tokens: 80, system, messages: [{ role: 'user', content: user }], temperature: 0.6 }),
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!r.ok) throw Object.assign(new Error(`Anthropic ${r.status}`), { status: r.status });
+      return (await r.json()).content[0].text;
+    }
+    if (p.provider === 'gemini') {
+      const r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${p.active_model || 'gemini-1.5-flash'}:generateContent?key=${p.api_key}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: system + '\n\n' + user }] }], generationConfig: { temperature: 0.6, maxOutputTokens: 80 } }),
+          signal: AbortSignal.timeout(12000) }
+      );
+      if (!r.ok) throw Object.assign(new Error(`Gemini ${r.status}`), { status: r.status });
+      return (await r.json()).candidates[0].content.parts[0].text;
+    }
+    if (p.provider === 'mistral') {
+      const r = await fetch('https://api.mistral.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.api_key}` },
+        body: JSON.stringify({ model: p.active_model || 'mistral-small', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...body }),
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!r.ok) throw Object.assign(new Error(`Mistral ${r.status}`), { status: r.status });
+      return (await r.json()).choices[0].message.content;
+    }
+    throw new Error(`Unknown provider: ${p.provider}`);
+  }
+
+  let lastError: Error = new Error('Unknown');
+  for (let n = 0; n < 3; n++) {
+    try { return await attempt(); }
+    catch (err: any) {
+      lastError = err;
+      if (err?.status === 429) { await wait((Math.pow(2, n + 1) + n) * 1000); continue; }
+      throw err;
+    }
+  }
+  throw lastError;
+}
+
+// ─── AI prompt — asks for ONE outcome sentence ────────────────────────────────
+// The AI writes a single custom outcome sentence for LINE 2 only.
+// Everything else is from code.
+
+function buildOutcomeSystemPrompt(companyName: string, niche: string | null): string {
+  return `You write one sentence for a cold B2B email. Just one sentence — nothing else.
+
+The sentence describes the specific operational outcome a ${niche || 'business'} like "${companyName}" gets from connecting their back-office systems.
+
+Rules:
+- Under 20 words
+- Starts with "We" (as in Pryro)
+- Describes what stops happening or what starts working — an operational before/after
+- Mentions a process specific to ${niche || 'this type of business'} (payroll, billing, stock, scheduling, etc.)
+- NO product features, NO module names, NO adjectives like "powerful" or "seamless"
+- NO question mark — this is a statement
+- NO greeting, NO sign-off, NO extra text
+
+Good examples:
+- "We connect HR and finance so your team stops reconciling manually every month-end."
+- "We link stock and billing so expiry write-offs show up before they hit the count."
+- "We sync driver payroll and trip logs so month-end reconciliation takes hours not days."
+
+Output: The single outcome sentence only. No labels. No quotes. No extra text.`;
+}
+
+function buildOutcomeUserPrompt(companyName: string, niche: string | null, customPainPoint?: string | null): string {
+  const hint = customPainPoint
+    ? `The specific problem to fix: ${customPainPoint}`
+    : `Focus on the single biggest daily operational problem for a ${niche || 'business'} and describe the outcome of fixing it.`;
+  return `Company: ${companyName}\nSector: ${niche || 'business'}\n${hint}\n\nWrite the one outcome sentence now:`;
+}
+
+function cleanAISentence(raw: string): string | null {
+  if (!raw) return null;
+  let s = raw
+    .replace(/^(SUBJECT:|BODY:|LINE \d[:\s-]*|Output:|Sentence:)/gim, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/^[-•*#]\s+/gm, '')
+    .replace(/\n.+/g, '')
+    .trim()
+    .replace(/^["'`]|["'`]$/g, '')
+    .trim();
+  if (!s || s.length < 10 || s.length > 200) return null;
+  const banned = ['streamline', 'leverage', 'empower', 'optimize', 'cutting-edge', 'revolutionary',
+    'seamlessly', 'innovative', 'robust', 'scalable', 'transform', 'synergy',
+    'i was looking', 'i noticed', 'i came across', 'i hope', 'i wanted to'];
+  if (banned.some(b => s.toLowerCase().includes(b))) return null;
+  return s;
+}
+
+// ─── Follow-up prompt builder ─────────────────────────────────────────────────
 
 export function buildFollowUpPrompt(
   signals: ProspectSignals,
@@ -463,7 +452,7 @@ export function buildFollowUpPrompt(
   };
   const ctas: Record<number, string> = {
     1: `"Still worth a quick look?"`,
-    2: `"Want to see how it works for a ${signals.niche || 'business'} your size?"`,
+    2: `"Open to seeing how it works for a ${signals.niche || 'business'} your size?"`,
     3: `"Happy to share a quick example if useful?"`,
   };
   const maxWords = followUpNumber === 1 ? 50 : followUpNumber === 2 ? 40 : 30;
@@ -492,69 +481,43 @@ export async function buildPersonalizedEmail(
   const { companyName, niche, signals } = params;
   const idx = params.emailIndex ?? 0;
 
-  // ── Step 1: Build all deterministic parts in code — AI cannot override these ──
-  const greeting = buildGreetingLine(signals, companyName);  // never "Sir/Madam"
-  const subject  = buildSubject(companyName, niche, idx); // sector bank subject
-  const signOff  = signals.signOff;
+  // All structural elements built in code — AI cannot touch them
+  const greeting    = buildGreetingLine(signals);
+  const subject     = buildSubject(companyName, niche, idx);
+  const observation = getSectorObservation(niche, idx);
+  const cta         = getSectorCTA(niche, idx);
+  const signOff     = signals.signOff;
 
   console.log(`[EmailBuilder] greeting="${greeting}" | company="${companyName}" | niche=${niche} | ai=${!!aiProvider}`);
 
-  // ── Step 2: Ask AI for LINE 2 only (one sector question sentence) ──────────
+  // AI writes ONE custom outcome sentence. All other lines are from code.
   if (aiProvider) {
-    console.log(`[EmailBuilder] Calling ${aiProvider.provider}/${aiProvider.active_model} for LINE 2 of "${companyName}"`);
+    console.log(`[EmailBuilder] Calling ${aiProvider.provider}/${aiProvider.active_model} for outcome sentence — "${companyName}"`);
 
-    let aiQuestion: string | null = null;
+    let aiOutcome: string | null = null;
 
-    // First attempt
-    try {
-      const system = buildQuestionSystemPrompt(companyName, niche);
-      const user   = buildQuestionUserPrompt(companyName, niche, params.customPainPoint);
-      const raw    = await callAI(aiProvider, system, user);
-      aiQuestion   = cleanAISentence(raw, companyName);
-      console.log(`[EmailBuilder] AI question attempt 1: "${aiQuestion ?? 'INVALID — ' + raw.slice(0,80)}"`);
-    } catch (err: any) {
-      console.warn(`[EmailBuilder] AI call 1 failed for "${companyName}": ${err?.message}`);
-    }
-
-    // Second attempt if first failed or was invalid
-    if (!aiQuestion) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        const system = buildQuestionSystemPrompt(companyName, niche);
-        const user   = buildQuestionUserPrompt(companyName, niche, params.customPainPoint);
+        const system = buildOutcomeSystemPrompt(companyName, niche);
+        const user   = buildOutcomeUserPrompt(companyName, niche, params.customPainPoint);
         const raw    = await callAI(aiProvider, system, user);
-        aiQuestion   = cleanAISentence(raw, companyName);
-        console.log(`[EmailBuilder] AI question attempt 2: "${aiQuestion ?? 'INVALID — ' + raw.slice(0,80)}"`);
+        aiOutcome    = cleanAISentence(raw);
+        console.log(`[EmailBuilder] AI outcome attempt ${attempt}: "${aiOutcome ?? 'INVALID — ' + raw.slice(0, 80)}"`);
+        if (aiOutcome) break;
       } catch (err: any) {
-        console.warn(`[EmailBuilder] AI call 2 failed for "${companyName}": ${err?.message}`);
+        console.warn(`[EmailBuilder] AI attempt ${attempt} failed for "${companyName}": ${err?.message}`);
       }
     }
 
-    if (aiQuestion) {
-      // ── Step 3: Assemble the 3-paragraph email with the AI question ─────────
-      const impact = getSectorImpact(niche, idx);
-      const { subject: s, body } = assembleEmail({
-        greeting,
-        sectorQuestion: aiQuestion,
-        impactSentence: impact,
-        companyName,
-        signOff,
-        subject,
-      });
-
-      const quality = checkEmailQuality({
-        subject: s,
-        body,
-        companyName,
-        externalPersonalizationScore: signals.personalizationScore,
-      });
-
+    if (aiOutcome) {
+      const { subject: s, body } = assembleEmail({ greeting, observation, outcome: aiOutcome, cta, signOff, subject });
+      const quality = checkEmailQuality({ subject: s, body, companyName, externalPersonalizationScore: signals.personalizationScore });
       console.log(`[EmailBuilder] Quality for "${companyName}": score=${quality.score}, passed=${quality.passed}`);
 
       if (quality.passed && quality.score >= 85) {
-        console.log(`[EmailBuilder] ✅ AI email accepted for "${companyName}" (score=${quality.score})`);
+        console.log(`[EmailBuilder] ✅ Accepted for "${companyName}" (score=${quality.score})`);
         return {
-          subject: s,
-          body,
+          subject: s, body,
           model: `${aiProvider.provider}/${aiProvider.active_model}`,
           personalizationScore: quality.personalizationScore,
           qualityScore: quality.score,
@@ -562,47 +525,27 @@ export async function buildPersonalizedEmail(
           dataSource: signals.personalizationScore >= 65 ? 'ai_personalized' : 'ai_industry',
         };
       }
-
-      console.warn(`[EmailBuilder] ⚠️ AI email for "${companyName}" scored ${quality.score}/85. Blocks: ${quality.flags.filter(f => f.severity === 'block').map(f => f.type).join(',') || 'none'}. Falling back to sector bank.`);
-
-      // AI question was bad — use sector bank fallback
-      const fallbackQuestion = getFallbackQuestion(companyName, niche, idx);
-      const { subject: fs, body: fb } = assembleEmail({ greeting, sectorQuestion: fallbackQuestion, impactSentence: impact, companyName, signOff, subject });
-      const fq = checkEmailQuality({ subject: fs, body: fb, companyName, externalPersonalizationScore: signals.personalizationScore });
-      return {
-        subject: fs,
-        body: fb,
-        model: `${aiProvider.provider}/${aiProvider.active_model}`,
-        personalizationScore: fq.personalizationScore,
-        qualityScore: fq.score,
-        qualityPassed: fq.passed,
-        qualityFlagged: true,
-        dataSource: 'ai_industry',
-      };
+      console.warn(`[EmailBuilder] ⚠️ Scored ${quality.score}/85 for "${companyName}" — using sector bank outcome.`);
+    } else {
+      console.warn(`[EmailBuilder] AI produced no valid outcome for "${companyName}" — using sector bank`);
     }
-
-    // AI completely failed — fall through to sector bank
-    console.warn(`[EmailBuilder] AI produced no valid question for "${companyName}" — using sector bank`);
   } else {
     console.log(`[EmailBuilder] No AI provider — using sector bank for "${companyName}"`);
   }
 
-  // ── Step 4: Pure code fallback — sector question bank, no AI ───────────────
-  const fallbackQuestion = getFallbackQuestion(companyName, niche, idx);
-  const impact = getSectorImpact(niche, idx);
-  const { subject: fs, body: fb } = assembleEmail({ greeting, sectorQuestion: fallbackQuestion, impactSentence: impact, companyName, signOff, subject });
+  // Sector bank fallback — always produces a passing email
+  const outcome = getSectorOutcome(niche, idx);
+  const { subject: fs, body: fb } = assembleEmail({ greeting, observation, outcome, cta, signOff, subject });
   const fq = checkEmailQuality({ subject: fs, body: fb, companyName, externalPersonalizationScore: signals.personalizationScore });
-
   console.log(`[EmailBuilder] Sector bank email for "${companyName}": score=${fq.score}`);
 
   return {
-    subject: fs,
-    body: fb,
-    model: 'template',
+    subject: fs, body: fb,
+    model: aiProvider ? `${aiProvider.provider}/${aiProvider.active_model}` : 'template',
     personalizationScore: fq.personalizationScore,
     qualityScore: fq.score,
     qualityPassed: fq.passed,
-    qualityFlagged: !!aiProvider,   // flag if AI was configured but failed
+    qualityFlagged: !!aiProvider,
     dataSource: 'template',
   };
 }

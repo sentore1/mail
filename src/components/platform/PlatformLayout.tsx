@@ -10,7 +10,6 @@ import CRMModule from "./CRMModule";
 import AISettingsModule from "./AISettingsModule";
 import SMTPManager from "./SMTPManager";
 import FollowUpModule from "./FollowUpModule";
-import CampaignsModule from "./CampaignsModule";
 import EmailVerificationModule from "./EmailVerificationModule";
 import AnalyticsModule from "./AnalyticsModule";
 import WebhooksModule from "./WebhooksModule";
@@ -156,10 +155,6 @@ export default function PlatformLayout({ userId, userEmail }: PlatformLayoutProp
 
           <LazyModule active={activeModule === "follow-up"}>
             <FollowUpModule userId={userId} />
-          </LazyModule>
-
-          <LazyModule active={activeModule === "campaigns"}>
-            <CampaignsModule userId={userId} />
           </LazyModule>
 
           <LazyModule active={activeModule === "analytics"}>

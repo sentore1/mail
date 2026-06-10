@@ -2,11 +2,34 @@
   "crons": [
     {
       "path": "/api/cron/process-followups",
-      "schedule": "*/10 * * * *"
+      "schedule": "0 8 * * *"
     },
     {
       "path": "/api/cron/scan-inbox",
       "schedule": "*/5 * * * *"
     }
-  ]
+  ],
+  "functions": {
+    "src/app/api/scrape-stream/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/scrape-and-generate/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/generate-emails-bulk/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/send-bulk/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/followup/process/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/cron/process-followups/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/cron/scan-inbox/route.ts": {
+      "maxDuration": 300
+    }
+  }
 }
