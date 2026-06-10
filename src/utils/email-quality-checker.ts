@@ -101,6 +101,18 @@ const HARD_BANNED: string[] = [
   'exclusive offer',
   'last chance',
   'only a few spots',
+  // Commission / referral — never in a first cold email
+  'we also offer',
+  'we offer a',
+  '20-30% commission',
+  '20–30% commission',
+  'referral commission',
+  'commission for every',
+  'successfully referred',
+  'schedule a demo',
+  'book a demo',
+  'pleased to inform',
+  'excited to share',
   // Formal closings that make it read like a newsletter
   'warm regards',
   'yours faithfully',
@@ -228,8 +240,9 @@ function personalizationScore(subject: string, body: string, companyName: string
   // Question present (human-sounding)
   if ((full.match(/\?/g) || []).length >= 1) score += 8;
 
-  // No generic salutation (+ve signal)
-  if (!/dear sir|dear madam|to whom/i.test(full)) score += 10;
+  // No generic salutation that isn't our own Dear Sir/Madam fallback (+ve signal)
+  // We allow "Dear Sir/Madam," as our own fallback — only penalize truly foreign salutations
+  if (!/to whom it may concern/i.test(full)) score += 10;
 
   // Named greeting — "Hi [RealName]," scores bonus; "Dear Sir/Madam," or "Hi there," does not
   if (/^hi [a-zA-Z]{2,12},/im.test(body) && !/^hi (there|sir|madam|sir\/madam),/im.test(body)) score += 9;
@@ -265,11 +278,13 @@ export function checkEmailQuality(params: {
   const fullLower = (subject + ' ' + body).toLowerCase();
   const bodyLower  = body.toLowerCase();
 
-  // The greeting line ("Hi there," / "Hi John,") is always first — skip it to find the real opener
+  // Skip greeting line to find the real observation opener
   const nonEmptyLines = body.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   const firstLine = nonEmptyLines[0] ?? '';
-  // If firstLine is a greeting, take the next non-empty line as the observation opener
-  const isGreetingLine = /^hi (there|[a-z]+),?$/i.test(firstLine) || /^hello (there|[a-z]+),?$/i.test(firstLine);
+  // Detect greeting patterns: "Hi [Name]," / "Hello [Name]," / "Dear Sir/Madam,"
+  const isGreetingLine = /^hi (there|[a-z]+),?$/i.test(firstLine)
+    || /^hello (there|[a-z]+),?$/i.test(firstLine)
+    || /^dear (sir|madam|sir\/madam),?$/i.test(firstLine);
   const observationLine = isGreetingLine ? (nonEmptyLines[1] ?? '') : firstLine;
 
   // ── 1. Banned phrases (hard block) ───────────────────────────────────────
@@ -312,11 +327,12 @@ export function checkEmailQuality(params: {
   const isStrongSubject = (
     /\?$/.test(subject) ||                               // ends with ?
     /\b(you|your)\b/i.test(subject) ||                   // personal
-    /still (managing|using|tracking|separate|manual)/i.test(subject) || // implies current pain
-    /— (is|are|how|do|does|still|why)\b/i.test(subject) || // em-dash question format
-    /\b(how long|how many|how much)\b/i.test(subject) || // operational question
-    /still\b.*\?/i.test(subject) ||                      // "still X?" pattern
-    /in one place\?/i.test(subject)                      // consolidation question
+    /still (managing|using|tracking|separate|manual)/i.test(subject) ||
+    / — (is|are|how|do|does|still|why)\b/i.test(subject) || // em-dash question format
+    /\b(how long|how many|how much)\b/i.test(subject) ||
+    /still\b.*\?/i.test(subject) ||
+    /in one place\?/i.test(subject) ||
+    / — /.test(subject)                                  // any em-dash subject = strong
   );
   const subjectStrength: 'weak' | 'ok' | 'strong' = isWeakSubject ? 'weak' : isStrongSubject ? 'strong' : 'ok';
 

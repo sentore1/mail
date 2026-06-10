@@ -55,37 +55,24 @@ function buildCTA(companyName: string): string {
 }
 
 // ─── Greeting builder — deterministic, code-only ─────────────────────────────
-// Resolves greeting in exact priority order. "Hi Sir/Madam," is NEVER used:
-//
-//   1. signals.greeting already set to "Hi [Name]," by the caller   → use it
-//   2. Greeting is "Hi [CompanyName] team," (team fallback)          → use it
-//   3. Greeting is "Hi there," (absolute last resort)                → use it
-//   4. Anything else (e.g. old "Hi Sir/Madam,")                      → replace with team
-//
-// companyName is passed in so we can build a proper team greeting if needed.
+// Priority order:
+//   1. signals.greeting = "Hi [RealName],"  → keep it
+//   2. signals.greeting = "Dear Sir/Madam," → pass through unchanged
+//   3. anything else                        → Dear Sir/Madam,
 function buildGreetingLine(signals: ProspectSignals, companyName: string): string {
   const raw = signals.greeting.trim();
 
-  // Extract the name part: "Hi [X]," → "X" (handles "team" suffix too)
+  // Pass through "Dear Sir/Madam," unchanged
+  if (/^dear sir\/madam,?$/i.test(raw)) return 'Dear Sir/Madam,';
+
+  // Extract name from "Hi [X],"
   const nameMatch = raw.match(/^hi\s+(.+?),?\s*$/i);
   const namePart  = nameMatch ? nameMatch[1]!.trim() : '';
 
   // If it's a real first name → keep it
-  if (isUsableFirstName(namePart)) {
-    return `Hi ${namePart},`;
-  }
+  if (isUsableFirstName(namePart)) return `Hi ${namePart},`;
 
-  // If it's already a team greeting (ends with "team") → keep it
-  if (/\bteam$/i.test(namePart)) {
-    return raw.endsWith(',') ? raw : `${raw},`;
-  }
-
-  // If it's "Hi there," → acceptable last resort, keep it
-  if (/^hi there,?$/i.test(raw)) {
-    return 'Hi there,';
-  }
-
-  // Anything else (no usable name) → Dear Sir/Madam
+  // Anything else → Dear Sir/Madam
   return 'Dear Sir/Madam,';
 }
 
@@ -371,19 +358,64 @@ function cleanAISentence(raw: string, companyName: string): string | null {
 // Note: the em-dash separator is kept only in subjects (not in the body).
 
 const SECTOR_SUBJECT_BANK: Record<string, Array<(c: string) => string>> = {
-  pharmacy:     [(c) => `${c}: still tracking expiry manually?`, (c) => `${c}: stock, billing, payroll separate?`, (c) => `${c}: expiry alerts in place?`],
-  healthcare:   [(c) => `${c}: payroll and billing still separate?`, (c) => `${c}: reconciling HR manually?`, (c) => `${c}: admin hours adding up?`],
-  hospital:     [(c) => `${c}: budgets and payroll connected?`, (c) => `${c}: department spend visible in real time?`, (c) => `${c}: HR and finance still separate?`],
-  hotel:        [(c) => `${c}: month-end still manual?`, (c) => `${c}: staff, billing, reservations connected?`, (c) => `${c}: housekeeping and payroll synced?`],
-  lodge:        [(c) => `${c}: bookings and accounts separate?`, (c) => `${c}: month-end always a scramble?`],
-  travel:       [(c) => `${c}: margin visible before trip ends?`, (c) => `${c}: commissions still in spreadsheets?`, (c) => `${c}: P&L always a month behind?`],
-  restaurant:   [(c) => `${c}: food cost visible today?`, (c) => `${c}: kitchen, suppliers, sales connected?`],
-  retail:       [(c) => `${c}: stockouts still a surprise?`, (c) => `${c}: inventory and reorders still manual?`],
-  ngo:          [(c) => `${c}: donor reports taking too long?`, (c) => `${c}: budgets and field spend connected?`],
-  construction: [(c) => `${c}: see overruns before they happen?`, (c) => `${c}: budgets and payroll still separate?`],
-  logistics:    [(c) => `${c}: month-end billing taking days?`, (c) => `${c}: driver payroll and stock connected?`],
-  school:       [(c) => `${c}: fees and payroll still separate?`, (c) => `${c}: term-end reporting still manual?`],
-  generic:      [(c) => `${c}: HR and finance still separate?`, (c) => `${c}: still running ops on multiple tools?`, (c) => `${c}: ops data in one place yet?`],
+  pharmacy:     [
+    (c) => `Is ${c} still tracking drug expiry manually?`,
+    (c) => `Are stock, billing and payroll separate at ${c}?`,
+    (c) => `How is ${c} catching expiry dates before write-offs?`,
+  ],
+  healthcare:   [
+    (c) => `Is ${c} still reconciling payroll and billing manually?`,
+    (c) => `How long does month-end take at ${c}?`,
+    (c) => `Are HR and patient billing still separate at ${c}?`,
+  ],
+  hospital:     [
+    (c) => `Are department budgets and payroll connected at ${c}?`,
+    (c) => `Is ${c} getting live department spend visibility?`,
+    (c) => `How does ${c} track HR and finance together?`,
+  ],
+  hotel:        [
+    (c) => `Is month-end still a manual process at ${c}?`,
+    (c) => `Are staff scheduling and billing connected at ${c}?`,
+    (c) => `How does ${c} reconcile housekeeping and payroll?`,
+  ],
+  lodge:        [
+    (c) => `Are bookings and accounts still separate at ${c}?`,
+    (c) => `Is month-end reconciliation still manual at ${c}?`,
+  ],
+  travel:       [
+    (c) => `Does ${c} know its booking margin before trips end?`,
+    (c) => `Are agent commissions still tracked in spreadsheets at ${c}?`,
+    (c) => `Is the P&L always a month behind at ${c}?`,
+  ],
+  restaurant:   [
+    (c) => `Does ${c} have a live view of food cost?`,
+    (c) => `Are kitchen stock and supplier invoices connected at ${c}?`,
+  ],
+  retail:       [
+    (c) => `Is ${c} still getting caught by stockouts?`,
+    (c) => `Are inventory reorders still managed manually at ${c}?`,
+  ],
+  ngo:          [
+    (c) => `Is donor reporting still taking too long at ${c}?`,
+    (c) => `Are grant budgets and field spend connected at ${c}?`,
+  ],
+  construction: [
+    (c) => `Does ${c} see cost overruns before they happen?`,
+    (c) => `Are project budgets and payroll still separate at ${c}?`,
+  ],
+  logistics:    [
+    (c) => `Is month-end billing still taking days at ${c}?`,
+    (c) => `Are driver payroll and stock connected at ${c}?`,
+  ],
+  school:       [
+    (c) => `Are fees and staff payroll still separate at ${c}?`,
+    (c) => `Is term-end reporting still a manual process at ${c}?`,
+  ],
+  generic:      [
+    (c) => `Are HR and finance still separate tools at ${c}?`,
+    (c) => `Is ${c} still running operations across multiple tools?`,
+    (c) => `How does ${c} keep ops data in one place?`,
+  ],
 };
 
 function buildSubject(companyName: string, niche: string | null, idx: number): string {

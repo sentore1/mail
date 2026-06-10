@@ -46,6 +46,47 @@ function isJunk(name: string): boolean {
     || /wikipedia$/.test(l) || /\.com$/.test(l) || /^https?:\/\//.test(l) || l.length > 80;
 }
 
+// ─── Fake / test contact detector ────────────────────────────────────────────
+// ─── Fake / test contact detector ────────────────────────────────────────────
+// Returns a rejection reason string if the lead should be skipped, else null.
+
+const FAKE_COMPANY_NAMES = new Set([
+  'default', 'test', 'n/a', 'na', 'untitled', 'unknown', 'sample', 'demo',
+  'example', 'company', 'business', 'placeholder', 'your company', 'none',
+  'null', 'undefined',
+]);
+
+const FAKE_EMAIL_PREFIXES = new Set([
+  'test', 'testing', 'fake', 'dummy', 'sample', 'demo', 'noreply', 'no-reply',
+  'mci', 'ims', 'admin123', 'user', 'user1', 'webmaster',
+]);
+
+const FAKE_EMAIL_DOMAINS = ['test.com', 'example.com', 'localhost', 'test.org',
+  'xyz.com', 'fake.com', 'mailtest.com', 'test.net'];
+
+function detectFakeContact(lead: {
+  company_name: string;
+  email: string | null;
+}): string | null {
+  const cn = lead.company_name?.trim().toLowerCase().replace(/[^a-z0-9\s]/g, '') ?? '';
+
+  if (!cn || cn.length < 2) return 'Company name is blank or too short';
+  if (FAKE_COMPANY_NAMES.has(cn)) return `"${lead.company_name}" is not a real company name`;
+
+  if (lead.email) {
+    const lower = lead.email.toLowerCase();
+    const [prefix = '', domain = ''] = lower.split('@');
+    if (FAKE_EMAIL_DOMAINS.some(d => domain === d || domain.endsWith('.' + d)))
+      return `Email domain "${domain}" is a test domain`;
+    if (FAKE_EMAIL_PREFIXES.has(prefix))
+      return `Email prefix "${prefix}" is a test or system address`;
+    if (/\btest\b/.test(prefix))
+      return `Email prefix "${prefix}" contains "test"`;
+  }
+
+  return null;
+}
+
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -244,6 +285,19 @@ export async function POST(request: NextRequest) {
         }
 
         const name = nameResult.cleaned;
+
+        // ── Fake/test contact gate ───────────────────────────────────────────
+        const fakeReason = detectFakeContact({ company_name: name, email: lead.email });
+        if (fakeReason) {
+          done++;
+          send('skipped', {
+            company_name: lead.company_name,
+            reason: fakeReason,
+            done,
+            total: leads.length,
+          });
+          continue;
+        }
 
         try {
           // Resolve contact name from contact_name field or email prefix
