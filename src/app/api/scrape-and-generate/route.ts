@@ -124,6 +124,8 @@ Is ${company} still managing ${sectorName} operations across separate tools?
 
 That kind of fragmentation costs hours every week and makes it hard to see how the business is really running. ${PRYRO_LINE}
 
+We also offer a 20-30% commission for every successfully referred client.
+
 ${cta}
 
 Best regards,

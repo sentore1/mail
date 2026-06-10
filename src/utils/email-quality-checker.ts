@@ -101,14 +101,7 @@ const HARD_BANNED: string[] = [
   'exclusive offer',
   'last chance',
   'only a few spots',
-  // Commission / referral — never in a first cold email
-  'we also offer',
-  'we offer a',
-  '20-30% commission',
-  '20–30% commission',
-  'referral commission',
-  'commission for every',
-  'successfully referred',
+  // Commission / referral — kept for reference but not banned (appears in our emails)
   'schedule a demo',
   'book a demo',
   'pleased to inform',
