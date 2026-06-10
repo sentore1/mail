@@ -163,6 +163,8 @@ ${sectorQuestion}
 
 ${impactSentence} ${PRYRO_LINE}
 
+We also offer a 20-30% commission for every successfully referred client.
+
 ${buildCTA(companyName)}
 
 ${signOff}`;

@@ -607,6 +607,8 @@ ${question}
 
 ${PRYRO_DESCRIPTION}
 
+We also offer a 20-30% commission for every successfully referred client.
+
 ${cta}
 
 ${signOff}`;
