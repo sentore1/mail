@@ -14,8 +14,6 @@ const nextConfig = {
   serverExternalPackages: ['puppeteer', 'puppeteer-core', 'nodemailer', 'imapflow'],
 
   // Turbopack config (Next.js 16 default bundler)
-  // Setting an empty object silences the "no turbopack config" warning
-  // while letting Turbopack use its own defaults for everything
   turbopack: {},
 };
 
