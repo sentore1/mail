@@ -185,22 +185,25 @@ BODY:
 [email body]`;
 }
 
-// ── Greeting — updated to match new standard ─────────────────────────────────
-function resolveGreeting(contactName?: string | null): string {
+// ── Greeting — never "Sir/Madam" ─────────────────────────────────────────────
+// Priority: contact name → company team fallback
+function resolveGreeting(contactName?: string | null, companyName?: string): string {
   if (contactName) {
-    const first = contactName.trim().split(/[\s,]+/)[0]?.trim() ?? '';
-    if (first.length >= 2 && first.length <= 15 && /^[a-zA-Z]+$/.test(first)) {
-      return `Hi ${first.charAt(0).toUpperCase() + first.slice(1).toLowerCase()},`;
+    const first = contactName.trim().split(/[\s,./]+/)[0]?.trim() ?? '';
+    const clean = first.replace(/^(dr|prof|mr|mrs|ms|miss|rev|eng)\.*\s*/i, '').trim();
+    if (clean.length >= 2 && clean.length <= 12 && /^[a-zA-Z]+$/.test(clean)) {
+      return `Hi ${clean.charAt(0).toUpperCase() + clean.slice(1).toLowerCase()},`;
     }
   }
-  return 'Hi Sir/Madam,';
+  // No usable first name → Dear Sir/Madam (never company name)
+  return 'Dear Sir/Madam,';
 }
 
 function buildUserPrompt(ctx: FollowUpContext, style: FollowUpStyle): string {
   const senderName = ctx.senderName || ctx.yourCompany || "Sales Team";
   const phoneLine  = ctx.senderPhone ? `\n${ctx.senderPhone}` : "";
   const signatureBlock = `Best regards,\n\n${senderName}\nPryro${phoneLine}`;
-  const greeting = resolveGreeting(ctx.contactName);
+  const greeting = resolveGreeting(ctx.contactName, ctx.companyName);
 
   // Each follow-up approaches the pain point from a different angle
   const angles: Record<number, string> = {
@@ -246,7 +249,7 @@ export function buildTemplateFollowUp(
   const sender    = senderName || yourCompany || "Sales Team";
   const phoneLine = senderPhone ? `\n${senderPhone}` : "";
   const sig       = `Best regards,\n\n${sender}\nPryro${phoneLine}`;
-  const greeting  = resolveGreeting(contactName);
+  const greeting  = resolveGreeting(contactName, companyName);
   const sector    = niche || 'business';
 
   // FU #1 — day 3 — time cost angle

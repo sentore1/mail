@@ -426,25 +426,193 @@ export function getNicheProfile(niche: string | null): NicheProfile {
   };
 }
 
-// ─── Company name cleaner (permanent rule) ───────────────────────────────────
-// Strips junk characters from scraped company names before any email is generated.
-// Called by both single and bulk generation pipelines.
+// ─── Name validator — blocks generation for unusable names ───────────────────
+// A "usable" first name is a real human name: letters only, 2–12 chars,
+// no dots, no digits, not an obvious email prefix like "drsanjaypathare".
 
-const JUNK_COMPANY_PATTERNS = [
-  /^\[.*?\]\s*/,            // leading [PDF], [DOC], etc.
-  /\s*-\s*$/,               // trailing dash
-  /\s*\|\s*.*$/,            // everything after |
-  /\s*[-–—]\s*.*$/,         // everything after dash/em-dash (e.g. "Name - City")
-  /&amp;/gi,                // HTML entity &
-  /&quot;/gi,               // HTML entity "
-  /&#\d+;/g,                // numeric HTML entities
-  /&#x[0-9a-f]+;/gi,        // hex HTML entities
-  /[<>{}[\]]/g,             // brackets
-  /\/{2,}/g,                // double slashes
-  /_{2,}/g,                 // double underscores
-  /^\d+[\s._-]*/,           // leading numbers with separator
-  /[\s._-]*\d+$/,           // trailing numbers with separator
-];
+export function isUsableFirstName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  const n = name.trim();
+  if (n.length < 2 || n.length > 12) return false;          // too short or too long
+  if (/[0-9._\-@+]/.test(n)) return false;                  // contains digits or punctuation
+  if (/^(hi|sir|madam|dear|mr|mrs|ms|dr|prof)$/i.test(n)) return false; // titles
+  if (!/^[a-zA-ZÀ-ÖØ-öø-ÿ]+$/.test(n)) return false;       // non-letter chars
+  return true;
+}
+
+// ─── Sector question bank — one genuine question per sector, varied per index ─
+// These are the OPENING LINE — a real question about a real daily challenge.
+
+const SECTOR_QUESTIONS: Record<string, Array<(company: string) => string>> = {
+  pharmacy: [
+    (c) => `Are you still tracking drug expiry dates and stock manually at ${c}?`,
+    (c) => `Is ${c} managing stock, billing, and payroll across separate systems?`,
+    (c) => `Are expiry write-offs still a regular problem at ${c}?`,
+  ],
+  healthcare: [
+    (c) => `Are you still reconciling HR, billing, and stock manually at ${c}?`,
+    (c) => `Is ${c} running payroll, patient billing, and pharmacy stock in separate tools?`,
+    (c) => `How much time does ${c}'s admin team spend reconciling payroll and billing each month?`,
+  ],
+  hospital: [
+    (c) => `Is ${c} still managing department budgets, HR, and procurement in separate systems?`,
+    (c) => `Are staff rosters, payroll, and department spend still disconnected at ${c}?`,
+    (c) => `Does ${c}'s finance team have a live view of actual spend versus approved budgets?`,
+  ],
+  hotel: [
+    (c) => `Is ${c} still reconciling housekeeping rosters, payroll, and vendor billing manually?`,
+    (c) => `Are reservations, staff scheduling, and financials still in separate tools at ${c}?`,
+    (c) => `How long does ${c}'s team spend on month-end reconciliation each month?`,
+  ],
+  lodge: [
+    (c) => `Are bookings, housekeeping, and accounts still running in separate places at ${c}?`,
+    (c) => `Is ${c} still reconciling bookings and payroll manually at month-end?`,
+  ],
+  travel: [
+    (c) => `Does ${c} know the actual margin on each booking before the trip ends?`,
+    (c) => `Is ${c} still tracking agent commissions and supplier costs in spreadsheets?`,
+    (c) => `Are client bookings, commissions, and P&L still in separate tools at ${c}?`,
+  ],
+  restaurant: [
+    (c) => `Does ${c} have a live view of food cost today, or only at month-end?`,
+    (c) => `Are kitchen stock, supplier invoices, and daily sales still separate at ${c}?`,
+  ],
+  retail: [
+    (c) => `Is ${c} still getting stockout surprises across locations?`,
+    (c) => `Are inventory, supplier reorders, and sales reporting still manual at ${c}?`,
+  ],
+  ngo: [
+    (c) => `Is ${c} still reconciling grant budgets and field expenses in separate tools?`,
+    (c) => `How long does ${c}'s finance team spend on donor reporting each quarter?`,
+  ],
+  construction: [
+    (c) => `Does ${c} see cost overruns in real time, or only after they've happened?`,
+    (c) => `Are project budgets, contractor payroll, and procurement still disconnected at ${c}?`,
+  ],
+  logistics: [
+    (c) => `Is ${c} still reconciling driver payroll, trip billing, and warehouse stock manually?`,
+    (c) => `How many days does month-end billing reconciliation take at ${c}?`,
+  ],
+  school: [
+    (c) => `Is ${c} still managing fee collection and staff payroll in separate systems?`,
+    (c) => `How long does ${c}'s bursar spend on term-end reconciliation?`,
+  ],
+  generic: [
+    (c) => `Are you still managing HR, billing, and operations in separate tools at ${c}?`,
+    (c) => `Is ${c} running finance, inventory, and payroll across disconnected systems?`,
+    (c) => `How much time does ${c}'s team spend each month reconciling data across tools?`,
+  ],
+};
+
+function getSectorQuestion(niche: string | null, companyName: string, idx: number): string {
+  const key = detectNicheKey(niche);
+  const questions = SECTOR_QUESTIONS[key] ?? SECTOR_QUESTIONS['generic']!;
+  const fn = questions[idx % questions.length]!;
+  return fn(companyName);
+}
+
+// ─── Subject line bank — short conversational questions, varied per index ─────
+
+const SECTOR_SUBJECTS: Record<string, Array<(company: string) => string>> = {
+  pharmacy: [
+    (c) => `Is ${c} still tracking drug expiry manually?`,
+    (c) => `Are stock, billing and payroll separate at ${c}?`,
+    (c) => `How is ${c} catching expiry dates before write-offs?`,
+  ],
+  healthcare: [
+    (c) => `Is ${c} still reconciling payroll and billing manually?`,
+    (c) => `How long does month-end take at ${c}?`,
+    (c) => `Are HR and patient billing still separate at ${c}?`,
+  ],
+  hospital: [
+    (c) => `Are department budgets and payroll connected at ${c}?`,
+    (c) => `Is ${c} getting live department spend visibility?`,
+    (c) => `How does ${c} track HR and finance together?`,
+  ],
+  hotel: [
+    (c) => `Is month-end still a manual process at ${c}?`,
+    (c) => `Are staff scheduling and billing connected at ${c}?`,
+    (c) => `How does ${c} reconcile housekeeping and payroll?`,
+  ],
+  lodge: [
+    (c) => `Are bookings and accounts still separate at ${c}?`,
+    (c) => `Is month-end reconciliation still manual at ${c}?`,
+  ],
+  travel: [
+    (c) => `Does ${c} know its booking margin before trips end?`,
+    (c) => `Are agent commissions still tracked in spreadsheets at ${c}?`,
+    (c) => `Is the P&L always a month behind at ${c}?`,
+  ],
+  restaurant: [
+    (c) => `Does ${c} have a live view of food cost?`,
+    (c) => `Are kitchen stock and supplier invoices connected at ${c}?`,
+  ],
+  retail: [
+    (c) => `Is ${c} still getting caught by stockouts?`,
+    (c) => `Are inventory reorders still managed manually at ${c}?`,
+  ],
+  ngo: [
+    (c) => `Is donor reporting still taking too long at ${c}?`,
+    (c) => `Are grant budgets and field spend connected at ${c}?`,
+  ],
+  construction: [
+    (c) => `Does ${c} see cost overruns before they happen?`,
+    (c) => `Are project budgets and payroll still separate at ${c}?`,
+  ],
+  logistics: [
+    (c) => `Is month-end billing still taking days at ${c}?`,
+    (c) => `Are driver payroll and stock connected at ${c}?`,
+  ],
+  school: [
+    (c) => `Are fees and staff payroll still separate at ${c}?`,
+    (c) => `Is term-end reporting still a manual process at ${c}?`,
+  ],
+  generic: [
+    (c) => `Are HR and finance still separate tools at ${c}?`,
+    (c) => `Is ${c} still running operations across multiple tools?`,
+    (c) => `How does ${c} keep ops data in one place?`,
+  ],
+};
+
+function getSectorSubject(niche: string | null, companyName: string, idx: number): string {
+  const key = detectNicheKey(niche);
+  const subjects = SECTOR_SUBJECTS[key] ?? SECTOR_SUBJECTS['generic']!;
+  const fn = subjects[idx % subjects.length]!;
+  return fn(companyName);
+}
+
+// ─── The fixed Pryro description line (never changes) ─────────────────────────
+const PRYRO_DESCRIPTION = `Pryro is an ERP that brings HR, payroll, finance, inventory, and CRM into one platform.`;
+
+// ─── Build the guaranteed 4-line email ────────────────────────────────────────
+
+export function buildGuaranteedEmail(params: {
+  firstName: string;         // usable name OR the cleaned company name (for team greeting)
+  companyName: string;
+  niche: string | null;
+  emailIndex: number;
+  signOff: string;
+  useTeamGreeting?: boolean; // when true, uses "Hi [firstName] team," instead of "Hi [firstName],"
+}): { subject: string; body: string } {
+  const { firstName, companyName, niche, emailIndex, signOff, useTeamGreeting } = params;
+
+  const subject   = getSectorSubject(niche, companyName, emailIndex);
+  const question  = getSectorQuestion(niche, companyName, emailIndex);
+  const cta       = `Would a 10 minute call make sense to show you how Pryro could work for ${companyName}?`;
+  const greeting  = firstName === 'Sir/Madam' || useTeamGreeting ? 'Dear Sir/Madam,' : `Hi ${firstName},`;
+
+  const body = `${greeting}
+
+${question}
+
+${PRYRO_DESCRIPTION}
+
+${cta}
+
+${signOff}`;
+
+  return { subject, body };
+}
 
 // Names that are definitively not real businesses — skip generation entirely
 const INVALID_COMPANY_NAMES = new Set([
@@ -477,6 +645,17 @@ export function cleanCompanyName(raw: string): CompanyNameResult {
   name = name.replace(/^\[.*?\]\s*/, '');  // [PDF], [DOC], etc.
   name = name.replace(/^https?:\/\/\S+/, '');  // URLs
   name = name.replace(/^[&+,\s]+/, '');    // leading & or + or comma
+
+  // Strip content inside parentheses or brackets — e.g. "(NW)", "(Pvt)", "(Uganda)"
+  name = name.replace(/\s*\([^)]*\)\s*/g, ' ');
+  name = name.replace(/\s*\[[^\]]*\]\s*/g, ' ');
+
+  // Strip legal suffixes — must be done BEFORE trailing junk stripping
+  // Order matters: strip multi-word first, then single-word
+  name = name.replace(/\b(Private Limited|Pvt\.?\s*Ltd\.?|Public Limited Company)\b\.?\s*/gi, '');
+  name = name.replace(/\b(Ltd|Limited|Inc|LLC|L\.L\.C|LLP|PLC|Corp|Corporation|Co\.?|NW|Pty|Pvt|S\.A|S\.A\.S|GmbH|B\.V)\b\.?\s*$/gi, '');
+  // Also strip if not at end (e.g. "Ltd t/a Something")
+  name = name.replace(/\b(Ltd|Limited|Inc|LLC|LLP|PLC|Corp|Corporation|NW|Pty|Pvt)\b\.?\s*/gi, ' ');
 
   // Strip trailing junk
   name = name.replace(/\s*[-–—|/]\s*$/, '');   // trailing dash, pipe, slash
@@ -610,19 +789,28 @@ export function extractFirstName(
 }
 
 // ─── Greeting builder ────────────────────────────────────────────────────────
-// Always uses the best available name. Never "Dear Sir/Madam".
-// Falls back to "Hi there," only when absolutely no name source exists.
+// 3-tier priority — "Hi Sir/Madam" is NEVER used:
+//
+//   Tier 1: usable first name from contact_name or email prefix  → "Hi [Name],"
+//   Tier 2: email exists but prefix is a generic word            → "Hi [CompanyName] team,"
+//   Tier 3: no name AND no email (or email prefix also unusable) → null (caller must block)
+//
+// companyName is required for the Tier-2 team fallback.
 
 export function buildGreeting(
   contactName?: string | null,
   email?: string | null,
+  companyName?: string | null,
 ): string {
+  // Tier 1 — real name from contact field or email prefix
   const { name } = extractFirstName(contactName, email);
   if (name) return `Hi ${name},`;
-  return 'Hi Sir/Madam,';
+
+  // Tier 2 — no usable name found → Dear Sir/Madam (no company name)
+  return 'Dear Sir/Madam,';
 }
 
-/** True when no real first name was found */
+/** True when no real first name was found (greeting used company team or "Hi there,") */
 export function greetingIsFallback(
   contactName?: string | null,
   email?: string | null,
@@ -860,7 +1048,7 @@ export async function researchProspect(params: {
 
   // ── Greeting — try contact name first, then email prefix ──────────────────
   // email is not available in this async path — pass null (caller overrides via lead.email)
-  const greeting = buildGreeting(contactName, null);
+  const greeting = buildGreeting(contactName, null, companyName);
 
   // ── Generic email flag ────────────────────────────────────────────────────
   // (email not available in async path — caller sets this via lead.email)
@@ -933,7 +1121,7 @@ export function researchProspectSync(params: {
 
   // ── Greeting — contact name first, email prefix fallback ─────────────────
   // email not available in sync path — caller re-builds greeting with lead.email if needed
-  const greeting = buildGreeting(contactName, null);
+  const greeting = buildGreeting(contactName, null, companyName);
 
   const firstName = senderName.split(' ')[0] || senderName;
   const signOff = senderPhone

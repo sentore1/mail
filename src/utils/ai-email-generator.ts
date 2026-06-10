@@ -10,7 +10,7 @@
  */
 
 import { createClient }                          from '../../supabase/client';
-import { researchProspect, researchProspectSync, isGenericEmailAddress, extractFirstName, cleanCompanyName } from './prospect-researcher';
+import { researchProspect, researchProspectSync, isGenericEmailAddress, extractFirstName, cleanCompanyName, isUsableFirstName } from './prospect-researcher';
 import { buildPersonalizedEmail }                 from './personalized-email-builder';
 
 export interface EmailGenerationParams {
@@ -110,11 +110,13 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{
   personalizationScore?: number;
   qualityScore?: number;
   qualityPassed?: boolean;
+  qualityFlagged?: boolean;
   dataSource?: string;
   profileIncomplete?: boolean;
   isGenericEmail?: boolean;
   greetingIsFallback?: boolean;
-  fallbackReason?: string;      // why the AI was not used — shown to user
+  fallbackReason?: string;
+  needsFirstName?: boolean;        // true when no usable name — caller should ask user to fix
 }> {
   const { lead, userId, emailIndex = 0 } = params;
 
@@ -131,8 +133,6 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{
   );
 
   // ── 2. AI provider — load from ai_settings ──────────────────────────────
-  // IMPORTANT: We check is_active=true but NOT is_connected — "is_connected" is set
-  // by a mock key-length test that many users skip. A saved active key is enough to try.
   let aiProvider: { provider: string; api_key: string; active_model: string } | null = null;
   let aiDiagnostic = 'no_provider';
   try {
@@ -158,11 +158,11 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{
     aiDiagnostic = `ai_settings query failed: ${e?.message}`;
   }
 
-  // ── 3. Resolve contact name — contact field first, then email prefix ──────
+  // ── 3. Resolve contact name ───────────────────────────────────────────────
   const { name: resolvedName } = extractFirstName(lead.contact_name, lead.email);
-  const effectiveContactName = resolvedName;
-  const genericEmail = isGenericEmailAddress(lead.email);
-  const nameIsFallback = !resolvedName;
+  const effectiveContactName = resolvedName && isUsableFirstName(resolvedName) ? resolvedName : null;
+  const genericEmail   = isGenericEmailAddress(lead.email);
+  const nameIsFallback = !effectiveContactName;
 
   // ── 4. Research prospect ─────────────────────────────────────────────────
   const researchParams = {
@@ -186,9 +186,9 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{
   signals.signOff      = signOff;
   signals.isGenericEmail = genericEmail;
 
-  // Re-build greeting now that we have the actual lead email for prefix extraction
+  // Re-build greeting with the actual name/email from the lead
   const { buildGreeting: buildGreetingFn } = await import('./prospect-researcher');
-  signals.greeting = buildGreetingFn(effectiveContactName, lead.email);
+  signals.greeting = buildGreetingFn(effectiveContactName, lead.email, cleanedCompanyName);
 
   // ── 5. Generate ──────────────────────────────────────────────────────────
   const result = await buildPersonalizedEmail(
@@ -214,11 +214,12 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{
     personalizationScore: result.personalizationScore,
     qualityScore:         result.qualityScore,
     qualityPassed:        result.qualityPassed,
+    qualityFlagged:       result.qualityFlagged,
     dataSource:           result.dataSource,
     profileIncomplete:    !profileComplete,
     isGenericEmail:       genericEmail,
     greetingIsFallback:   nameIsFallback,
-    fallbackReason:       result.model === 'template' ? (aiProvider ? `AI output scored below threshold` : aiDiagnostic) : undefined,
+    fallbackReason:       result.model === 'template' ? (aiProvider ? `AI output scored below 85% threshold after 2 attempts` : aiDiagnostic) : undefined,
   };
 }
 

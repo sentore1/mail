@@ -12,7 +12,7 @@
 import { NextRequest }         from 'next/server';
 import { createClient }        from '../../../../supabase/server';
 import { createServiceClient } from '../../../../supabase/service';
-import { researchProspectSync, isGenericEmailAddress, extractFirstName, cleanCompanyName, getNicheProfile } from '@/utils/prospect-researcher';
+import { researchProspectSync, isGenericEmailAddress, extractFirstName, cleanCompanyName, isUsableFirstName, buildGuaranteedEmail } from '@/utils/prospect-researcher';
 import { buildPersonalizedEmail } from '@/utils/personalized-email-builder';
 
 export const runtime    = 'nodejs';
@@ -44,6 +44,47 @@ function isJunk(name: string): boolean {
   const l = name.toLowerCase().trim();
   return /^(list of|top \d+|best \d+|\d+ best|businesses in .+\|)/.test(l)
     || /wikipedia$/.test(l) || /\.com$/.test(l) || /^https?:\/\//.test(l) || l.length > 80;
+}
+
+// ─── Fake / test contact detector ────────────────────────────────────────────
+// ─── Fake / test contact detector ────────────────────────────────────────────
+// Returns a rejection reason string if the lead should be skipped, else null.
+
+const FAKE_COMPANY_NAMES = new Set([
+  'default', 'test', 'n/a', 'na', 'untitled', 'unknown', 'sample', 'demo',
+  'example', 'company', 'business', 'placeholder', 'your company', 'none',
+  'null', 'undefined',
+]);
+
+const FAKE_EMAIL_PREFIXES = new Set([
+  'test', 'testing', 'fake', 'dummy', 'sample', 'demo', 'noreply', 'no-reply',
+  'mci', 'ims', 'admin123', 'user', 'user1', 'webmaster',
+]);
+
+const FAKE_EMAIL_DOMAINS = ['test.com', 'example.com', 'localhost', 'test.org',
+  'xyz.com', 'fake.com', 'mailtest.com', 'test.net'];
+
+function detectFakeContact(lead: {
+  company_name: string;
+  email: string | null;
+}): string | null {
+  const cn = lead.company_name?.trim().toLowerCase().replace(/[^a-z0-9\s]/g, '') ?? '';
+
+  if (!cn || cn.length < 2) return 'Company name is blank or too short';
+  if (FAKE_COMPANY_NAMES.has(cn)) return `"${lead.company_name}" is not a real company name`;
+
+  if (lead.email) {
+    const lower = lead.email.toLowerCase();
+    const [prefix = '', domain = ''] = lower.split('@');
+    if (FAKE_EMAIL_DOMAINS.some(d => domain === d || domain.endsWith('.' + d)))
+      return `Email domain "${domain}" is a test domain`;
+    if (FAKE_EMAIL_PREFIXES.has(prefix))
+      return `Email prefix "${prefix}" is a test or system address`;
+    if (/\btest\b/.test(prefix))
+      return `Email prefix "${prefix}" contains "test"`;
+  }
+
+  return null;
 }
 
 export async function POST(request: NextRequest) {
@@ -245,6 +286,19 @@ export async function POST(request: NextRequest) {
 
         const name = nameResult.cleaned;
 
+        // ── Fake/test contact gate ───────────────────────────────────────────
+        const fakeReason = detectFakeContact({ company_name: name, email: lead.email });
+        if (fakeReason) {
+          done++;
+          send('skipped', {
+            company_name: lead.company_name,
+            reason: fakeReason,
+            done,
+            total: leads.length,
+          });
+          continue;
+        }
+
         try {
           // Resolve contact name from contact_name field or email prefix
           const { name: resolvedContactName } = extractFirstName(lead.contact_name, lead.email);
@@ -267,13 +321,13 @@ export async function POST(request: NextRequest) {
           signals.isGenericEmail = genericEmail;
 
           // Re-build greeting with the actual lead email so prefix extraction works
-          if (resolvedContactName) {
+          if (resolvedContactName && isUsableFirstName(resolvedContactName)) {
             signals.greeting = `Hi ${resolvedContactName},`;
           } else if (lead.email && !genericEmail) {
             const { name: emailName } = extractFirstName(null, lead.email);
-            signals.greeting = emailName ? `Hi ${emailName},` : 'Hi there,';
+            signals.greeting = (emailName && isUsableFirstName(emailName)) ? `Hi ${emailName},` : 'Dear Sir/Madam,';
           } else {
-            signals.greeting = 'Hi there,';
+            signals.greeting = 'Dear Sir/Madam,';
           }
 
           console.log(`[bulk-gen] Generating for "${name}" | ai=${!!aiProvider} | greeting="${signals.greeting}" | niche=${lead.niche}`);
@@ -301,6 +355,7 @@ export async function POST(request: NextRequest) {
               body:               result.body,
               model:              result.model,
               isFallback:         result.model === 'template',
+              qualityFlagged:     result.qualityFlagged ?? false,
               isGenericEmail:     genericEmail,
               greetingIsFallback: !resolvedContactName,
               personalizationScore: result.personalizationScore,
@@ -316,31 +371,32 @@ export async function POST(request: NextRequest) {
           fallbackCount++;
           done++;
 
-          // Emergency fallback uses the niche-specific sentences — not a generic ERP blurb
-          const city      = (lead.location || 'your city').split(',')[0]?.trim() || 'your city';
+          // Emergency fallback — always use the guaranteed 4-line structure
           const { name: fbName } = extractFirstName(lead.contact_name, lead.email);
-          const fbGreeting = fbName ? `Hi ${fbName},` : 'Hi Sir/Madam,';
+          const fbIsUsable = fbName && isUsableFirstName(fbName);
           const genericEmail = isGenericEmailAddress(lead.email);
-          const nicheProfile = getNicheProfile(lead.niche);
-          const fbSubjectFn  = nicheProfile.subjectTemplates[0]!;
-          const fbSubject    = fbSubjectFn(name, city);
-          const fbFirstLine  = nicheProfile.firstLineTemplates[0]?.(name, city) ?? `${name} in ${city} — managing operations manually starts to cost more time than expected at this scale.`;
-          const fbProblem    = nicheProfile.problemAngles[0] ?? nicheProfile.problemSentence;
-          const fbPryro      = nicheProfile.pryroSentence;
-          const fbCta        = (nicheProfile.ctaOptions[0] ?? `Would a 10-minute call be worth it to see if Pryro fits how you run ${name}?`)
-            .replace(/\{company\}/g, name).replace(/\{city\}/g, city);
+
+          const guaranteed = buildGuaranteedEmail({
+            firstName:       fbIsUsable ? fbName! : 'Sir/Madam',
+            companyName:     name,
+            niche:           lead.niche,
+            emailIndex:      idx,
+            signOff:         profileSignOff,
+            useTeamGreeting: false,
+          });
 
           send('email', {
             email: {
               lead_id:            lead.id,
               lead_email:         lead.email,
               company_name:       name,
-              subject:            fbSubject,
-              body:               `${fbGreeting}\n\n${fbFirstLine}\n\n${fbProblem} ${fbPryro}\n\n${fbCta}\n\n${profileSignOff}`,
+              subject:            guaranteed.subject,
+              body:               guaranteed.body,
               model:              'template',
               isFallback:         true,
+              qualityFlagged:     false,
               isGenericEmail:     genericEmail,
-              greetingIsFallback: !fbName,
+              greetingIsFallback: !fbIsUsable,
               personalizationScore: genericEmail ? 30 : 45,
               qualityScore:       genericEmail ? 55 : 68,
               dataSource:         'template',
