@@ -356,7 +356,6 @@ export type ActiveModule =
   | 'ai-settings'
   | 'smtp-manager'
   | 'follow-up'
-  | 'campaigns'
   | 'analytics'
   | 'webhooks'
   | 'sequences'

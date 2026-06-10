@@ -91,12 +91,37 @@ export async function POST(req: NextRequest) {
       .order("sent_at", { ascending: true })
       .limit(10);
 
+    // Load sender profile — authoritative source for sender name and phone
+    const { data: senderProfile } = await serviceClient
+      .from('sender_profiles')
+      .select('full_name, phone, job_title')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
     // Get user follow-up settings
     const { data: settings } = await serviceClient
       .from("followup_settings")
       .select("*")
       .eq("user_id", user.id)
       .single();
+
+    // Sender name priority: overrideContext > sender_profiles > SMTP account > fallback
+    let resolvedSenderName = overrideContext?.senderName || senderProfile?.full_name || '';
+    let resolvedSenderPhone = overrideContext?.senderPhone || senderProfile?.phone || '';
+
+    // Last resort: pull from SMTP account that sent the original email
+    if (!resolvedSenderName && (sentEmail as any).smtp_account_id) {
+      const { data: smtpAccount } = await serviceClient
+        .from('smtp_accounts')
+        .select('sender_name, email')
+        .eq('id', (sentEmail as any).smtp_account_id)
+        .single();
+      if (smtpAccount) {
+        resolvedSenderName = smtpAccount.sender_name ||
+          smtpAccount.email.split('@')[0].replace(/[._\-]/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+      }
+    }
+    if (!resolvedSenderName) resolvedSenderName = 'Sales Team';
 
     const context: FollowUpContext = {
       companyName: lead?.company_name || "there",
@@ -111,16 +136,13 @@ export async function POST(req: NextRequest) {
       openCount: lead?.open_count || 0,
       clickCount: lead?.click_count || 0,
       hasReplied: false,
-      yourCompany: settings?.your_company || overrideContext?.yourCompany || "",
-      yourService: settings?.your_service || overrideContext?.yourService || "",
-      senderName: overrideContext?.senderName || settings?.your_company || "",
-      senderPhone: overrideContext?.senderPhone || undefined,
+      yourCompany: "Pryro",
+      yourService: settings?.your_service || "ERP platform",
+      senderName: resolvedSenderName,
+      senderPhone: resolvedSenderPhone,
       contactName: lead?.contact_name || lead?.owner_name || undefined,
       style: style as FollowUpStyle | undefined,
       tone: tone as FollowUpTone | undefined,
-      ...overrideContext,
-      // Ensure leadEmail is always available for name derivation
-      leadEmail: lead?.email || undefined,
     } as FollowUpContext & { leadEmail?: string };
 
     // Get decision engine recommendation

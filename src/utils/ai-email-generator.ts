@@ -54,13 +54,7 @@ async function resolveSenderProfile(
       const complete = !!data.is_complete;
       const phone    = data.phone || '';
 
-      // Full professional footer (Q4):
-      //   Best regards,
-      //
-      //   Alice UMUBYEYI
-      //   Executive Sales
-      //   Pryro
-      //   0790038006
+      // Multi-line professional footer
       const footerLines = ['Best regards,', ''];
       footerLines.push(data.full_name);
       if (data.job_title)    footerLines.push(data.job_title);

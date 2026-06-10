@@ -193,13 +193,17 @@ function wordCount(text: string): number {
 function ctaType(body: string): 'missing' | 'hard' | 'soft' {
   const last300 = body.split('\n').filter(l => l.trim()).slice(-5).join(' ').toLowerCase();
   const softPatterns = [
+    /open to seeing/i,
+    /worth a quick look/i,
+    /does this sound familiar/i,
+    /does this match/i,
     /would (it|a|this) (be|make) (worth|sense)/i,
     /would a 10 minute call/i,
     /show you how/i,
     /is this something/i,
     /would you be open/i,
     /are you open/i,
-    /worth a (call|chat|10 min)/i,
+    /worth a (call|chat|10 min|look)/i,
     /would it make sense/i,
     /is .{3,40} something your/i,
   ];
@@ -247,11 +251,10 @@ function personalizationScore(subject: string, body: string, companyName: string
 }
 
 function signOffType(body: string): 'professional' | 'casual' | 'missing' {
-  // NEW professional footer starts with "Best regards," followed by name on next line
+  // Multi-line professional footer starts with "Best regards,"
   if (/best regards,\s*\n\s*\n?\s*\S+/i.test(body)) return 'professional';
-  // Old casual style
-  if (/from pryro|— pryro|\npryro/i.test(body)) return 'professional';
-  // Bad formal closings that have no name (just a closing phrase alone)
+  // One-line fallback also acceptable
+  if (/ — Pryro/i.test(body) || /from pryro|\npryro/i.test(body)) return 'professional';
   if (/warm regards\s*$|yours (faithfully|sincerely)\s*$|best wishes\s*$/im.test(body)) return 'missing';
   return 'missing';
 }
