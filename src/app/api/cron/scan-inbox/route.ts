@@ -4,8 +4,8 @@
  * Scans all user inboxes via IMAP to detect replies.
  * Schedule: every 5 minutes
  *
- * Vercel cron:
- * { "path": "/api/cron/scan-inbox", "schedule": "*/5 * * * *" }
+ * Vercel cron (Hobby plan — daily only):
+ * { "path": "/api/cron/scan-inbox", "schedule": "0 9 * * *" }
  */
 
 import { NextRequest, NextResponse } from "next/server";
