@@ -309,7 +309,7 @@ Configure in `vercel.json`:
 {
   "crons": [{
     "path": "/api/cron/process-followups",
-    "schedule": "*/10 * * * *"  // Every 10 minutes
+    "schedule": "0 8 * * *"  // Every 10 minutes
   }]
 }
 ```
@@ -349,7 +349,7 @@ Authorization: Bearer {CRON_SECRET}
 ```json
 {
   "path": "/api/cron/scan-inbox",
-  "schedule": "*/5 * * * *"  // Every 5 minutes
+  "schedule": "0 9 * * *"  // Every 5 minutes
 }
 ```
 

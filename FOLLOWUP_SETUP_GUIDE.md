@@ -50,7 +50,7 @@ The `vercel.json` file has already been created in your project root with:
     },
     {
       "path": "/api/inbox/check",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 10 * * *"
     }
   ]
 }

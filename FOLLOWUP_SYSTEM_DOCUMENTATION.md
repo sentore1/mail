@@ -413,7 +413,7 @@ Sales Team
     },
     {
       "path": "/api/inbox/check",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 10 * * *"
     }
   ]
 }
