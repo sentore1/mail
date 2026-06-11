@@ -1,4 +1,4 @@
-﻿/** @type {import('next').NextConfig} */
+/** @type {import('next').NextConfig} */
 
 const nextConfig = {
   images: {
@@ -10,25 +10,11 @@ const nextConfig = {
     ],
   },
 
-  // Puppeteer and nodemailer use Node.js APIs not available in Edge runtime
-  // Mark them as server-only so Next.js doesn't try to bundle them for the browser
+  // Puppeteer, nodemailer, imapflow use Node.js APIs — keep them server-side only
   serverExternalPackages: ['puppeteer', 'puppeteer-core', 'nodemailer', 'imapflow'],
 
-  // Webpack config — suppress warnings from server-only packages
-  webpack: (config, { isServer }) => {
-    if (!isServer) {
-      // Don't bundle these on the client side
-      config.resolve.fallback = {
-        ...config.resolve.fallback,
-        net: false,
-        tls: false,
-        fs: false,
-        dns: false,
-        child_process: false,
-      };
-    }
-    return config;
-  },
+  // Turbopack config (Next.js 16 default bundler)
+  turbopack: {},
 };
 
 module.exports = nextConfig;
