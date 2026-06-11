@@ -1,14 +1,4 @@
 {
-  "crons": [
-    {
-      "path": "/api/cron/process-followups",
-      "schedule": "0 8 * * *"
-    },
-    {
-      "path": "/api/cron/scan-inbox",
-      "schedule": "0 9 * * *"
-    }
-  ],
   "functions": {
     "src/app/api/scrape-stream/route.ts": {
       "maxDuration": 300
