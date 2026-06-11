@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/scan-inbox",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 9 * * *"
     }
   ],
   "functions": {
