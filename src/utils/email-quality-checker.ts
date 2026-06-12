@@ -37,7 +37,7 @@ export interface QualityReport {
 // Two tiers: HARD (block sending), SOFT (warn only)
 
 const HARD_BANNED: string[] = [
-  // Generic cold email openers — Q9
+  // Generic cold email openers
   'i hope this email finds you well',
   'i hope you are doing well',
   "i hope you're doing well",
@@ -47,19 +47,14 @@ const HARD_BANNED: string[] = [
   'i wanted to connect',
   'i am writing to',
   'i am contacting you',
-  'i am getting in touch',
   'just following up',
   'touching base',
   'circling back',
-  'checking in',
-  'as per my last email',
-  'per my last email',
   'to whom it may concern',
   'dear sir or madam',
+  'dear sir/madam',
   'please find attached',
   'kindly revert',
-  'kindly get back',
-  'do the needful',
   // Hype / ad-speak
   'cutting-edge',
   'revolutionary',
@@ -67,7 +62,6 @@ const HARD_BANNED: string[] = [
   'game changer',
   'disruptive',
   'synergy',
-  'leverage',        // verb usage in sales copy
   'best-in-class',
   'world-class',
   'industry-leading',
@@ -80,15 +74,12 @@ const HARD_BANNED: string[] = [
   'robust platform',
   'next-level',
   'unlock potential',
-  'drive growth',
-  'scale your business',
   'take your business to the next level',
   // Generic "we help" framing
   'we help companies like yours',
   'we help businesses like yours',
   'companies like yours',
   'businesses like yours',
-  'organizations like yours',
   // Spam triggers
   'limited time offer',
   'act now',
@@ -100,18 +91,20 @@ const HARD_BANNED: string[] = [
   'special promotion',
   'exclusive offer',
   'last chance',
-  'only a few spots',
-  // Commission / referral — kept for reference but not banned (appears in our emails)
+  // Weak CTAs
   'schedule a demo',
   'book a demo',
   'pleased to inform',
   'excited to share',
-  // Formal closings that make it read like a newsletter
+  'does this match what your team deals with',
+  'does this sound familiar',
+  // Formal closings
   'warm regards',
   'yours faithfully',
   'yours sincerely',
   'best wishes',
-  // Website-quoting openers — robotic, low open rate
+  'best regards',
+  // Website-quoting openers
   'i was looking at your website',
   'i came across your website',
   "i came across your site",
@@ -122,12 +115,6 @@ const HARD_BANNED: string[] = [
   'your website mentions',
   'i visited your website',
   'i found on your website',
-  'i was looking at the website',
-  'i came across the website',
-  "i'm looking at your website",
-  'after looking at your website',
-  'after visiting your website',
-  'while looking at your website',
 ];
 
 const SOFT_BANNED: string[] = [
@@ -192,25 +179,30 @@ function wordCount(text: string): number {
 
 function ctaType(body: string): 'missing' | 'hard' | 'soft' {
   const last300 = body.split('\n').filter(l => l.trim()).slice(-5).join(' ').toLowerCase();
-  const softPatterns = [
+  // Valid CTA patterns — must be a specific 10-minute call ask with company name
+  const validPatterns = [
+    /would a 10.?minute call/i,
+    /can we get 10 minutes/i,
+    /10 min(ute)? call.*make sense/i,
+    /show you how pryro could work for/i,
+    /worth it to see if this fits/i,
+  ];
+  if (validPatterns.some(p => p.test(last300))) return 'soft';
+  // Weak patterns — still pass the type check but will warn
+  const weakPatterns = [
     /open to seeing/i,
     /worth a quick look/i,
-    /does this sound familiar/i,
-    /does this match/i,
     /would (it|a|this) (be|make) (worth|sense)/i,
-    /would a 10 minute call/i,
-    /show you how/i,
-    /is this something/i,
     /would you be open/i,
     /are you open/i,
-    /worth a (call|chat|10 min|look)/i,
+    /is this something/i,
+    /worth a (call|chat|look)/i,
     /would it make sense/i,
-    /is .{3,40} something your/i,
   ];
-  if (softPatterns.some(p => p.test(last300))) return 'soft';
+  if (weakPatterns.some(p => p.test(last300))) return 'hard'; // treat as hard — needs fixing
   const hardPatterns = [/schedule a/i, /book a/i, /let's set up/i, /let me know if/i];
   if (hardPatterns.some(p => p.test(last300))) return 'hard';
-  if (last300.includes('?')) return 'soft'; // any question at end = acceptable
+  if (last300.includes('?')) return 'hard'; // any question at end = still weak
   return 'missing';
 }
 
@@ -251,10 +243,11 @@ function personalizationScore(subject: string, body: string, companyName: string
 }
 
 function signOffType(body: string): 'professional' | 'casual' | 'missing' {
-  // Multi-line professional footer starts with "Best regards,"
-  if (/best regards,\s*\n\s*\n?\s*\S+/i.test(body)) return 'professional';
-  // One-line fallback also acceptable
-  if (/ — Pryro/i.test(body) || /from pryro|\npryro/i.test(body)) return 'professional';
+  // Multi-line footer: last non-empty line contains a name or phone (not a question)
+  const lines = body.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const lastLine = lines[lines.length - 1] ?? '';
+  // Valid footer: last line looks like a name, email, or phone — not a question or CTA
+  if (/\w/.test(lastLine) && !lastLine.endsWith('?')) return 'professional';
   if (/warm regards\s*$|yours (faithfully|sincerely)\s*$|best wishes\s*$/im.test(body)) return 'missing';
   return 'missing';
 }
@@ -277,11 +270,21 @@ export function checkEmailQuality(params: {
   // Skip greeting line to find the real observation opener
   const nonEmptyLines = body.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   const firstLine = nonEmptyLines[0] ?? '';
-  // Detect greeting patterns: "Hi [Name]," / "Hello [Name]," / "Dear Sir/Madam,"
-  const isGreetingLine = /^hi (there|[a-z]+),?$/i.test(firstLine)
-    || /^hello (there|[a-z]+),?$/i.test(firstLine)
-    || /^dear (sir|madam|sir\/madam),?$/i.test(firstLine);
+  // Detect greeting patterns: "Hi [Name]," / "Hi [Company] team," / "Hello [Name],"
+  const isGreetingLine = /^hi (there|[a-z].{0,30}),?$/i.test(firstLine)
+    || /^hello (there|[a-z]+),?$/i.test(firstLine);
   const observationLine = isGreetingLine ? (nonEmptyLines[1] ?? '') : firstLine;
+
+  // ── 0. Mandatory greeting check (hard block) ──────────────────────────────
+  // Every email MUST start with "Hi [Name]," or "Hi [Company] team,"
+  if (!isGreetingLine) {
+    flags.push({
+      type: 'generic_opener',
+      severity: 'block',
+      message: `Email does not start with a greeting. First line: "${firstLine.slice(0, 80)}"`,
+      fix: `The very first line of every email must be "Hi [Name]," or "Hi [Company] team," before any other content.`,
+    });
+  }
 
   // ── 1. Banned phrases (hard block) ───────────────────────────────────────
   for (const phrase of HARD_BANNED) {
@@ -348,15 +351,15 @@ export function checkEmailQuality(params: {
       type: 'cta',
       severity: 'block',
       message: 'No call-to-action found.',
-      fix: `End with one soft question: "Would a 10-minute call be worth it to see if this fits how you run [Company]?"`,
+      fix: `End with a specific 10-minute call ask: "Would a 10-minute call make sense to show you how Pryro could work for [Company]?"`,
     });
   }
   if (cta === 'hard') {
     flags.push({
       type: 'cta',
       severity: 'warn',
-      message: 'CTA is a booking request, not a soft question.',
-      fix: `Replace with a question: "Would it make sense to have a quick call?" rather than "Let's schedule a call."`,
+      message: 'CTA is weak or vague — not a specific 10-minute call ask.',
+      fix: `Replace with: "Would a 10-minute call make sense to show you how Pryro could work for [Company]?" Never use "does this match", "open to seeing", or weak permission questions.`,
     });
   }
 
@@ -385,8 +388,8 @@ export function checkEmailQuality(params: {
     flags.push({
       type: 'signoff',
       severity: 'warn',
-      message: 'Email has no recognisable sign-off.',
-      fix: `End with the professional footer:\nBest regards,\n\n[Full Name]\n[Job Title]\n[Company]\n[Phone]`,
+      message: 'Email has no valid one-line signature.',
+      fix: `End with one clean line: "Alice Umubyeyi — Pryro | 0790038006". No "Best regards," block.`,
     });
   }
 

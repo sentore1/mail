@@ -33,7 +33,7 @@ export default function EmailWriterModule({ userId, preloadedLead, onGoToProfile
 
   // ── Sender profile — hardcoded as Pryro ─────────────────────────────────
   const yourCompany = "Pryro";
-  const yourService = "ERP platform that replaces Excel-based operations and manual workflows with a unified system — we offer a 20–30% commission for every successfully referred client";
+  const yourService = "ERP platform that replaces Excel-based operations and manual workflows with a unified system";
 
   // ── Single mode ───────────────────────────────────────────────────────────
   const [selectedLead, setSelectedLead]       = useState<Lead | null>(preloadedLead || null);

@@ -118,10 +118,12 @@ export async function POST(request: NextRequest) {
 
   const serviceSupabase = createServiceClient();
 
-  // ── Sender profile — load full profile from DB ───────────────────────────
-  let senderName  = bodySenderName || '';
-  let senderPhone = bodySenderPhone || '';
-  let profileSignOff = '';   // full footer built from DB profile
+  // ── Sender profile — load ALL fields from DB for multi-line footer ──────
+  let senderName    = bodySenderName || '';
+  let senderPhone   = bodySenderPhone || '';
+  let senderTitle   = '';
+  let senderCompany = 'Pryro';
+  let senderEmail   = '';
 
   try {
     const { data } = await serviceSupabase
@@ -131,16 +133,11 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     if (data?.full_name) {
-      senderName  = data.full_name;
-      senderPhone = data.phone || bodySenderPhone || '';
-      // Multi-line professional footer
-      const footerLines = ['Best regards,', ''];
-      footerLines.push(data.full_name);
-      if (data.job_title)    footerLines.push(data.job_title);
-      if (data.company_name) footerLines.push(data.company_name);
-      if (data.phone)        footerLines.push(data.phone);
-      if (data.email)        footerLines.push(data.email);
-      profileSignOff = footerLines.join('\n');
+      senderName    = data.full_name;
+      senderPhone   = data.phone        || bodySenderPhone || '';
+      senderTitle   = data.job_title    || '';
+      senderCompany = data.company_name || 'Pryro';
+      senderEmail   = data.email        || '';
     }
   } catch { /* fall through */ }
 
@@ -162,13 +159,6 @@ export async function POST(request: NextRequest) {
     } catch { /* use default */ }
   }
   if (!senderName) senderName = 'Sales Team';
-
-  // Build multi-line footer if profile load failed
-  if (!profileSignOff) {
-    profileSignOff = senderPhone
-      ? `Best regards,\n\n${senderName}\nPryro\n${senderPhone}`
-      : `Best regards,\n\n${senderName}\nPryro`;
-  }
 
   // ── AI provider — load from ai_settings ─────────────────────────────────
   // Do NOT filter by is_connected — that field is set by a mock test many users skip.
@@ -309,17 +299,19 @@ export async function POST(request: NextRequest) {
           });
 
           // Stamp correct values from lead data
-          signals.signOff        = profileSignOff;
           signals.isGenericEmail = genericEmail;
 
-          // Re-build greeting with the actual lead email so prefix extraction works
+          // Build greeting: real name if available, otherwise "Hi there,"
+          const cleanCo = name.replace(/\b(Ltd|Limited|Inc|LLC|LLP|PLC|Corp|Pty|Pvt)\b\.?\s*/gi, '').trim();
           if (resolvedContactName && isUsableFirstName(resolvedContactName)) {
             signals.greeting = `Hi ${resolvedContactName},`;
           } else if (lead.email && !genericEmail) {
             const { name: emailName } = extractFirstName(null, lead.email);
-            signals.greeting = (emailName && isUsableFirstName(emailName)) ? `Hi ${emailName},` : 'Dear Sir/Madam,';
+            signals.greeting = (emailName && isUsableFirstName(emailName))
+              ? `Hi ${emailName},`
+              : 'Hi there,';
           } else {
-            signals.greeting = 'Dear Sir/Madam,';
+            signals.greeting = 'Hi there,';
           }
 
           console.log(`[bulk-gen] Generating for "${name}" | ai=${!!aiProvider} | greeting="${signals.greeting}" | niche=${lead.niche}`);
@@ -331,7 +323,21 @@ export async function POST(request: NextRequest) {
           }
 
           const result = await buildPersonalizedEmail(
-            { companyName: name, niche: lead.niche, location: lead.location, companyContext: lead.company_context, website: lead.website, signals, senderName, senderPhone, customPainPoint, emailIndex: idx },
+            {
+              companyName:    name,
+              niche:          lead.niche,
+              location:       lead.location,
+              companyContext: lead.company_context,
+              website:        lead.website,
+              signals,
+              senderName,
+              senderTitle,
+              senderCompany,
+              senderPhone,
+              senderEmail,
+              customPainPoint,
+              emailIndex: idx,
+            },
             aiProvider,
           );
 
@@ -363,18 +369,22 @@ export async function POST(request: NextRequest) {
           fallbackCount++;
           done++;
 
-          // Emergency fallback — always use the guaranteed 4-line structure
+          // Emergency fallback — guaranteed email structure
           const { name: fbName } = extractFirstName(lead.contact_name, lead.email);
           const fbIsUsable = fbName && isUsableFirstName(fbName);
           const genericEmail = isGenericEmailAddress(lead.email);
 
           const guaranteed = buildGuaranteedEmail({
-            firstName:       fbIsUsable ? fbName! : 'Sir/Madam',
+            firstName:       fbIsUsable ? fbName! : '',
             companyName:     name,
             niche:           lead.niche,
+            location:        lead.location,
             emailIndex:      idx,
-            signOff:         profileSignOff,
-            useTeamGreeting: false,
+            senderName,
+            senderTitle,
+            senderCompany,
+            senderPhone,
+            senderEmail,
           });
 
           send('email', {

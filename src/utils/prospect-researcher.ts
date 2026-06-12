@@ -568,8 +568,8 @@ const SECTOR_SUBJECTS: Record<string, Array<(company: string) => string>> = {
     (c) => `Is term-end reporting still a manual process at ${c}?`,
   ],
   generic: [
-    (c) => `Are HR and finance still separate tools at ${c}?`,
-    (c) => `Is ${c} still running operations across multiple tools?`,
+    (c) => `Is ${c} still running ops across multiple tools?`,
+    (c) => `Are HR and finance still separate at ${c}?`,
     (c) => `How does ${c} keep ops data in one place?`,
   ],
 };
@@ -590,78 +590,78 @@ export function buildGuaranteedEmail(params: {
   firstName: string;
   companyName: string;
   niche: string | null;
+  location?: string | null;
   emailIndex: number;
-  signOff: string;
-  useTeamGreeting?: boolean;
+  senderName: string;
+  senderTitle?: string;
+  senderCompany?: string;
+  senderPhone?: string;
+  senderEmail?: string;
 }): { subject: string; body: string } {
-  const { firstName, companyName, niche, emailIndex, signOff, useTeamGreeting } = params;
-
-  const subject  = getSectorSubject(niche, companyName, emailIndex);
-  const greeting = firstName === 'Sir/Madam' || useTeamGreeting ? 'Dear Sir/Madam,' : `Hi ${firstName},`;
-
-  // Sector-specific observation (peer-level industry statement)
+  const { firstName, companyName, niche, emailIndex } = params;
+  const loc = (params.location || 'your area').split(',')[0]?.trim() || 'your area';
+  const subject = getSectorSubject(niche, companyName, emailIndex);
   const nicheKey = detectNicheKey(niche);
-  const observations: Record<string, string[]> = {
-    pharmacy:     ['Most pharmacy teams say drug expiry write-offs are invisible until they hit the monthly count.'],
-    healthcare:   ['Most healthcare finance teams say getting payroll and patient billing to match at month-end still takes days of manual work.'],
-    hospital:     ['Most hospital finance leads say tracking real-time department spend against approved budgets is nearly impossible due to payroll lag.'],
-    hotel:        ['Most hospitality ops leads say month-end reconciliation still takes days because scheduling, billing, and finance never sync automatically.'],
-    lodge:        ['Most lodge operators say knowing their real occupancy margin before month-end is difficult when bookings and accounts are separate.'],
-    travel:       ['Most travel agency owners say they only find out their actual margin on a booking after the trip ends.'],
-    restaurant:   ['Most restaurant operators say food cost is only visible at month-end. By which point the margin problem has already happened.'],
-    retail:       ['Most retail ops managers say stockouts are only caught when a shelf is empty. By then the sale is already gone.'],
-    ngo:          ['Most NGO finance leads say pulling together grant budget versus actual spend for a donor report still takes the better part of a week.'],
-    construction: ['Most construction finance managers say cost overruns are only visible in the P&L after the margin is already gone.'],
-    logistics:    ['Most logistics ops leads say matching driver payroll to trip logs at month-end still takes days of manual cross-referencing.'],
-    school:       ['Most school bursars say term-end reconciliation between fee collection and staff payroll still takes the better part of two weeks.'],
-    generic:      ['Most operations leads say the hours lost to moving data between finance, HR, and inventory systems are invisible until they add up at quarter-end.'],
-  };
-  const outcomes: Record<string, string[]> = {
-    pharmacy:     ['We connect stock, billing, and payroll into one view so your team catches expiry issues before they become write-offs.'],
-    healthcare:   ['We connect HR and patient billing into one live view so your admin team stops reconciling manually every month-end.'],
-    hospital:     ['We connect HR payroll and department budgets so your finance team sees real-time spend against approved limits, not last month\'s.'],
-    hotel:        ['We connect scheduling, vendor billing, and financials so month-end reconciliation goes from five days to same-day.'],
-    lodge:        ['We connect bookings, staff costs, and accounts so your real occupancy margin is visible before month-end, not after.'],
-    travel:       ['We connect bookings, commissions, and supplier costs so your margin on every deal is visible before the trip ends.'],
-    restaurant:   ['We connect kitchen stock and daily sales so food cost is a live number your chef sees every morning, not a month-end surprise.'],
-    retail:       ['We connect inventory and reorder points to sales data so stockouts trigger an alert, not an empty shelf.'],
-    ngo:          ['We connect grant budgets, field expenses, and payroll so your donor report takes hours instead of a week.'],
-    construction: ['We connect project budgets, contractor payroll, and procurement so cost overruns show up before they show up in the P&L.'],
-    logistics:    ['We connect driver payroll, trip logs, and billing so month-end reconciliation goes from days to hours.'],
-    school:       ['We connect fee collection and staff payroll so your bursar\'s numbers balance automatically instead of needing two weeks of chasing.'],
-    generic:      ['We connect finance, inventory, and HR into one live view so your team stops moving data between tools and starts running the business.'],
-  };
-  const ctas: Record<string, string> = {
-    pharmacy: 'Open to seeing the 2-minute workflow we use to fix this?',
-    healthcare: 'Open to seeing the 2-minute workflow we use to fix this?',
-    hospital: 'Open to seeing how we do it for a hospital your size?',
-    hotel: 'Open to a 2-minute look at how it works for a property your size?',
-    lodge: 'Open to seeing the 2-minute walkthrough we do for lodges?',
-    travel: 'Open to seeing how we surface margin before a trip ends?',
-    restaurant: 'Open to seeing the live food cost view your chef would use daily?',
-    retail: 'Open to seeing how the stockout alert works in practice?',
-    ngo: 'Open to seeing how the donor report pulls together in one click?',
-    construction: 'Open to seeing how the real-time budget view works on a live project?',
-    logistics: 'Open to seeing how the reconciliation looks when it runs automatically?',
-    school: 'Open to seeing how the term-end reconciliation works when it\'s automated?',
-    generic: 'Open to seeing the 2-minute workflow we use to fix this?',
+
+  // Greeting: real name or "Hi there," — never junk company name
+  const hasName = firstName && firstName.length > 1 && firstName !== 'Sir/Madam';
+  const greeting = hasName ? `Hi ${firstName},` : 'Hi there,';
+
+  // Problem sentence — "[Company] in [Location], many [sector] businesses often deal with [pain]."
+  const problems: Record<string, string> = {
+    pharmacy:     `${companyName} in ${loc}, many pharmacy businesses often deal with drug expiry write-offs and billing errors that only surface at month-end because stock and invoicing run in separate systems.`,
+    healthcare:   `${companyName} in ${loc}, many healthcare businesses often deal with days of manual work every month reconciling staff payroll against patient billing because HR and finance run separately.`,
+    hospital:     `${companyName} in ${loc}, many hospital finance teams often deal with getting a live view of actual department spend being nearly impossible because HR payroll and procurement aren't connected.`,
+    hotel:        `${companyName} in ${loc}, many hospitality businesses often deal with month-end reconciliation taking three to five days because housekeeping rosters, vendor invoices, and payroll each live in a different system.`,
+    lodge:        `${companyName} in ${loc}, many lodge operators often deal with only finding out their real occupancy margin after month-end because bookings and accounts run in separate places.`,
+    travel:       `${companyName} in ${loc}, many travel agencies often deal with only knowing the real margin on a booking after the trip has ended because commissions and supplier costs live in spreadsheets.`,
+    restaurant:   `${companyName} in ${loc}, many restaurant businesses often deal with food cost only becoming visible at month-end because kitchen stock, supplier invoices, and daily sales aren't in the same system.`,
+    retail:       `${companyName} in ${loc}, many retail businesses often deal with stockouts only being caught when the shelf is already empty because inventory and reorder points aren't connected to live sales.`,
+    ngo:          `${companyName} in ${loc}, many NGO finance teams often deal with donor compliance reports taking the better part of a week because field expenses and grant budgets live in separate spreadsheets.`,
+    construction: `${companyName} in ${loc}, many construction businesses often deal with cost overruns only showing up in the P&L after the margin is already gone because project budgets and procurement run separately.`,
+    logistics:    `${companyName} in ${loc}, many logistics businesses often deal with month-end reconciliation taking days because driver payroll, trip logs, and client billing all live in separate places.`,
+    school:       `${companyName} in ${loc}, many schools often deal with bursar reconciliation taking two weeks every term because fee collection and staff payroll run in separate registers.`,
+    generic:      `${companyName} in ${loc}, many financial services businesses often deal with manual workflows and fragmented tools that slow teams down.`,
   };
 
-  const obs     = (observations[nicheKey] ?? observations['generic']!)[emailIndex % (observations[nicheKey]?.length ?? 1)]!;
-  const outcome = (outcomes[nicheKey]    ?? outcomes['generic']!)   [emailIndex % (outcomes[nicheKey]?.length    ?? 1)]!;
-  const cta     = ctas[nicheKey] ?? ctas['generic']!;
+  // Pryro sentence WITH commission embedded
+  const pryros: Record<string, string> = {
+    pharmacy:     'Pryro is an ERP that connects your drug stock, billing, and payroll into one live platform so expiry losses and billing errors surface before month-end and we offer a 20–30% commission for every successfully referred client.',
+    healthcare:   'Pryro is an ERP that connects HR attendance and patient billing into one platform so your admin team reconciles both from one screen instead of two separate systems and we offer a 20–30% commission for every successfully referred client.',
+    hospital:     "Pryro is an ERP that connects department budgets and HR payroll so your finance team sees live spend against approved limits — not last month's figures and we offer a 20–30% commission for every successfully referred client.",
+    hotel:        'Pryro is an ERP that connects staff scheduling, vendor billing, and financial management so month-end reconciliation drops from five days to same-day and we offer a 20–30% commission for every successfully referred client.',
+    lodge:        'Pryro is an ERP that connects bookings, staff costs, and accounts so your real occupancy margin is visible before month-end instead of after and we offer a 20–30% commission for every successfully referred client.',
+    travel:       'Pryro is an ERP that connects bookings, commissions, and supplier invoicing so your margin on every deal is visible before the trip ends and we offer a 20–30% commission for every successfully referred client.',
+    restaurant:   'Pryro is an ERP that connects kitchen stock and daily sales so food cost is a live number your team sees every morning — not a month-end surprise and we offer a 20–30% commission for every successfully referred client.',
+    retail:       'Pryro is an ERP that connects inventory, reorder points, and live sales so a stockout triggers an alert in the system — not an empty shelf in your store and we offer a 20–30% commission for every successfully referred client.',
+    ngo:          'Pryro is an ERP that connects grant budgets, field expenses, and payroll so donor compliance reports pull together in hours instead of a week and we offer a 20–30% commission for every successfully referred client.',
+    construction: 'Pryro is an ERP that connects project budgets, contractor payroll, and procurement so cost overruns show up before they show up in the P&L and we offer a 20–30% commission for every successfully referred client.',
+    logistics:    'Pryro is an ERP that connects driver payroll, trip logs, and client billing so month-end reconciliation drops from days to hours and we offer a 20–30% commission for every successfully referred client.',
+    school:       "Pryro is an ERP that connects fee collection and staff payroll so your bursar's numbers balance automatically — no two-week reconciliation sprint and we offer a 20–30% commission for every successfully referred client.",
+    generic:      'Pryro is an ERP that replaces those manual workflows and fragmented tools with one unified system for finance, inventory, HR, and operations and we offer a 20–30% commission for every successfully referred client.',
+  };
+
+  const problem = problems[nicheKey] ?? problems['generic']!;
+  const pryro   = pryros[nicheKey]   ?? pryros['generic']!;
+  const cta     = 'Would you be open to a 10-minute call to see if it is relevant?';
+
+  const footerLines: string[] = ['Best regards,'];
+  if (params.senderName)    footerLines.push(params.senderName);
+  if (params.senderTitle)   footerLines.push(params.senderTitle);
+  if (params.senderCompany) footerLines.push(params.senderCompany);
+  if (params.senderPhone)   footerLines.push(params.senderPhone);
+  if (params.senderEmail)   footerLines.push(params.senderEmail);
+  const footer = footerLines.join('\n');
 
   const body = `${greeting}
 
-${obs}
+${problem}
 
-${outcome}
-
-We also offer a 20-30% commission for every successfully referred client.
+${pryro}
 
 ${cta}
 
-${signOff}`;
+${footer}`;
 
   return { subject, body };
 }
@@ -671,10 +671,24 @@ const INVALID_COMPANY_NAMES = new Set([
   'untitled', 'n/a', 'na', 'test', 'example', 'sample', 'demo',
   'unknown', 'company', 'business', 'organization', 'organisation',
   'null', 'undefined', 'none', 'placeholder', 'your company',
+  // Error pages scraped as company names
+  'error', '404', '403', '500', '502', '503', '504',
+  '404 not found', 'not found', 'page not found',
+  'ooops', 'oops', 'oops error', 'ooops error',
+  'access denied', 'forbidden', '403 forbidden', '500 internal server error',
+  'bad gateway', 'service unavailable', 'gateway timeout',
+  // Generic page titles scraped as company names
+  'about', 'about us', 'home', 'home page', 'index',
+  'services', 'products', 'contact', 'contact us', 'contacts us',
+  'coming soon', 'under construction', 'maintenance',
+  'welcome', 'loading', 'redirect', 'login', 'sign in', 'sign up',
+  'privacy policy', 'terms of service', 'terms and conditions',
+  // Test / placeholder names
+  'test company', 'test business', 'my company', 'my business',
+  'your business', 'new company', 'company name',
   // Junk scraped names from the logs
-  'pain', 'skin', 'contacts us', 'contact us', 'appointments',
-  'medical assistance', 'list of medical facilities', 'mis/ur',
-  'about', 'home', 'index', 'services', 'products',
+  'pain', 'skin', 'appointments', 'medical assistance',
+  'list of medical facilities', 'mis/ur',
 ]);
 
 export interface CompanyNameResult {
@@ -703,20 +717,18 @@ export function cleanCompanyName(raw: string): CompanyNameResult {
   name = name.replace(/\s*\[[^\]]*\]\s*/g, ' ');
 
   // Strip legal suffixes — must be done BEFORE trailing junk stripping
-  // Order matters: strip multi-word first, then single-word
   name = name.replace(/\b(Private Limited|Pvt\.?\s*Ltd\.?|Public Limited Company)\b\.?\s*/gi, '');
   name = name.replace(/\b(Ltd|Limited|Inc|LLC|L\.L\.C|LLP|PLC|Corp|Corporation|Co\.?|NW|Pty|Pvt|S\.A|S\.A\.S|GmbH|B\.V)\b\.?\s*$/gi, '');
-  // Also strip if not at end (e.g. "Ltd t/a Something")
   name = name.replace(/\b(Ltd|Limited|Inc|LLC|LLP|PLC|Corp|Corporation|NW|Pty|Pvt)\b\.?\s*/gi, ' ');
 
   // Strip trailing junk
-  name = name.replace(/\s*[-–—|/]\s*$/, '');   // trailing dash, pipe, slash
-  name = name.replace(/\s*,\s*$/, '');           // trailing comma
-  name = name.replace(/\s*\.\s*$/, '');          // trailing dot (unless abbreviation)
-  name = name.replace(/[<>{}[\]]/g, '');         // brackets
+  name = name.replace(/\s*[-–—|/]\s*$/, '');
+  name = name.replace(/\s*,\s*$/, '');
+  name = name.replace(/\s*\.\s*$/, '');
+  name = name.replace(/[<>{}[\]]/g, '');
   name = name.replace(/\s+/g, ' ').trim();
 
-  // Check length
+  // ── Length checks ──────────────────────────────────────────────────────────
   if (name.length < 2) {
     return { cleaned: name, valid: false, reason: 'Name too short after cleaning' };
   }
@@ -724,28 +736,58 @@ export function cleanCompanyName(raw: string): CompanyNameResult {
     return { cleaned: name.slice(0, 100), valid: false, reason: 'Name too long — likely a description, not a company name' };
   }
 
-  // Check for obvious non-business names
+  // ── Error page patterns ────────────────────────────────────────────────────
+  // Catch "Ooops....Error 404", "404 Not Found", "Oops! Something went wrong" etc.
+  if (/\b(404|403|500|502|503|504)\b/.test(name)) {
+    return { cleaned: name, valid: false, reason: `"${name}" looks like an HTTP error page — not a company name` };
+  }
+  if (/^ooo*ps/i.test(name) || /\berror\b.*\d{3}/i.test(name) || /\d{3}\s*(error|not found)/i.test(name)) {
+    return { cleaned: name, valid: false, reason: `"${name}" looks like an error page — not a company name` };
+  }
+
+  // ── Multiple dots / ellipsis ───────────────────────────────────────────────
+  // "Ooops....Error" has 4+ consecutive dots — not a real company name
+  if (/\.{3,}/.test(name)) {
+    return { cleaned: name, valid: false, reason: `"${name}" contains ellipsis — likely scraped junk, not a company name` };
+  }
+
+  // ── Mostly non-letter characters ──────────────────────────────────────────
+  // Real company names are mostly letters. If >40% are special chars, skip.
+  const letters = (name.match(/[a-zA-ZÀ-ÖØ-öø-ÿ]/g) || []).length;
+  if (name.length > 4 && letters / name.length < 0.4) {
+    return { cleaned: name, valid: false, reason: `"${name}" has too few letters — likely scraped junk` };
+  }
+
+  // ── Known bad name list ────────────────────────────────────────────────────
   const lower = name.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
   if (INVALID_COMPANY_NAMES.has(lower)) {
     return { cleaned: name, valid: false, reason: `"${name}" is not a real business name` };
   }
+  // Also check if it starts with a known bad token
+  const firstWord = lower.split(/\s+/)[0] ?? '';
+  if (['oops', 'ooops', 'error', '404', '403', '500', 'oops'].includes(firstWord)) {
+    return { cleaned: name, valid: false, reason: `"${name}" starts with an error word — likely an error page` };
+  }
 
-  // Check for single character or just numbers
+  // ── Single character or just numbers ──────────────────────────────────────
   if (/^[a-z0-9]$/.test(lower)) {
     return { cleaned: name, valid: false, reason: 'Single character — not a valid company name' };
   }
-
-  // Names that start with a conjunction or connector — scraped from page nav
-  if (/^(&|and |or |the |a |an )/i.test(name.trim())) {
-    return { cleaned: name, valid: false, reason: 'Starts with a connector — likely scraped page navigation, not a company name' };
+  if (/^\d+$/.test(lower)) {
+    return { cleaned: name, valid: false, reason: 'All numbers — not a valid company name' };
   }
 
-  // Names that contain "list of" — directory pages, not companies
+  // ── Starts with a connector ────────────────────────────────────────────────
+  if (/^(&|and |or |the |a |an )/i.test(name.trim())) {
+    return { cleaned: name, valid: false, reason: 'Starts with a connector — likely page navigation, not a company name' };
+  }
+
+  // ── Directory / list pages ────────────────────────────────────────────────
   if (/\blist of\b/i.test(name)) {
     return { cleaned: name, valid: false, reason: '"list of" — this is a directory page, not a company name' };
   }
 
-  // Still contains HTML entities or URL fragments after cleaning
+  // ── Leftover HTML or URLs ─────────────────────────────────────────────────
   if (/&#|&[a-z]+;|https?:\/\//i.test(name)) {
     return { cleaned: name, valid: false, reason: 'Contains unclean HTML or URL fragments' };
   }
@@ -841,25 +883,24 @@ export function extractFirstName(
 }
 
 // ─── Greeting builder ────────────────────────────────────────────────────────
-// 3-tier priority — "Hi Sir/Madam" is NEVER used:
+// Priority:
+//   1. Real first name from contact_name or email prefix → "Hi [Name],"
+//   2. No usable name → "Hi there,"  (safe generic, never exposes junk company name)
 //
-//   Tier 1: usable first name from contact_name or email prefix  → "Hi [Name],"
-//   Tier 2: email exists but prefix is a generic word            → "Hi [CompanyName] team,"
-//   Tier 3: no name AND no email (or email prefix also unusable) → null (caller must block)
-//
-// companyName is required for the Tier-2 team fallback.
+// We deliberately do NOT use "Hi [Company] team," because the company name
+// could be scraped junk like "Ooops....Error 404". "Hi there," is always safe.
 
 export function buildGreeting(
   contactName?: string | null,
   email?: string | null,
   companyName?: string | null,
 ): string {
-  // Tier 1 — real name from contact field or email prefix
+  // Try real first name from contact field or email prefix
   const { name } = extractFirstName(contactName, email);
   if (name) return `Hi ${name},`;
 
-  // Tier 2 — no usable name found → Dear Sir/Madam (no company name)
-  return 'Dear Sir/Madam,';
+  // Safe generic fallback — never uses company name directly
+  return 'Hi there,';
 }
 
 /** True when no real first name was found (greeting used company team or "Hi there,") */

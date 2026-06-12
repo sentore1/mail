@@ -1,14 +1,25 @@
 /**
- * PERSONALIZED EMAIL BUILDER — v4
+ * PERSONALIZED EMAIL BUILDER — v9
  * ────────────────────────────────
- * NEW STRUCTURE (4 elements, under 100 words):
+ * EXACT FORMAT (from approved screenshot):
  *
- *   GREETING   Hi [Name] / Dear Sir/Madam,
- *   LINE 1     Confident industry observation — peer-level, not a rhetorical question
- *   LINE 2     Outcome sentence — what Pryro delivers, not a feature list
- *   LINE 3     Commission line
- *   CTA        Low-friction interest ask — "Open to seeing this?" not "Book a call"
- *   SIGNATURE  One line: Name — Pryro | Phone
+ *   Subject:  Still managing [X] manually? [Company Name]
+ *   Greeting: Hi there,  (or Hi [FirstName], if name is available)
+ *
+ *   [Company] in [Location], many [sector] businesses often deal with
+ *   [specific operational problem that slows teams down].
+ *
+ *   Pryro is an ERP that [specific fix for their sector] and we offer a
+ *   20–30% commission for every successfully referred client.
+ *
+ *   Would you be open to a 10-minute call to see if it is relevant?
+ *
+ *   Best regards,
+ *   [Name]
+ *   [Title]
+ *   [Company]
+ *   [Phone]
+ *   [Email]
  */
 
 import type { ProspectSignals } from './prospect-researcher';
@@ -28,6 +39,9 @@ export interface EmailGenerationParams {
   signals: ProspectSignals;
   senderName: string;
   senderPhone?: string;
+  senderTitle?: string;
+  senderEmail?: string;
+  senderCompany?: string;
   customPainPoint?: string;
   emailIndex?: number;
 }
@@ -43,282 +57,245 @@ export interface GeneratedEmail {
   dataSource: 'ai_personalized' | 'ai_industry' | 'template';
 }
 
-// ─── Greeting builder ─────────────────────────────────────────────────────────
+// ─── Greeting ─────────────────────────────────────────────────────────────────
+// Real first name → "Hi [Name],"
+// No name → "Hi there,"  (never uses company name — could be junk)
 function buildGreetingLine(signals: ProspectSignals): string {
   const raw = signals.greeting.trim();
-  if (/^dear sir\/madam,?$/i.test(raw)) return 'Dear Sir/Madam,';
   const m = raw.match(/^hi\s+(.+?),?\s*$/i);
   const name = m ? m[1]!.trim() : '';
   if (isUsableFirstName(name)) return `Hi ${name},`;
-  return 'Dear Sir/Madam,';
+  return 'Hi there,';
 }
 
-// ─── One-line signature builder ───────────────────────────────────────────────
-// Format: "Alice Umubyeyi — Pryro | 0790038006"
-// Strips the old multi-line block down to one clean phone-typed line.
-export function buildOneLineSignature(senderName: string, senderPhone?: string): string {
-  const phone = senderPhone?.trim() || '';
-  if (phone) return `${senderName} — Pryro | ${phone}`;
-  return `${senderName} — Pryro`;
-}
-
-// ─── Sector observation bank (LINE 1) ────────────────────────────────────────
-// Confident industry statements — NOT rhetorical questions.
-// Sound like a peer who works in this space, not a salesperson reading a script.
-
-const SECTOR_OBSERVATION_BANK: Record<string, string[]> = {
-  pharmacy: [
-    'Most pharmacy teams say drug expiry write-offs are invisible until they hit the monthly count. By then the margin is already gone.',
-    'Pharmacy billing errors almost always trace back to stock records and invoicing systems that never talk to each other.',
-  ],
-  healthcare: [
-    'Most healthcare finance teams say getting payroll and patient billing to match at month-end still takes days of manual work.',
-    'Reconciling staff attendance, payroll, and patient billing across separate systems is one of those problems that never fully goes away.',
-  ],
-  hospital: [
-    'Most hospital finance leads say tracking real-time department spend against approved budgets is nearly impossible due to payroll lag.',
-    'When HR and department procurement run in separate systems, the CFO is always working from last month\'s numbers.',
-  ],
-  hotel: [
-    'Most hospitality ops leads say month-end reconciliation still takes three to five days because scheduling, billing, and finance never sync automatically.',
-    'When housekeeping rosters, vendor invoices, and payroll each live in a different system, the numbers never match on the first pass.',
-  ],
-  lodge: [
-    'Most lodge operators say knowing their real occupancy margin before month-end is genuinely difficult when bookings and accounts are in separate places.',
-    'When staff rosters and supplier bills are not connected to accounts, month-end is always a scramble to match numbers that should already balance.',
-  ],
-  travel: [
-    'Most travel agency owners say they only find out their actual margin on a booking after the trip ends, sometimes weeks later.',
-    'When agent commissions, supplier costs, and client bookings live in separate spreadsheets, the P&L is always a month behind the real picture.',
-  ],
-  restaurant: [
-    'Most restaurant operators say food cost is only visible at month-end. By which point the margin problem has already happened.',
-    'When kitchen stock, supplier invoices, and daily sales do not connect, food cost surprises are just part of running the month.',
-  ],
-  retail: [
-    'Most retail ops managers say stockouts are only caught when a shelf is empty. By then the sale and the customer are already gone.',
-    'When inventory and reorder points are not connected to sales data, stockout surprises become a regular cost of doing business.',
-  ],
-  ngo: [
-    'Most NGO finance leads say pulling together grant budget versus actual spend for a donor report still takes the better part of a week.',
-    'When field expenses, grant budgets, and payroll each live in a separate spreadsheet, financial compliance reports are always late.',
-  ],
-  construction: [
-    'Most construction finance managers say cost overruns are only visible in the P&L after the margin is already gone.',
-    'When project budgets, contractor payroll, and procurement are tracked in separate systems, the budget view is always backward-looking.',
-  ],
-  logistics: [
-    'Most logistics ops leads say matching driver payroll to trip logs at month-end still takes days of manual cross-referencing.',
-    'When driver records, fuel costs, and client billing are not in the same system, month-end reconciliation is always a multi-day exercise.',
-  ],
-  school: [
-    'Most school bursars say term-end reconciliation between fee collection and staff payroll still takes the better part of two weeks.',
-    'When fee registers and payroll run in separate systems, the numbers almost never balance automatically. Someone always has to chase the difference.',
-  ],
-  generic: [
-    'Most operations leads say the hours lost to moving data between finance, HR, and inventory systems are invisible until they add up at quarter-end.',
-    'When finance, inventory, and HR each run in a different tool, the coordination overhead grows quietly until it becomes a full-time job.',
-    'Most teams only see the real cost of fragmented back-office tools when month-end arrives and the numbers do not match.',
-  ],
-};
-
-// ─── Sector outcome bank (LINE 2) ────────────────────────────────────────────
-// Outcome sentences — what the prospect gets, not what features Pryro has.
-// Always describes a before → after operational change.
-
-const SECTOR_OUTCOME_BANK: Record<string, string[]> = {
-  pharmacy: [
-    'We connect stock, billing, and payroll into one view so your team catches expiry issues before they become write-offs.',
-    'We link your drug stock and billing data so margin leaks from expiry and billing errors show up before month-end.',
-  ],
-  healthcare: [
-    'We connect HR and patient billing into one live view so your admin team stops reconciling manually every month-end.',
-    'We sync staff payroll and billing so your team spends month-end reviewing numbers instead of chasing them.',
-  ],
-  hospital: [
-    'We connect HR payroll and department budgets so your finance team sees real-time spend against approved limits, not last month\'s.',
-    'We give your CFO a live view of department spend versus approved budget so overruns surface in days not months.',
-  ],
-  hotel: [
-    'We connect scheduling, vendor billing, and financials so month-end reconciliation goes from five days to same-day.',
-    'We sync your ops and finance data so your team stops moving numbers between systems every single month.',
-  ],
-  lodge: [
-    'We connect bookings, staff costs, and accounts so your real occupancy margin is visible before month-end, not after.',
-    'We link bookings and accounts so month-end stops being a reconciliation exercise and starts being a five-minute check.',
-  ],
-  travel: [
-    'We connect bookings, commissions, and supplier costs so your margin on every deal is visible before the trip ends.',
-    'We sync client records, supplier invoices, and agent commissions so your P&L reflects today\'s deals, not last month\'s.',
-  ],
-  restaurant: [
-    'We connect kitchen stock and daily sales so food cost is a live number your chef sees every morning, not a month-end surprise.',
-    'We link supplier invoices and daily sales so food cost variance shows up the day it happens, not at month-end.',
-  ],
-  retail: [
-    'We connect inventory and reorder points to sales data so stockouts trigger an alert, not an empty shelf.',
-    'We sync stock levels and supplier reorders so your team gets a system warning before a customer finds an empty shelf.',
-  ],
-  ngo: [
-    'We connect grant budgets, field expenses, and payroll so your donor report takes hours instead of a week.',
-    'We give your finance team one live view of grant spend versus budget so compliance reports write themselves.',
-  ],
-  construction: [
-    'We connect project budgets, contractor payroll, and procurement so cost overruns show up in the system before they show up in the P&L.',
-    'We sync project management and financial tracking so your team sees budget versus actuals in real time, not at month-end.',
-  ],
-  logistics: [
-    'We connect driver payroll, trip logs, and billing so month-end reconciliation goes from days to hours.',
-    'We link driver records and client billing so the numbers that go into payroll and the numbers that go into invoicing come from the same source.',
-  ],
-  school: [
-    'We connect fee collection and staff payroll so your bursar\'s numbers balance automatically instead of needing two weeks of chasing.',
-    'We sync fee registers and payroll so term-end reconciliation becomes a one-day check instead of a two-week exercise.',
-  ],
-  generic: [
-    'We connect finance, inventory, and HR into one live view so your team stops moving data between tools and starts running the business.',
-    'We give your ops and finance teams one system instead of three so the coordination overhead disappears.',
-    'We connect your back-office tools into one live view so month-end stops being a reconciliation exercise.',
-  ],
-};
-
-// ─── Sector CTA bank (low-friction, interest-based) ──────────────────────────
-// Ask for permission, not calendar time. Prospect can say yes with one word.
-
-const SECTOR_CTA_BANK: Record<string, string[]> = {
-  pharmacy:     ['Open to seeing the 2-minute workflow we use to fix this?', 'Worth a quick look at how it works for a pharmacy your size?'],
-  healthcare:   ['Open to seeing the 2-minute workflow we use to fix this?', 'Does this match what your admin team runs into every month-end?'],
-  hospital:     ['Open to seeing how we do it for a hospital your size?', 'Worth a quick look at the live dashboard your CFO would see?'],
-  hotel:        ['Open to a 2-minute look at how it works for a property your size?', 'Does this match what your ops team deals with every month-end?'],
-  lodge:        ['Open to seeing the 2-minute walkthrough we do for lodges?', 'Worth a quick look at how other lodges use it?'],
-  travel:       ['Open to seeing how we surface margin before a trip ends?', 'Does this sound like what your team runs into on every booking?'],
-  restaurant:   ['Open to seeing the live food cost view your chef would use daily?', 'Does this sound like what happens every month-end at your place?'],
-  retail:       ['Open to seeing how the stockout alert works in practice?', 'Worth a quick look at how other retailers use it?'],
-  ngo:          ['Open to seeing how the donor report pulls together in one click?', 'Does this match what your finance team deals with each quarter?'],
-  construction: ['Open to seeing how the real-time budget view works on a live project?', 'Does this match what your project managers run into every month?'],
-  logistics:    ['Open to seeing how the reconciliation looks when it runs automatically?', 'Does this match what your ops team goes through every month-end?'],
-  school:       ['Open to seeing how the term-end reconciliation works when it\'s automated?', 'Does this sound like what your bursar runs into every term?'],
-  generic:      ['Open to seeing the 2-minute workflow we use to fix this?', 'Worth a quick look at how it works for a business your size?', 'Does this sound familiar?'],
-};
-
-function getSectorObservation(niche: string | null, idx: number): string {
-  const key = detectNicheKey(niche);
-  const bank = SECTOR_OBSERVATION_BANK[key] ?? SECTOR_OBSERVATION_BANK['generic']!;
-  return bank[idx % bank.length]!;
-}
-
-function getSectorOutcome(niche: string | null, idx: number): string {
-  const key = detectNicheKey(niche);
-  const bank = SECTOR_OUTCOME_BANK[key] ?? SECTOR_OUTCOME_BANK['generic']!;
-  return bank[idx % bank.length]!;
-}
-
-function getSectorCTA(niche: string | null, idx: number): string {
-  const key = detectNicheKey(niche);
-  const bank = SECTOR_CTA_BANK[key] ?? SECTOR_CTA_BANK['generic']!;
-  return bank[idx % bank.length]!;
+// ─── Footer ───────────────────────────────────────────────────────────────────
+export function buildMultiLineFooter(params: {
+  senderName: string;
+  senderTitle?: string;
+  senderCompany?: string;
+  senderPhone?: string;
+  senderEmail?: string;
+}): string {
+  const lines: string[] = ['Best regards,'];
+  if (params.senderName)    lines.push(params.senderName);
+  if (params.senderTitle)   lines.push(params.senderTitle);
+  if (params.senderCompany) lines.push(params.senderCompany);
+  if (params.senderPhone)   lines.push(params.senderPhone);
+  if (params.senderEmail)   lines.push(params.senderEmail);
+  return lines.join('\n');
 }
 
 // ─── Subject bank ─────────────────────────────────────────────────────────────
-const SECTOR_SUBJECT_BANK: Record<string, Array<(c: string) => string>> = {
-  pharmacy:     [
-    (c) => `Is ${c} still tracking drug expiry manually?`,
-    (c) => `Are stock, billing and payroll separate at ${c}?`,
-    (c) => `How is ${c} catching expiry dates before write-offs?`,
+// Format: "Still [doing X] manually? [Company Name]"
+
+const SUBJECT_BANK: Record<string, Array<(c: string) => string>> = {
+  pharmacy:     [(c) => `Still tracking drug expiry manually? ${c}`,
+                 (c) => `Stock and billing still in separate systems? ${c}`],
+  healthcare:   [(c) => `Still reconciling payroll and billing manually? ${c}`,
+                 (c) => `HR and patient billing still separate? ${c}`],
+  hospital:     [(c) => `Still managing department budgets manually? ${c}`,
+                 (c) => `Department spend and payroll still disconnected? ${c}`],
+  hotel:        [(c) => `Still reconciling housekeeping and payroll manually? ${c}`,
+                 (c) => `Month-end still a multi-day process? ${c}`],
+  lodge:        [(c) => `Still tracking bookings and accounts separately? ${c}`,
+                 (c) => `Month-end still a manual reconciliation? ${c}`],
+  travel:       [(c) => `Still finding out booking margin after trips end? ${c}`,
+                 (c) => `Commissions still tracked in spreadsheets? ${c}`],
+  restaurant:   [(c) => `Still finding out food cost at month-end? ${c}`,
+                 (c) => `Stock and sales still in separate systems? ${c}`],
+  retail:       [(c) => `Still getting caught by stockouts? ${c}`,
+                 (c) => `Inventory reorders still managed manually? ${c}`],
+  ngo:          [(c) => `Donor reporting still taking a week to prepare? ${c}`,
+                 (c) => `Grant budgets and field spend still separate? ${c}`],
+  construction: [(c) => `Still seeing cost overruns after they happen? ${c}`,
+                 (c) => `Project budgets and payroll still disconnected? ${c}`],
+  logistics:    [(c) => `Month-end billing still taking days to close? ${c}`,
+                 (c) => `Driver payroll and trip records still separate? ${c}`],
+  school:       [(c) => `Still reconciling fees and payroll manually? ${c}`,
+                 (c) => `Term-end still a manual process? ${c}`],
+  generic:      [(c) => `Still managing financial services manually? ${c}`,
+                 (c) => `Finance, HR, and ops still in separate tools? ${c}`,
+                 (c) => `Still running operations across disconnected systems? ${c}`],
+};
+
+// ─── Problem sentence bank ────────────────────────────────────────────────────
+// Format: "[Company] in [Location], many [sector] businesses often deal with [pain]."
+// One sentence. Uses company name + location. Specific to their sector.
+
+const PROBLEM_BANK: Record<string, Array<(c: string, l: string) => string>> = {
+  pharmacy: [
+    (c, l) => `${c} in ${l}, many pharmacy businesses often deal with drug expiry write-offs and billing errors that only surface at month-end because stock and invoicing run in separate systems.`,
+    (c, l) => `${c} in ${l}, many pharmacy teams deal with stock, billing, and payroll each running in a different tool — which means margin losses often go unnoticed until month-end.`,
   ],
-  healthcare:   [
-    (c) => `Is ${c} still reconciling payroll and billing manually?`,
-    (c) => `How long does month-end take at ${c}?`,
-    (c) => `Are HR and patient billing still separate at ${c}?`,
+  healthcare: [
+    (c, l) => `${c} in ${l}, many healthcare businesses often deal with days of manual work every month reconciling staff payroll against patient billing because HR and finance run separately.`,
+    (c, l) => `${c} in ${l}, many healthcare admin teams deal with HR attendance and patient billing living in separate systems — which means month-end reconciliation takes days it shouldn't.`,
   ],
-  hospital:     [
-    (c) => `Are department budgets and payroll connected at ${c}?`,
-    (c) => `Is ${c} getting live department spend visibility?`,
-    (c) => `How does ${c} track HR and finance together?`,
+  hospital: [
+    (c, l) => `${c} in ${l}, many hospital finance teams often deal with the challenge of getting a live view of actual department spend because HR payroll and procurement aren't connected.`,
+    (c, l) => `${c} in ${l}, many hospitals deal with department budgets and HR payroll running in separate systems — which means the CFO is always working from last month's numbers.`,
   ],
-  hotel:        [
-    (c) => `Is month-end still a manual process at ${c}?`,
-    (c) => `Are staff scheduling and billing connected at ${c}?`,
-    (c) => `How does ${c} reconcile housekeeping and payroll?`,
+  hotel: [
+    (c, l) => `${c} in ${l}, many hospitality businesses often deal with month-end reconciliation taking three to five days because housekeeping rosters, vendor invoices, and payroll each live in a different system.`,
+    (c, l) => `${c} in ${l}, many hotel operations deal with staff scheduling, vendor billing, and financials running in separate tools — which means every month-end becomes a manual exercise.`,
   ],
-  lodge:        [
-    (c) => `Are bookings and accounts still separate at ${c}?`,
-    (c) => `Is month-end reconciliation still manual at ${c}?`,
+  lodge: [
+    (c, l) => `${c} in ${l}, many lodge operators often deal with only finding out their real occupancy margin after month-end because bookings and accounts run in separate places.`,
+    (c, l) => `${c} in ${l}, many lodges deal with bookings and accounts not being connected — which means month-end is always a scramble to match numbers that should balance automatically.`,
   ],
-  travel:       [
-    (c) => `Does ${c} know its booking margin before trips end?`,
-    (c) => `Are agent commissions still tracked in spreadsheets at ${c}?`,
-    (c) => `Is the P&L always a month behind at ${c}?`,
+  travel: [
+    (c, l) => `${c} in ${l}, many travel agencies often deal with only knowing the real margin on a booking after the trip has ended because commissions and supplier costs live in spreadsheets.`,
+    (c, l) => `${c} in ${l}, many travel businesses deal with client bookings, agent commissions, and supplier invoices tracked in different tools — which means the P&L is always a month behind.`,
   ],
-  restaurant:   [
-    (c) => `Does ${c} have a live view of food cost?`,
-    (c) => `Are kitchen stock and supplier invoices connected at ${c}?`,
+  restaurant: [
+    (c, l) => `${c} in ${l}, many restaurant businesses often deal with food cost only becoming visible at month-end because kitchen stock, supplier invoices, and daily sales aren't in the same system.`,
+    (c, l) => `${c} in ${l}, many restaurants deal with stock and sales running separately — which means food cost problems only show up after the margin is already gone.`,
   ],
-  retail:       [
-    (c) => `Is ${c} still getting caught by stockouts?`,
-    (c) => `Are inventory reorders still managed manually at ${c}?`,
+  retail: [
+    (c, l) => `${c} in ${l}, many retail businesses often deal with stockouts only being caught when the shelf is already empty because inventory levels and reorder points aren't connected to live sales.`,
+    (c, l) => `${c} in ${l}, many retail operations deal with inventory and sales running in different systems — which means stockout surprises become a regular cost of doing business.`,
   ],
-  ngo:          [
-    (c) => `Is donor reporting still taking too long at ${c}?`,
-    (c) => `Are grant budgets and field spend connected at ${c}?`,
+  ngo: [
+    (c, l) => `${c} in ${l}, many NGO finance teams often deal with donor compliance reports taking the better part of a week because field expenses and grant budgets live in separate spreadsheets.`,
+    (c, l) => `${c} in ${l}, many NGOs deal with grant budgets and field costs tracked in different tools — which means the finance team spends more time reconciling data than reporting on impact.`,
   ],
   construction: [
-    (c) => `Does ${c} see cost overruns before they happen?`,
-    (c) => `Are project budgets and payroll still separate at ${c}?`,
+    (c, l) => `${c} in ${l}, many construction businesses often deal with cost overruns only showing up in the P&L after the margin is already gone because project budgets and procurement run separately.`,
+    (c, l) => `${c} in ${l}, many construction firms deal with project management and financial tracking not sharing the same data — which means budget-to-actuals is always a backward-looking exercise.`,
   ],
-  logistics:    [
-    (c) => `Is month-end billing still taking days at ${c}?`,
-    (c) => `Are driver payroll and stock connected at ${c}?`,
+  logistics: [
+    (c, l) => `${c} in ${l}, many logistics businesses often deal with month-end reconciliation taking days because driver payroll, trip logs, and client billing all live in separate places.`,
+    (c, l) => `${c} in ${l}, many transport operations deal with driver records and client invoicing not being connected — which means billing errors compound quietly every month.`,
   ],
-  school:       [
-    (c) => `Are fees and staff payroll still separate at ${c}?`,
-    (c) => `Is term-end reporting still a manual process at ${c}?`,
+  school: [
+    (c, l) => `${c} in ${l}, many schools often deal with bursar reconciliation taking two weeks every term because fee collection and staff payroll run in separate registers.`,
+    (c, l) => `${c} in ${l}, many educational institutions deal with fee records and payroll running in different systems — which means term-end is always a reconciliation sprint.`,
   ],
-  generic:      [
-    (c) => `Are HR and finance still separate tools at ${c}?`,
-    (c) => `Is ${c} still running operations across multiple tools?`,
-    (c) => `How does ${c} keep ops data in one place?`,
+  generic: [
+    (c, l) => `${c} in ${l}, many financial services businesses often deal with manual workflows and fragmented tools that slow teams down.`,
+    (c, l) => `${c} in ${l}, many businesses deal with finance, HR, inventory, and operations each running in a different tool — which means the team spends days every month moving data that should flow automatically.`,
+    (c, l) => `${c} in ${l}, many businesses deal with disconnected back-office systems where finance, HR, and operations don't share the same data — and the coordination overhead grows quietly.`,
   ],
 };
 
-function buildSubject(companyName: string, niche: string | null, idx: number): string {
+// ─── Pryro solution bank ──────────────────────────────────────────────────────
+// Format: "Pryro is an ERP that [fix] and we offer a 20–30% commission..."
+// Commission is embedded in this sentence — same line as the solution.
+
+const PRYRO_BANK: Record<string, string[]> = {
+  pharmacy: [
+    'Pryro is an ERP that connects your drug stock, billing, and payroll into one live platform so expiry losses and billing errors surface before month-end',
+    'Pryro is an ERP that links drug stock, supplier invoicing, and HR payroll so your team catches expiry and billing problems in real time — not at month-end',
+  ],
+  healthcare: [
+    'Pryro is an ERP that connects HR attendance and patient billing into one platform so your admin team reconciles both from one screen instead of two separate systems',
+    'Pryro is an ERP that links staff payroll and patient billing so month-end takes minutes instead of days',
+  ],
+  hospital: [
+    "Pryro is an ERP that connects department budgets and HR payroll so your finance team sees live spend against approved limits — not last month's figures",
+    'Pryro is an ERP that gives your CFO real-time budget-to-actuals visibility by connecting payroll and department procurement in one system',
+  ],
+  hotel: [
+    'Pryro is an ERP that connects staff scheduling, vendor billing, and financial management so month-end reconciliation drops from five days to same-day',
+    'Pryro is an ERP that links housekeeping rosters, vendor invoices, and payroll so your ops and accounts teams stop moving numbers between tools every month',
+  ],
+  lodge: [
+    'Pryro is an ERP that connects bookings, staff costs, and accounts so your real occupancy margin is visible before month-end instead of after',
+    'Pryro is an ERP that links your booking records and accounts so month-end becomes a five-minute check instead of a multi-day exercise',
+  ],
+  travel: [
+    'Pryro is an ERP that connects bookings, commissions, and supplier invoicing so your margin on every deal is visible before the trip ends',
+    "Pryro is an ERP that links CRM and Financial Management so your P&L reflects this week's deals — not last month's",
+  ],
+  restaurant: [
+    'Pryro is an ERP that connects kitchen stock and daily sales so food cost is a live number your team sees every morning — not a month-end surprise',
+    'Pryro is an ERP that links Inventory Management and Financial Management so food cost variance shows up the day it happens',
+  ],
+  retail: [
+    'Pryro is an ERP that connects inventory, reorder points, and live sales so a stockout triggers an alert in the system — not an empty shelf in your store',
+    'Pryro is an ERP that links Inventory Management and sales data so your team gets a reorder warning before the shelf runs out',
+  ],
+  ngo: [
+    'Pryro is an ERP that connects grant budgets, field expenses, and payroll so donor compliance reports pull together in hours instead of a week',
+    'Pryro is an ERP that links Financial Management and HR Payroll so your finance team reports on impact instead of reconciling spreadsheets',
+  ],
+  construction: [
+    'Pryro is an ERP that connects project budgets, contractor payroll, and procurement so cost overruns show up before they show up in the P&L',
+    'Pryro is an ERP that links Project Management and Financial Management so your team sees budget versus actuals in real time — not at month-end',
+  ],
+  logistics: [
+    'Pryro is an ERP that connects driver payroll, trip logs, and client billing so month-end reconciliation drops from days to hours',
+    'Pryro is an ERP that links HR Payroll and Financial Management so driver payroll and client invoicing always come from the same numbers',
+  ],
+  school: [
+    "Pryro is an ERP that connects fee collection and staff payroll so your bursar's numbers balance automatically — no two-week reconciliation sprint",
+    'Pryro is an ERP that links fee registers and HR Payroll so term-end becomes a one-day check instead of a multi-week exercise',
+  ],
+  generic: [
+    'Pryro is an ERP that replaces those manual workflows and fragmented tools with one unified system for finance, inventory, HR, and operations',
+    'Pryro is an ERP that connects Financial Management, Inventory, HR & Payroll, and CRM into one platform so your team runs the business instead of managing tools',
+  ],
+};
+
+// ─── Bank helpers ─────────────────────────────────────────────────────────────
+
+function getSubject(niche: string | null, companyName: string, idx: number): string {
   const key = detectNicheKey(niche);
-  const bank = SECTOR_SUBJECT_BANK[key] ?? SECTOR_SUBJECT_BANK['generic']!;
+  const bank = SUBJECT_BANK[key] ?? SUBJECT_BANK['generic']!;
   return bank[idx % bank.length]!(companyName);
 }
 
-// ─── Assemble final email ─────────────────────────────────────────────────────
-// Structure: greeting → observation → outcome → commission → CTA → one-line sig
+function getProblem(niche: string | null, companyName: string, location: string | null, idx: number): string {
+  const key = detectNicheKey(niche);
+  const bank = PROBLEM_BANK[key] ?? PROBLEM_BANK['generic']!;
+  const loc = (location || 'your area').split(',')[0]?.trim() || 'your area';
+  return bank[idx % bank.length]!(companyName, loc);
+}
+
+function getPryro(niche: string | null, idx: number): string {
+  const key = detectNicheKey(niche);
+  const bank = PRYRO_BANK[key] ?? PRYRO_BANK['generic']!;
+  const base = bank[idx % bank.length]!;
+  // Commission always appended to the Pryro sentence
+  return base.replace(/[.!]?\s*$/, '') + ' and we offer a 20–30% commission for every successfully referred client.';
+}
+
+// ─── Email assembler ──────────────────────────────────────────────────────────
 
 function assembleEmail(params: {
   greeting: string;
-  observation: string;
-  outcome: string;
-  cta: string;
-  signOff: string;
+  problem: string;
+  pryro: string;
+  footer: string;
   subject: string;
 }): { subject: string; body: string } {
-  const { greeting, observation, outcome, cta, signOff, subject } = params;
+  const { greeting, problem, pryro, footer, subject } = params;
+
+  if (!greeting.trim().toLowerCase().startsWith('hi ')) {
+    throw new Error('GREETING_MISSING: must start with Hi');
+  }
+
+  const cta = 'Would you be open to a 10-minute call to see if it is relevant?';
+
   const body = `${greeting}
 
-${observation}
+${problem}
 
-${outcome}
-
-We also offer a 20-30% commission for every successfully referred client.
+${pryro}
 
 ${cta}
 
-${signOff}`;
+${footer}`;
+
   return { subject, body };
 }
 
-// ─── AI caller ───────────────────────────────────────────────────────────────
+// ─── AI caller ────────────────────────────────────────────────────────────────
 
 interface AIProvider { provider: string; api_key: string; active_model: string; }
 
 async function callAI(p: AIProvider, system: string, user: string): Promise<string> {
-  const body = { temperature: 0.75, max_tokens: 80 };
+  const reqBody = { temperature: 0.7, max_tokens: 100 };
   const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
 
   async function attempt(): Promise<string> {
@@ -326,7 +303,7 @@ async function callAI(p: AIProvider, system: string, user: string): Promise<stri
       const r = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.api_key}` },
-        body: JSON.stringify({ model: p.active_model || 'gpt-4o-mini', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...body }),
+        body: JSON.stringify({ model: p.active_model || 'gpt-4o-mini', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...reqBody }),
         signal: AbortSignal.timeout(12000),
       });
       if (!r.ok) throw Object.assign(new Error(`OpenAI ${r.status}`), { status: r.status });
@@ -336,7 +313,7 @@ async function callAI(p: AIProvider, system: string, user: string): Promise<stri
       const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.api_key}` },
-        body: JSON.stringify({ model: p.active_model || 'llama-3.3-70b-versatile', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...body }),
+        body: JSON.stringify({ model: p.active_model || 'llama-3.3-70b-versatile', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...reqBody }),
         signal: AbortSignal.timeout(12000),
       });
       if (!r.ok) throw Object.assign(new Error(`Groq ${r.status}`), { status: r.status });
@@ -346,7 +323,7 @@ async function callAI(p: AIProvider, system: string, user: string): Promise<stri
       const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': p.api_key, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: p.active_model || 'claude-3-5-haiku-20241022', max_tokens: 80, system, messages: [{ role: 'user', content: user }], temperature: 0.6 }),
+        body: JSON.stringify({ model: p.active_model || 'claude-3-5-haiku-20241022', max_tokens: 100, system, messages: [{ role: 'user', content: user }], temperature: 0.6 }),
         signal: AbortSignal.timeout(12000),
       });
       if (!r.ok) throw Object.assign(new Error(`Anthropic ${r.status}`), { status: r.status });
@@ -356,7 +333,7 @@ async function callAI(p: AIProvider, system: string, user: string): Promise<stri
       const r = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${p.active_model || 'gemini-1.5-flash'}:generateContent?key=${p.api_key}`,
         { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [{ text: system + '\n\n' + user }] }], generationConfig: { temperature: 0.6, maxOutputTokens: 80 } }),
+          body: JSON.stringify({ contents: [{ parts: [{ text: system + '\n\n' + user }] }], generationConfig: { temperature: 0.6, maxOutputTokens: 100 } }),
           signal: AbortSignal.timeout(12000) }
       );
       if (!r.ok) throw Object.assign(new Error(`Gemini ${r.status}`), { status: r.status });
@@ -366,7 +343,7 @@ async function callAI(p: AIProvider, system: string, user: string): Promise<stri
       const r = await fetch('https://api.mistral.ai/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.api_key}` },
-        body: JSON.stringify({ model: p.active_model || 'mistral-small', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...body }),
+        body: JSON.stringify({ model: p.active_model || 'mistral-small', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], ...reqBody }),
         signal: AbortSignal.timeout(12000),
       });
       if (!r.ok) throw Object.assign(new Error(`Mistral ${r.status}`), { status: r.status });
@@ -387,89 +364,77 @@ async function callAI(p: AIProvider, system: string, user: string): Promise<stri
   throw lastError;
 }
 
-// ─── AI prompt — asks for ONE outcome sentence ────────────────────────────────
-// The AI writes a single custom outcome sentence for LINE 2 only.
-// Everything else is from code.
+// ─── AI prompt ────────────────────────────────────────────────────────────────
+// AI writes the Pryro solution sentence (WITHOUT commission — that gets appended by code).
 
-function buildOutcomeSystemPrompt(companyName: string, niche: string | null): string {
-  return `You write one sentence for a cold B2B email. Just one sentence — nothing else.
+function buildAISystemPrompt(companyName: string, niche: string | null, companyContext?: string | null): string {
+  const ctxHint = companyContext
+    ? `\nWhat this company does: "${companyContext.slice(0, 180)}"\nUse this to make the solution specific to their actual operation.`
+    : '';
+  return `You write one sentence for a cold email about Pryro (pryro.com), an ERP.
 
-The sentence describes the specific operational outcome a ${niche || 'business'} like "${companyName}" gets from connecting their back-office systems.
+Pryro: Financial Management, Inventory Management, HR & Payroll, Project Management, CRM, AI Analytics.
+${ctxHint}
+Write ONE sentence that starts with "Pryro is an ERP that" describing what Pryro fixes for a ${niche || 'business'} like "${companyName}".
 
 Rules:
-- Under 20 words
-- Starts with "We" (as in Pryro)
-- Describes what stops happening or what starts working — an operational before/after
-- Mentions a process specific to ${niche || 'this type of business'} (payroll, billing, stock, scheduling, etc.)
-- NO product features, NO module names, NO adjectives like "powerful" or "seamless"
-- NO question mark — this is a statement
-- NO greeting, NO sign-off, NO extra text
+- Start with exactly: "Pryro is an ERP that"
+- Name at least one Pryro module
+- Describe the outcome — what stops happening or what starts working
+- Under 35 words. No commission mention (added separately). No greeting. No sign-off.
+- No buzzwords: streamline, leverage, empower, optimize, seamless, innovative, robust
 
-Good examples:
-- "We connect HR and finance so your team stops reconciling manually every month-end."
-- "We link stock and billing so expiry write-offs show up before they hit the count."
-- "We sync driver payroll and trip logs so month-end reconciliation takes hours not days."
-
-Output: The single outcome sentence only. No labels. No quotes. No extra text.`;
+Output: the sentence only.`;
 }
 
-function buildOutcomeUserPrompt(companyName: string, niche: string | null, customPainPoint?: string | null): string {
-  const hint = customPainPoint
-    ? `The specific problem to fix: ${customPainPoint}`
-    : `Focus on the single biggest daily operational problem for a ${niche || 'business'} and describe the outcome of fixing it.`;
-  return `Company: ${companyName}\nSector: ${niche || 'business'}\n${hint}\n\nWrite the one outcome sentence now:`;
+function buildAIUserPrompt(companyName: string, niche: string | null, customPainPoint?: string | null): string {
+  const focus = customPainPoint
+    ? `Specific problem: ${customPainPoint}`
+    : `Biggest daily operational friction for a ${niche || 'business'}.`;
+  return `Company: ${companyName}\nSector: ${niche || 'business'}\n${focus}\n\nWrite the sentence now:`;
 }
 
 function cleanAISentence(raw: string): string | null {
   if (!raw) return null;
   let s = raw
-    .replace(/^(SUBJECT:|BODY:|LINE \d[:\s-]*|Output:|Sentence:)/gim, '')
+    .replace(/^(OUTPUT:|Sentence:|Result:)/gim, '')
     .replace(/\*\*(.+?)\*\*/g, '$1')
     .replace(/^[-•*#]\s+/gm, '')
     .replace(/\n.+/g, '')
     .trim()
     .replace(/^["'`]|["'`]$/g, '')
     .trim();
-  if (!s || s.length < 10 || s.length > 200) return null;
-  const banned = ['streamline', 'leverage', 'empower', 'optimize', 'cutting-edge', 'revolutionary',
-    'seamlessly', 'innovative', 'robust', 'scalable', 'transform', 'synergy',
-    'i was looking', 'i noticed', 'i came across', 'i hope', 'i wanted to'];
+  if (!s || s.length < 20 || s.length > 280) return null;
+  if (!s.toLowerCase().startsWith('pryro is an erp that')) return null;
+  const banned = ['commission', 'referral', 'percent', '20-30', '20\u201330',
+    'free trial', 'dear sir', 'best regards', 'streamline', 'leverage',
+    'empower', 'optimize', 'seamlessly', 'innovative', 'robust', 'scalable'];
   if (banned.some(b => s.toLowerCase().includes(b))) return null;
   return s;
 }
 
-// ─── Follow-up prompt builder ─────────────────────────────────────────────────
+// ─── Follow-up prompt ─────────────────────────────────────────────────────────
 
 export function buildFollowUpPrompt(
   signals: ProspectSignals,
   originalSubject: string,
   followUpNumber: 1 | 2 | 3,
+  senderFooter: string,
 ): string {
-  const angles: Record<number, string> = {
-    1: `Time cost angle: how many hours per month is this problem costing their team?`,
-    2: `Risk angle: what quietly goes wrong when systems don't connect?`,
-    3: `Peer angle: others in this sector have solved this — offer to share briefly.`,
-  };
-  const ctas: Record<number, string> = {
-    1: `"Still worth a quick look?"`,
-    2: `"Open to seeing how it works for a ${signals.niche || 'business'} your size?"`,
-    3: `"Happy to share a quick example if useful?"`,
-  };
-  const maxWords = followUpNumber === 1 ? 50 : followUpNumber === 2 ? 40 : 30;
-
-  return `Write follow-up #${followUpNumber} on the same thread.
+  return `Follow-up #${followUpNumber} for Pryro ERP outreach.
 Company: ${signals.companyName} | Sector: ${signals.niche || 'business'}
-Greeting (verbatim): ${signals.greeting}
-Angle: ${angles[followUpNumber]}
-CTA style: ${ctas[followUpNumber]}
-Max words: ${maxWords}. Shorter than the previous email. Different sentences.
-Subject must start with: Re: ${originalSubject}
-Footer (verbatim): ${signals.signOff}
-
-OUTPUT FORMAT:
+Greeting: ${signals.greeting}
+Max words: ${followUpNumber === 1 ? 50 : followUpNumber === 2 ? 40 : 30}
+CTA: "Would you be open to a 10-minute call to see if it is relevant?"
+Footer: ${senderFooter}
+Rules: mention Pryro, different angle, no commission.
+FORMAT:
 SUBJECT: Re: ${originalSubject}
 BODY:
-[follow-up body]`;
+[greeting]
+[new angle + Pryro]
+[CTA]
+[footer]`;
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
@@ -478,44 +443,43 @@ export async function buildPersonalizedEmail(
   params: EmailGenerationParams,
   aiProvider: AIProvider | null,
 ): Promise<GeneratedEmail> {
-  const { companyName, niche, signals } = params;
+  const { companyName, niche, location, signals } = params;
   const idx = params.emailIndex ?? 0;
 
-  // All structural elements built in code — AI cannot touch them
-  const greeting    = buildGreetingLine(signals);
-  const subject     = buildSubject(companyName, niche, idx);
-  const observation = getSectorObservation(niche, idx);
-  const cta         = getSectorCTA(niche, idx);
-  const signOff     = signals.signOff;
+  const greeting = buildGreetingLine(signals);
+  const subject  = getSubject(niche, companyName, idx);
+  const problem  = getProblem(niche, companyName, location, idx);
+  const footer   = buildMultiLineFooter({
+    senderName:    params.senderName,
+    senderTitle:   params.senderTitle,
+    senderCompany: params.senderCompany || 'Pryro',
+    senderPhone:   params.senderPhone,
+    senderEmail:   params.senderEmail,
+  });
 
-  console.log(`[EmailBuilder] greeting="${greeting}" | company="${companyName}" | niche=${niche} | ai=${!!aiProvider}`);
+  console.log(`[EmailBuilder] company="${companyName}" | niche=${niche} | ai=${!!aiProvider}`);
 
-  // AI writes ONE custom outcome sentence. All other lines are from code.
+  // AI writes the Pryro solution sentence — commission appended by code
   if (aiProvider) {
-    console.log(`[EmailBuilder] Calling ${aiProvider.provider}/${aiProvider.active_model} for outcome sentence — "${companyName}"`);
-
-    let aiOutcome: string | null = null;
-
+    let aiBase: string | null = null;
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        const system = buildOutcomeSystemPrompt(companyName, niche);
-        const user   = buildOutcomeUserPrompt(companyName, niche, params.customPainPoint);
-        const raw    = await callAI(aiProvider, system, user);
-        aiOutcome    = cleanAISentence(raw);
-        console.log(`[EmailBuilder] AI outcome attempt ${attempt}: "${aiOutcome ?? 'INVALID — ' + raw.slice(0, 80)}"`);
-        if (aiOutcome) break;
+        const sys = buildAISystemPrompt(companyName, niche, params.companyContext);
+        const usr = buildAIUserPrompt(companyName, niche, params.customPainPoint);
+        const raw = await callAI(aiProvider, sys, usr);
+        aiBase = cleanAISentence(raw);
+        console.log(`[EmailBuilder] AI attempt ${attempt}: "${aiBase ?? 'INVALID — ' + raw.slice(0, 60)}"`);
+        if (aiBase) break;
       } catch (err: any) {
-        console.warn(`[EmailBuilder] AI attempt ${attempt} failed for "${companyName}": ${err?.message}`);
+        console.warn(`[EmailBuilder] AI attempt ${attempt} failed: ${err?.message}`);
       }
     }
 
-    if (aiOutcome) {
-      const { subject: s, body } = assembleEmail({ greeting, observation, outcome: aiOutcome, cta, signOff, subject });
+    if (aiBase) {
+      const pryro = aiBase.replace(/[.!]?\s*$/, '') + ' and we offer a 20–30% commission for every successfully referred client.';
+      const { subject: s, body } = assembleEmail({ greeting, problem, pryro, footer, subject });
       const quality = checkEmailQuality({ subject: s, body, companyName, externalPersonalizationScore: signals.personalizationScore });
-      console.log(`[EmailBuilder] Quality for "${companyName}": score=${quality.score}, passed=${quality.passed}`);
-
-      if (quality.passed && quality.score >= 85) {
-        console.log(`[EmailBuilder] ✅ Accepted for "${companyName}" (score=${quality.score})`);
+      if (quality.passed) {
         return {
           subject: s, body,
           model: `${aiProvider.provider}/${aiProvider.active_model}`,
@@ -525,19 +489,13 @@ export async function buildPersonalizedEmail(
           dataSource: signals.personalizationScore >= 65 ? 'ai_personalized' : 'ai_industry',
         };
       }
-      console.warn(`[EmailBuilder] ⚠️ Scored ${quality.score}/85 for "${companyName}" — using sector bank outcome.`);
-    } else {
-      console.warn(`[EmailBuilder] AI produced no valid outcome for "${companyName}" — using sector bank`);
     }
-  } else {
-    console.log(`[EmailBuilder] No AI provider — using sector bank for "${companyName}"`);
   }
 
-  // Sector bank fallback — always produces a passing email
-  const outcome = getSectorOutcome(niche, idx);
-  const { subject: fs, body: fb } = assembleEmail({ greeting, observation, outcome, cta, signOff, subject });
+  // Sector bank fallback
+  const pryro = getPryro(niche, idx);
+  const { subject: fs, body: fb } = assembleEmail({ greeting, problem, pryro, footer, subject });
   const fq = checkEmailQuality({ subject: fs, body: fb, companyName, externalPersonalizationScore: signals.personalizationScore });
-  console.log(`[EmailBuilder] Sector bank email for "${companyName}": score=${fq.score}`);
 
   return {
     subject: fs, body: fb,

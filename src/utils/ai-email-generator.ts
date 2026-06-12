@@ -1,17 +1,26 @@
 /**
- * AI EMAIL GENERATOR — v3
+ * AI EMAIL GENERATOR — v4
  * ────────────────────────
  * Wires together:
- *   1. Sender profile loaded from sender_profiles table (single source of truth)
+ *   1. Sender profile loaded from sender_profiles table (all fields)
  *   2. Prospect research
- *   3. AI generation with quality gate
+ *   3. AI generation via buildPersonalizedEmail
  *
- * Sender profile is authoritative — no more scattered senderName/senderTitle/senderPhone fields.
+ * Footer is multi-line, generated from whatever sender profile fields exist.
+ * Never a single-line signature. Never blank placeholders.
  */
 
-import { createClient }                          from '../../supabase/client';
-import { researchProspect, researchProspectSync, isGenericEmailAddress, extractFirstName, cleanCompanyName, isUsableFirstName } from './prospect-researcher';
-import { buildPersonalizedEmail }                 from './personalized-email-builder';
+import { createClient } from '../../supabase/client';
+import {
+  researchProspect,
+  researchProspectSync,
+  isGenericEmailAddress,
+  extractFirstName,
+  cleanCompanyName,
+  isUsableFirstName,
+  buildGreeting,
+} from './prospect-researcher';
+import { buildPersonalizedEmail } from './personalized-email-builder';
 
 export interface EmailGenerationParams {
   lead: {
@@ -21,7 +30,7 @@ export interface EmailGenerationParams {
     company_context: string | null;
     website?: string | null;
     contact_name?: string | null;
-    email?: string | null;        // used for name extraction + generic email detection
+    email?: string | null;
   };
   yourCompany: string;
   yourService: string;
@@ -36,12 +45,25 @@ export interface EmailGenerationParams {
   skipResearch?: boolean;
 }
 
-/** Load sender profile from DB, fall back to legacy param fields, then SMTP name. */
+interface SenderProfile {
+  senderName: string;
+  senderTitle: string;
+  senderCompany: string;
+  senderPhone: string;
+  senderEmail: string;
+  profileComplete: boolean;
+}
+
+/**
+ * Load full sender profile from sender_profiles table.
+ * Falls back to legacy param fields, then SMTP account name.
+ * Returns all fields so the multi-line footer can be built from real data.
+ */
 async function resolveSenderProfile(
   userId: string,
   legacyName?: string,
   legacyPhone?: string,
-): Promise<{ senderName: string; senderPhone: string; signOff: string; profileComplete: boolean }> {
+): Promise<SenderProfile> {
   try {
     const supabase = createClient();
     const { data } = await supabase
@@ -51,29 +73,27 @@ async function resolveSenderProfile(
       .maybeSingle();
 
     if (data && data.full_name) {
-      const complete = !!data.is_complete;
-      const phone    = data.phone || '';
-
-      // Multi-line professional footer
-      const footerLines = ['Best regards,', ''];
-      footerLines.push(data.full_name);
-      if (data.job_title)    footerLines.push(data.job_title);
-      if (data.company_name) footerLines.push(data.company_name);
-      if (phone)             footerLines.push(phone);
-      if (data.email)        footerLines.push(data.email);
-      const signOff = footerLines.join('\n');
-
-      return { senderName: data.full_name, senderPhone: phone, signOff, profileComplete: complete };
+      return {
+        senderName:    data.full_name,
+        senderTitle:   data.job_title   || '',
+        senderCompany: data.company_name || 'Pryro',
+        senderPhone:   data.phone        || '',
+        senderEmail:   data.email        || '',
+        profileComplete: !!data.is_complete,
+      };
     }
   } catch { /* fall through */ }
 
   // Legacy param fallback
   if (legacyName) {
-    const phone   = legacyPhone || '';
-    const signOff = phone
-      ? `Best regards,\n\n${legacyName}\nPryro\n${phone}`
-      : `Best regards,\n\n${legacyName}\nPryro`;
-    return { senderName: legacyName, senderPhone: phone, signOff, profileComplete: false };
+    return {
+      senderName:    legacyName,
+      senderTitle:   '',
+      senderCompany: 'Pryro',
+      senderPhone:   legacyPhone || '',
+      senderEmail:   '',
+      profileComplete: false,
+    };
   }
 
   // SMTP account name last resort
@@ -90,11 +110,11 @@ async function resolveSenderProfile(
       const row = rows[0];
       const name = row.sender_name ||
         row.email.split('@')[0].replace(/[._\-]/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
-      return { senderName: name, senderPhone: '', signOff: `Best regards,\n\n${name}\nPryro`, profileComplete: false };
+      return { senderName: name, senderTitle: '', senderCompany: 'Pryro', senderPhone: '', senderEmail: '', profileComplete: false };
     }
   } catch { /* ignore */ }
 
-  return { senderName: 'Sales Team', senderPhone: '', signOff: 'Best regards,\n\nSales Team\nPryro', profileComplete: false };
+  return { senderName: 'Sales Team', senderTitle: '', senderCompany: 'Pryro', senderPhone: '', senderEmail: '', profileComplete: false };
 }
 
 export async function generateAIEmail(params: EmailGenerationParams): Promise<{
@@ -110,23 +130,20 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{
   isGenericEmail?: boolean;
   greetingIsFallback?: boolean;
   fallbackReason?: string;
-  needsFirstName?: boolean;        // true when no usable name — caller should ask user to fix
 }> {
   const { lead, userId, emailIndex = 0 } = params;
 
   // ── 0. Clean and validate company name ──────────────────────────────────
   const nameResult = cleanCompanyName(lead.company_name);
   if (!nameResult.valid) {
-    throw new Error(`Invalid company name: ${nameResult.reason} — "${lead.company_name}". Please correct the name before generating.`);
+    throw new Error(`Invalid company name: ${nameResult.reason} — "${lead.company_name}". Please correct before generating.`);
   }
   const cleanedCompanyName = nameResult.cleaned;
 
   // ── 1. Sender profile ────────────────────────────────────────────────────
-  const { senderName, senderPhone, signOff, profileComplete } = await resolveSenderProfile(
-    userId, params.senderName, params.senderPhone,
-  );
+  const profile = await resolveSenderProfile(userId, params.senderName, params.senderPhone);
 
-  // ── 2. AI provider — load from ai_settings ──────────────────────────────
+  // ── 2. AI provider ───────────────────────────────────────────────────────
   let aiProvider: { provider: string; api_key: string; active_model: string } | null = null;
   let aiDiagnostic = 'no_provider';
   try {
@@ -141,32 +158,31 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{
       const p = data[0];
       if (p.api_key && p.provider && p.active_model) {
         aiProvider = { provider: p.provider, api_key: p.api_key, active_model: p.active_model };
-        aiDiagnostic = `found: ${p.provider}/${p.active_model} (connected=${p.is_connected})`;
+        aiDiagnostic = `found: ${p.provider}/${p.active_model}`;
       } else {
-        aiDiagnostic = `ai_settings row exists but missing api_key/provider/model`;
+        aiDiagnostic = 'ai_settings row exists but missing api_key/provider/model';
       }
     } else {
-      aiDiagnostic = 'no active ai_settings row (set AI provider in AI Settings)';
+      aiDiagnostic = 'no active ai_settings row — go to AI Settings to add one';
     }
   } catch (e: any) {
     aiDiagnostic = `ai_settings query failed: ${e?.message}`;
   }
 
-  // ── 3. Resolve contact name ───────────────────────────────────────────────
+  // ── 3. Contact name ──────────────────────────────────────────────────────
   const { name: resolvedName } = extractFirstName(lead.contact_name, lead.email);
   const effectiveContactName = resolvedName && isUsableFirstName(resolvedName) ? resolvedName : null;
-  const genericEmail   = isGenericEmailAddress(lead.email);
-  const nameIsFallback = !effectiveContactName;
+  const genericEmail = isGenericEmailAddress(lead.email);
 
-  // ── 4. Research prospect ─────────────────────────────────────────────────
+  // ── 4. Research ──────────────────────────────────────────────────────────
   const researchParams = {
     companyName:    cleanedCompanyName,
     niche:          lead.niche,
     location:       lead.location,
     companyContext: lead.company_context,
     contactName:    effectiveContactName,
-    senderName,
-    senderPhone,
+    senderName:     profile.senderName,
+    senderPhone:    profile.senderPhone,
     emailIndex,
   };
 
@@ -176,13 +192,8 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{
         () => researchProspectSync(researchParams),
       );
 
-  // Stamp the correct values derived from lead data
-  signals.signOff      = signOff;
   signals.isGenericEmail = genericEmail;
-
-  // Re-build greeting with the actual name/email from the lead
-  const { buildGreeting: buildGreetingFn } = await import('./prospect-researcher');
-  signals.greeting = buildGreetingFn(effectiveContactName, lead.email, cleanedCompanyName);
+  signals.greeting = buildGreeting(effectiveContactName, lead.email, cleanedCompanyName);
 
   // ── 5. Generate ──────────────────────────────────────────────────────────
   const result = await buildPersonalizedEmail(
@@ -193,8 +204,11 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{
       companyContext: lead.company_context,
       website:        lead.website,
       signals,
-      senderName,
-      senderPhone,
+      senderName:     profile.senderName,
+      senderTitle:    profile.senderTitle,
+      senderCompany:  profile.senderCompany,
+      senderPhone:    profile.senderPhone,
+      senderEmail:    profile.senderEmail,
       customPainPoint: params.customPainPoint,
       emailIndex,
     },
@@ -210,10 +224,12 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{
     qualityPassed:        result.qualityPassed,
     qualityFlagged:       result.qualityFlagged,
     dataSource:           result.dataSource,
-    profileIncomplete:    !profileComplete,
+    profileIncomplete:    !profile.profileComplete,
     isGenericEmail:       genericEmail,
-    greetingIsFallback:   nameIsFallback,
-    fallbackReason:       result.model === 'template' ? (aiProvider ? `AI output scored below 85% threshold after 2 attempts` : aiDiagnostic) : undefined,
+    greetingIsFallback:   !effectiveContactName,
+    fallbackReason:       result.model === 'template'
+      ? (aiProvider ? 'AI output failed quality gate after 2 attempts' : aiDiagnostic)
+      : undefined,
   };
 }
 
