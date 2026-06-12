@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
     // Load sender profile — authoritative source for sender name and phone
     const { data: senderProfile } = await serviceClient
       .from('sender_profiles')
-      .select('full_name, phone, job_title')
+      .select('full_name, phone, job_title, company_name, email')
       .eq('user_id', user.id)
       .maybeSingle();
 
@@ -105,9 +105,11 @@ export async function POST(req: NextRequest) {
       .eq("user_id", user.id)
       .single();
 
-    // Sender name priority: overrideContext > sender_profiles > SMTP account > fallback
-    let resolvedSenderName = overrideContext?.senderName || senderProfile?.full_name || '';
-    let resolvedSenderPhone = overrideContext?.senderPhone || senderProfile?.phone || '';
+    let resolvedSenderName  = overrideContext?.senderName  || senderProfile?.full_name  || '';
+    let resolvedSenderPhone = overrideContext?.senderPhone || senderProfile?.phone       || '';
+    let resolvedSenderTitle   = senderProfile?.job_title    || '';
+    let resolvedSenderCompany = senderProfile?.company_name || 'Pryro';
+    let resolvedSenderEmail   = senderProfile?.email        || '';
 
     // Last resort: pull from SMTP account that sent the original email
     if (!resolvedSenderName && (sentEmail as any).smtp_account_id) {
@@ -138,8 +140,11 @@ export async function POST(req: NextRequest) {
       hasReplied: false,
       yourCompany: "Pryro",
       yourService: settings?.your_service || "ERP platform",
-      senderName: resolvedSenderName,
-      senderPhone: resolvedSenderPhone,
+      senderName:    resolvedSenderName,
+      senderPhone:   resolvedSenderPhone,
+      senderTitle:   resolvedSenderTitle,
+      senderCompany: resolvedSenderCompany,
+      senderEmail:   resolvedSenderEmail,
       contactName: lead?.contact_name || lead?.owner_name || undefined,
       style: style as FollowUpStyle | undefined,
       tone: tone as FollowUpTone | undefined,

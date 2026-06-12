@@ -5,7 +5,8 @@ import {
   Send, Loader2, X, ChevronDown, ChevronRight, ChevronLeft,
   Sparkles, RefreshCw, Eye, MousePointer, CheckCircle,
   Edit3, AtSign, Flame, Search, Filter, Clock, Mail,
-  ArrowUpDown, Calendar, RotateCcw, Users,
+  ArrowUpDown, Calendar, RotateCcw, Users, Activity, AlertCircle,
+  Bot, User,
 } from "lucide-react";
 import { createClient } from "../../../supabase/client";
 import { toast } from "sonner";
@@ -16,7 +17,22 @@ interface LeadThread {
   leadId: string; leadEmail: string; companyName: string; niche: string | null;
   emails: SentEmail[]; replies: EmailReply[];
   hasReply: boolean; latestStatus: string; followupCount: number;
-  priority: number; // 0=normal, 1=opened, 2=clicked (higher = more urgent)
+  priority: number;
+  isDueToday: boolean;
+}
+
+interface ActivityLogEntry {
+  id: string;
+  lead_id: string | null;
+  company_name: string | null;
+  email: string | null;
+  followup_number: number;
+  subject: string | null;
+  status: string;
+  error_message: string | null;
+  is_auto: boolean;
+  needs_manual_review: boolean;
+  sent_at: string;
 }
 
 // ── FU Stage config ────────────────────────────────────────────────────────────
@@ -44,6 +60,9 @@ function fdatetime(d: string) {
 export default function FollowUpModule({ userId }: FollowUpModuleProps) {
   const sb = createClient();
 
+  // ── Tab ───────────────────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<"manual" | "activity">("manual");
+
   // ── Data ──────────────────────────────────────────────────────────────────
   const [sentEmails, setSentEmails] = useState<SentEmail[]>([]);
   const [replies, setReplies] = useState<EmailReply[]>([]);
@@ -51,11 +70,21 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
 
+  // ── Due-today queue map ────────────────────────────────────────────────────
+  const [dueLeadIds, setDueLeadIds] = useState<Set<string>>(new Set());
+
+  // ── Activity log ──────────────────────────────────────────────────────────
+  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityTableMissing, setActivityTableMissing] = useState(false);
+
   // ── Filters ───────────────────────────────────────────────────────────────
   const [search, setSearch] = useState("");
   const [nicheFilter, setNicheFilter] = useState("all");
   const [fuFilter, setFuFilter] = useState<number | "all">("all");
-  const [dateFilter, setDateFilter] = useState(""); // YYYY-MM-DD of original send
+  const [dueOnlyFilter, setDueOnlyFilter] = useState(false);
+  const [daysFilter, setDaysFilter] = useState<number>(0); // 0 = all, 3 = 3+, 5 = 5+, 7 = 7+
+  const [dateFilter, setDateFilter] = useState("");
   const [sortBy, setSortBy] = useState<"priority" | "days" | "name" | "stage">("priority");
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 25;
@@ -100,17 +129,22 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
         .in("status", ["contacted", "Email Sent", "opened", "clicked", "Replied", "replied", "Interested"])
         .order("last_contacted_at", { ascending: false }).limit(1000);
 
-      const [s, r] = await Promise.all([
+      const [s, r, q] = await Promise.all([
         sb.from("sent_emails").select("*").eq("user_id", userId)
           .not("lead_id", "is", null)
           .not("status", "in", '("failed","bounced","invalid_email")')
           .order("sent_at", { ascending: false }).limit(1000),
         sb.from("email_replies").select("*").eq("user_id", userId)
           .order("received_at", { ascending: false }),
+        // Due today: pending queue rows where scheduled_at <= now
+        sb.from("followup_queue").select("lead_id").eq("user_id", userId)
+          .eq("status", "pending")
+          .lte("scheduled_at", new Date().toISOString()),
       ]);
 
       if (s.data) setSentEmails(s.data as SentEmail[]);
       if (r.data) setReplies(r.data as EmailReply[]);
+      if (q.data) setDueLeadIds(new Set(q.data.map((x: any) => x.lead_id as string)));
 
       const m = new Map<string, Lead>();
       contactedLeads?.forEach((l: Lead) => m.set(l.id, l));
@@ -123,6 +157,29 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
       setLeads(m);
     } catch { toast.error("Failed to load data"); }
     finally { setLoading(false); }
+  }, [userId, sb]);
+
+  const loadActivityLog = useCallback(async () => {
+    setActivityLoading(true);
+    try {
+      const { data, error } = await sb
+        .from("followup_activity_log")
+        .select("*")
+        .eq("user_id", userId)
+        .not("status", "eq", "daily_summary")
+        .order("sent_at", { ascending: false })
+        .limit(200);
+      if (error) {
+        if (error.code === "42P01") { setActivityTableMissing(true); }
+        else { toast.error("Could not load activity log"); }
+        return;
+      }
+      setActivityLog((data ?? []) as ActivityLogEntry[]);
+    } catch {
+      setActivityTableMissing(true);
+    } finally {
+      setActivityLoading(false);
+    }
   }, [userId, sb]);
 
   useEffect(() => {
@@ -149,7 +206,13 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
       const lead = leads.get(e.lead_id);
       if (!lead?.email) continue;
       if (!map.has(e.lead_id)) {
-        map.set(e.lead_id, { leadId: e.lead_id, leadEmail: lead.email, companyName: lead.company_name || lead.email, niche: lead.niche || null, emails: [], replies: [], hasReply: false, latestStatus: e.status || "sent", followupCount: 0, priority: 0 });
+        map.set(e.lead_id, {
+          leadId: e.lead_id, leadEmail: lead.email,
+          companyName: lead.company_name || lead.email,
+          niche: lead.niche || null, emails: [], replies: [],
+          hasReply: false, latestStatus: e.status || "sent",
+          followupCount: 0, priority: 0, isDueToday: dueLeadIds.has(e.lead_id),
+        });
       }
       const t = map.get(e.lead_id)!;
       t.emails.push(e);
@@ -162,12 +225,13 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
     const all = Array.from(map.values());
     for (const t of all) {
       t.followupCount = t.emails.filter((e: any) => e.is_followup).length;
-      // Priority: clicked=2, opened=1, else=0
       const latest = t.emails.filter(e => !["failed", "bounced"].includes(e.status || "")).slice(-1)[0];
       t.priority = latest?.clicked_at ? 2 : latest?.opened_at ? 1 : 0;
+      // Refresh isDueToday from latest set
+      t.isDueToday = dueLeadIds.has(t.leadId);
     }
     return all.filter(t => t.emails.some(e => !["failed", "bounced"].includes(e.status || "")));
-  }, [sentEmails, replies, leads]);
+  }, [sentEmails, replies, leads, dueLeadIds]);
 
   // ── Eligible (no reply, not bounced) ──────────────────────────────────────
   const eligible = useMemo(() =>
@@ -197,10 +261,18 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
     }
     if (nicheFilter !== "all") list = list.filter(t => (t.niche || "") === nicheFilter);
     if (fuFilter !== "all") list = list.filter(t => t.followupCount === fuFilter);
+    if (dueOnlyFilter) list = list.filter(t => t.isDueToday);
+    if (daysFilter > 0) {
+      list = list.filter(t => {
+        const latest = t.emails.filter(e => !["failed","bounced"].includes(e.status||"")).slice(-1)[0];
+        return latest ? daysSince(latest.sent_at) >= daysFilter : false;
+      });
+    }
     if (dateFilter) list = list.filter(t => getOriginalDate(t) === dateFilter);
 
     return [...list].sort((a, b) => {
       if (sortBy === "priority") {
+        if (a.isDueToday !== b.isDueToday) return a.isDueToday ? -1 : 1;
         if (b.priority !== a.priority) return b.priority - a.priority;
         const daysA = daysSince((a.emails.filter(e => !["failed","bounced"].includes(e.status||"")).slice(-1)[0]?.sent_at || ""));
         const daysB = daysSince((b.emails.filter(e => !["failed","bounced"].includes(e.status||"")).slice(-1)[0]?.sent_at || ""));
@@ -215,7 +287,7 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
       if (sortBy === "stage") return a.followupCount - b.followupCount;
       return 0;
     });
-  }, [eligible, search, nicheFilter, fuFilter, dateFilter, sortBy]);
+  }, [eligible, search, nicheFilter, fuFilter, dueOnlyFilter, daysFilter, dateFilter, sortBy]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -255,16 +327,41 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
     if (!drawerThread || !drawerBody.trim()) return;
     setDrawerSending(true);
     try {
+      // De-dupe check
+      const dupeRes = await fetch("/api/followup/check-duplicate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leadId: drawerThread.leadId, followupNumber: drawerThread.followupCount + 1 }),
+      });
+      const dupeData = await dupeRes.json();
+      if (dupeData.isDuplicate) {
+        toast.warning("A follow-up for this lead at this stage was already sent in the last 24 hours.");
+        setDrawerSending(false);
+        return;
+      }
+
       const res = await fetch("/api/send-email", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ to: drawerThread.leadEmail, subject: drawerSubj, body: drawerBody, leadId: drawerThread.leadId, scheduleFollowups: false }),
       });
       const d = await res.json();
       if (!d.success) throw new Error(d.error);
-      toast.success(`Follow-up sent to ${drawerThread.companyName}!`);
 
-      // Optimistic update — move lead out of list
-      setSentEmails(prev => [...prev]); // trigger re-render; load() will refresh fully
+      // Mark queue row as sent + schedule next stage
+      await fetch("/api/followup/mark-sent", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leadId: drawerThread.leadId,
+          followupNumber: drawerThread.followupCount + 1,
+          sentEmailId: d.sentEmailId ?? "",
+          threadId: d.threadId ?? undefined,
+          subject: drawerSubj,
+          body: drawerBody,
+          companyName: drawerThread.companyName,
+          leadEmail: drawerThread.leadEmail,
+        }),
+      }).catch(() => {});
+
+      toast.success(`Follow-up sent to ${drawerThread.companyName}!`);
       setDrawerThread(null);
       load();
     } catch (e: any) { toast.error(e.message || "Send failed"); }
@@ -458,11 +555,175 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
   // ─────────────────────────────────────────────────────────────────────────
   if (loading) return <div className="flex items-center justify-center h-full"><Loader2 size={22} className="animate-spin text-blue-600" /></div>;
 
+  // ── Activity log counts for today ─────────────────────────────────────────
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayLogs = activityLog.filter(e => e.sent_at.startsWith(todayStr) && e.is_auto);
+  const todaySent   = todayLogs.filter(e => e.status === "sent").length;
+  const todayFailed = todayLogs.filter(e => e.status === "failed").length;
+
+  // ── Activity Log Tab ──────────────────────────────────────────────────────
+  if (activeTab === "activity") {
+    return (
+      <div className="flex flex-col h-full bg-white overflow-hidden">
+        {/* Tab bar */}
+        <div className="flex items-center gap-1 px-6 pt-4 pb-0 border-b border-gray-200 bg-white shrink-0">
+          <button onClick={() => setActiveTab("manual")}
+            className="px-4 py-2.5 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-800 transition-colors">
+            Manual Follow-Up
+          </button>
+          <button onClick={() => { setActiveTab("activity"); loadActivityLog(); }}
+            className="px-4 py-2.5 text-sm font-semibold border-b-2 border-blue-600 text-blue-600 transition-colors flex items-center gap-1.5">
+            <Activity size={13} /> Auto Activity Log
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto p-6 flex flex-col gap-4">
+          {/* Summary banner */}
+          {(todaySent > 0 || todayFailed > 0) && (
+            <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-sm font-medium ${todayFailed > 0 ? "bg-amber-50 border-amber-200 text-amber-800" : "bg-green-50 border-green-200 text-green-800"}`}>
+              <Activity size={15} className="flex-shrink-0" />
+              <span>
+                {todaySent + todayFailed} follow-ups processed automatically today —{" "}
+                <strong>{todaySent} delivered</strong>
+                {todayFailed > 0 && <>, <span className="text-red-600 font-bold">{todayFailed} failed</span></>}
+              </span>
+              {todayFailed > 0 && (
+                <span className="ml-auto flex items-center gap-1 text-red-600 text-xs font-semibold">
+                  <AlertCircle size={12} /> {todayFailed} need review
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Table or states */}
+          {activityLoading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 size={22} className="animate-spin text-blue-600" />
+            </div>
+          ) : activityTableMissing ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+              <AlertCircle size={32} className="text-amber-400" />
+              <p className="text-sm font-semibold text-gray-700">Activity log table not set up yet</p>
+              <p className="text-xs text-gray-500 max-w-sm">
+                Run <strong>SETUP_FOLLOWUP_ACTIVITY_LOG.sql</strong> in your Supabase SQL Editor to enable this feature.
+              </p>
+              <button onClick={loadActivityLog}
+                className="mt-2 flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700">
+                <RefreshCw size={12} /> Retry
+              </button>
+            </div>
+          ) : activityLog.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+              <Activity size={32} className="text-gray-300" />
+              <p className="text-sm font-semibold text-gray-500">No automatic activity yet</p>
+              <p className="text-xs text-gray-400">Automatic follow-ups will appear here after the daily cron runs (8 AM UTC).</p>
+            </div>
+          ) : (
+            <div className="border border-gray-200 rounded-xl overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-44">Company</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-44">Email</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-20">Stage</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Subject</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-36">Time</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-20">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-20">Source</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {activityLog.map(entry => (
+                    <tr key={entry.id} className={`hover:bg-gray-50 transition-colors ${entry.needs_manual_review ? "bg-red-50/30" : ""}`}>
+                      <td className="px-4 py-3">
+                        <p className="text-xs font-semibold text-gray-900 truncate max-w-[160px]">
+                          {entry.company_name || "—"}
+                        </p>
+                      </td>
+                      <td className="px-4 py-3">
+                        <p className="text-xs text-gray-500 truncate max-w-[160px]">{entry.email || "—"}</p>
+                      </td>
+                      <td className="px-4 py-3">
+                        {entry.followup_number > 0 ? (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                            FU #{entry.followup_number}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <p className="text-xs text-gray-700 truncate max-w-[240px]" title={entry.subject ?? ""}>
+                          {entry.subject || "—"}
+                        </p>
+                        {entry.error_message && (
+                          <p className="text-[10px] text-red-500 mt-0.5 truncate max-w-[240px]" title={entry.error_message}>
+                            ⚠ {entry.error_message}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <p className="text-xs text-gray-500">{fdatetime(entry.sent_at)}</p>
+                      </td>
+                      <td className="px-4 py-3">
+                        {entry.status === "sent" && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-green-50 text-green-700 border border-green-200">Sent</span>
+                        )}
+                        {entry.status === "failed" && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-red-50 text-red-700 border border-red-200">Failed</span>
+                        )}
+                        {entry.status === "duplicate_skipped" && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-gray-100 text-gray-500 border border-gray-200">Duplicate</span>
+                        )}
+                        {entry.status === "skipped" && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-gray-100 text-gray-500 border border-gray-200">Skipped</span>
+                        )}
+                        {entry.needs_manual_review && (
+                          <span className="ml-1 text-[10px] text-amber-600 font-semibold">⚑ Review</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {entry.is_auto ? (
+                          <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                            <Bot size={9} /> Auto
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-gray-100 text-gray-600 border border-gray-200">
+                            <User size={9} /> Manual
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full bg-white overflow-hidden">
 
       {/* ── LEFT: Main table ─────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+
+        {/* Tab bar */}
+        <div className="flex items-center gap-1 px-6 pt-4 pb-0 border-b border-gray-200 bg-white shrink-0">
+          <button onClick={() => setActiveTab("manual")}
+            className="px-4 py-2.5 text-sm font-semibold border-b-2 border-blue-600 text-blue-600 transition-colors">
+            Manual Follow-Up
+          </button>
+          <button onClick={() => { setActiveTab("activity"); loadActivityLog(); }}
+            className="px-4 py-2.5 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-800 transition-colors flex items-center gap-1.5">
+            <Activity size={13} /> Auto Activity Log
+            {todayFailed > 0 && (
+              <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-bold">{todayFailed}</span>
+            )}
+          </button>
+        </div>
 
         {/* Top bar */}
         <div className="px-6 py-4 border-b border-gray-200 bg-white shrink-0">
@@ -495,6 +756,22 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
                 placeholder="Search company or email…"
                 className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-blue-400 bg-white" />
             </div>
+
+            {/* Due today toggle */}
+            <button
+              onClick={() => { setDueOnlyFilter(v => !v); setPage(0); }}
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border transition-all ${dueOnlyFilter ? "bg-amber-500 text-white border-amber-500" : "bg-white text-gray-600 border-gray-200 hover:border-amber-400"}`}>
+              <Clock size={12} /> Due today{dueLeadIds.size > 0 && !dueOnlyFilter && ` (${dueLeadIds.size})`}
+            </button>
+
+            {/* Days since filter */}
+            <select value={daysFilter} onChange={e => { setDaysFilter(Number(e.target.value)); setPage(0); }}
+              className="px-3 py-2 text-xs border border-gray-200 rounded-lg outline-none focus:border-blue-400 bg-white text-gray-700">
+              <option value={0}>All days</option>
+              <option value={3}>3+ days ago</option>
+              <option value={5}>5+ days ago</option>
+              <option value={7}>7+ days ago</option>
+            </select>
 
             {/* Date filter */}
             <input type="date" value={dateFilter} onChange={e => { setDateFilter(e.target.value); setPage(0); }}
@@ -603,7 +880,12 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
                             {isHighPriority && <Flame size={13} className="text-orange-500 shrink-0" />}
                             {isOpened && !isHighPriority && <Eye size={12} className="text-amber-500 shrink-0" />}
                             <div className="min-w-0">
-                              <p className="text-sm font-semibold text-gray-900 truncate">{thread.companyName}</p>
+                              <div className="flex items-center gap-1.5">
+                                <p className="text-sm font-semibold text-gray-900 truncate">{thread.companyName}</p>
+                                {thread.isDueToday && (
+                                  <span className="flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-amber-500 text-white">DUE</span>
+                                )}
+                              </div>
                               <p className="text-[11px] text-gray-400 truncate">{thread.leadEmail}{thread.niche ? ` · ${thread.niche}` : ""}</p>
                             </div>
                           </div>

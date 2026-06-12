@@ -85,11 +85,53 @@ function calculateNextFollowupTime(
 }
 
 /**
+ * Insert a row into followup_activity_log (fire-and-forget; errors are swallowed)
+ */
+async function logActivity(
+  supabase: ReturnType<typeof createServiceClient>,
+  params: {
+    user_id: string;
+    lead_id?: string | null;
+    company_name?: string | null;
+    email?: string | null;
+    followup_number: number;
+    subject?: string | null;
+    body?: string | null;
+    status: "sent" | "failed" | "skipped" | "duplicate_skipped" | "daily_summary";
+    error_message?: string | null;
+    is_auto: boolean;
+    needs_manual_review?: boolean;
+  }
+): Promise<void> {
+  try {
+    await supabase.from("followup_activity_log").insert({
+      user_id: params.user_id,
+      lead_id: params.lead_id ?? null,
+      company_name: params.company_name ?? null,
+      email: params.email ?? null,
+      followup_number: params.followup_number,
+      subject: params.subject ?? null,
+      body: params.body ?? null,
+      status: params.status,
+      error_message: params.error_message ?? null,
+      is_auto: params.is_auto,
+      needs_manual_review: params.needs_manual_review ?? false,
+      sent_at: new Date().toISOString(),
+    });
+  } catch {
+    // Non-critical — never let logging break the send flow
+  }
+}
+
+/**
  * Process a single follow-up from the queue
+ * Returns { success, error }
+ * Includes one retry on SMTP failure.
  */
 async function processSingleFollowup(
   queueItem: any,
-  smtpManager: SMTPManager
+  smtpManager: SMTPManager,
+  isRetry = false,
 ): Promise<{ success: boolean; error?: string }> {
   const supabase = createServiceClient();
 
@@ -170,8 +212,8 @@ async function processSingleFollowup(
       ? `${queueItem.original_references} ${queueItem.original_message_id}`
       : queueItem.original_message_id;
 
-    // Send via SMTP
-    const sendResult = await smtpManager.sendEmail(
+    // Send via SMTP (with one retry on failure)
+    let sendResult = await smtpManager.sendEmail(
       queueItem.lead_email,
       subject,
       body,
@@ -181,6 +223,21 @@ async function processSingleFollowup(
         references,
       }
     );
+
+    if (!sendResult.success) {
+      // Wait 2 seconds then retry once
+      await new Promise((r) => setTimeout(r, 2000));
+      sendResult = await smtpManager.sendEmail(
+        queueItem.lead_email,
+        subject,
+        body,
+        body.replace(/\n/g, "<br>"),
+        {
+          inReplyTo: queueItem.original_message_id,
+          references,
+        }
+      );
+    }
 
     if (!sendResult.success) {
       throw new Error(sendResult.error || "SMTP send failed");
@@ -238,6 +295,19 @@ async function processSingleFollowup(
       })
       .eq("id", queueItem.lead_id);
 
+    // Log to activity log
+    await logActivity(supabase, {
+      user_id: queueItem.user_id,
+      lead_id: queueItem.lead_id,
+      company_name: queueItem.company_name,
+      email: queueItem.lead_email,
+      followup_number: queueItem.followup_number,
+      subject,
+      body,
+      status: "sent",
+      is_auto: true,
+    });
+
     // Schedule next follow-up if within limit
     const maxFollowups = queueItem.max_followups || 5;
     const nextFollowupNumber = queueItem.followup_number + 1;
@@ -290,8 +360,8 @@ async function processSingleFollowup(
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
 
-    // Update queue with error
-    const retryCount = (queueItem.retry_count || 0) + 1;
+    // Update queue with error — retry_count forced to 2 (already retried once in send)
+    const retryCount = 2;
     const maxRetries = 3;
 
     await supabase
@@ -303,6 +373,26 @@ async function processSingleFollowup(
         updated_at: new Date().toISOString(),
       })
       .eq("id", queueItem.queue_id);
+
+    // Mark lead as followup_failed so it surfaces in manual review
+    await supabase
+      .from("leads")
+      .update({ status: "followup_failed", updated_at: new Date().toISOString() })
+      .eq("id", queueItem.lead_id);
+
+    // Log failure to activity log
+    await logActivity(supabase, {
+      user_id: queueItem.user_id,
+      lead_id: queueItem.lead_id,
+      company_name: queueItem.company_name,
+      email: queueItem.lead_email,
+      followup_number: queueItem.followup_number,
+      subject: queueItem.subject,
+      status: "failed",
+      error_message: errorMsg,
+      is_auto: true,
+      needs_manual_review: true,
+    });
 
     return { success: false, error: errorMsg };
   }
@@ -370,18 +460,97 @@ export async function processFollowUps(
       continue;
     }
 
+    // ── Dedup check: skip if already sent in the last 24 hours ───────────
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { data: recentSend } = await supabase
+      .from("sent_emails")
+      .select("id")
+      .eq("lead_id", item.lead_id)
+      .eq("followup_number", item.followup_number)
+      .eq("status", "sent")
+      .gte("sent_at", cutoff)
+      .limit(1);
+
+    if (recentSend && recentSend.length > 0) {
+      result.skipped++;
+      await supabase
+        .from("followup_queue")
+        .update({ status: "skipped", skip_reason: "duplicate", updated_at: new Date().toISOString() })
+        .eq("id", item.queue_id);
+      await logActivity(supabase, {
+        user_id: userId,
+        lead_id: item.lead_id,
+        company_name: item.company_name,
+        email: item.lead_email,
+        followup_number: item.followup_number,
+        subject: item.subject,
+        status: "duplicate_skipped",
+        is_auto: true,
+      });
+      continue;
+    }
+
     const { success, error: sendError } = await processSingleFollowup(item, smtpManager);
 
     if (success) {
       result.sent++;
+      // Log successful auto send
+      await logActivity(supabase, {
+        user_id: userId,
+        lead_id: item.lead_id,
+        company_name: item.company_name,
+        email: item.lead_email,
+        followup_number: item.followup_number,
+        subject: item.subject,
+        status: "sent",
+        is_auto: true,
+      });
     } else {
-      result.failed++;
-      if (sendError) result.errors.push(sendError);
+      // Retry once after 2 seconds
+      await new Promise(r => setTimeout(r, 2000));
+      const retry = await processSingleFollowup(item, smtpManager);
+      if (retry.success) {
+        result.sent++;
+        await logActivity(supabase, {
+          user_id: userId, lead_id: item.lead_id,
+          company_name: item.company_name, email: item.lead_email,
+          followup_number: item.followup_number, subject: item.subject,
+          status: "sent", is_auto: true,
+        });
+      } else {
+        result.failed++;
+        const errMsg = retry.error ?? sendError;
+        if (errMsg) result.errors.push(errMsg);
+        // Log failure + flag for manual review
+        await logActivity(supabase, {
+          user_id: userId, lead_id: item.lead_id,
+          company_name: item.company_name, email: item.lead_email,
+          followup_number: item.followup_number, subject: item.subject,
+          status: "failed", is_auto: true, error_message: errMsg,
+          needs_manual_review: true,
+        });
+        // Flag lead
+        if (item.lead_id) {
+          await supabase.from("leads")
+            .update({ status: "followup_failed", updated_at: new Date().toISOString() })
+            .eq("id", item.lead_id);
+        }
+      }
     }
 
     // Rate limiting — small delay between sends
     await new Promise((r) => setTimeout(r, 1500 + Math.random() * 1000));
   }
+
+  // Insert daily summary log entry
+  await logActivity(supabase, {
+    user_id: userId,
+    lead_id: null,
+    followup_number: 0,
+    subject: `Daily summary: ${result.sent} sent, ${result.failed} failed, ${result.skipped} skipped`,
+    status: "daily_summary" as any,
+    is_auto: true,
+  });
 
   return result;
 }
