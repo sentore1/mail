@@ -1,5 +1,5 @@
-/**
- * SENDER PROFILE — shared utility
+﻿/**
+ * SENDER PROFILE, shared utility
  * ─────────────────────────────────
  * Single source of truth for loading a user's sender profile and
  * rendering the professional email footer.
@@ -34,7 +34,7 @@ export interface SenderProfile {
   is_complete?: boolean;
 }
 
-/** Empty/placeholder profile — used before the DB row loads */
+/** Empty/placeholder profile, used before the DB row loads */
 export const EMPTY_PROFILE: Omit<SenderProfile, 'user_id'> = {
   full_name:    '',
   job_title:    '',
@@ -52,7 +52,7 @@ export const EMPTY_PROFILE: Omit<SenderProfile, 'user_id'> = {
 /**
  * Builds the plain-text footer from the sender profile.
  * Format: Name \n Title \n Company \n Phone [\n Email]
- * No "Best regards," — the email body ends directly with the CTA, then the footer.
+ * No "Best regards,", the email body ends directly with the CTA, then the footer.
  */
 export function renderFooter(profile: SenderProfile): string {
   const lines: string[] = [];
@@ -66,7 +66,7 @@ export function renderFooter(profile: SenderProfile): string {
 
 /**
  * Builds the casual sign-off used in AI system prompts.
- * Shorter than the full footer — just name + company + phone.
+ * Shorter than the full footer, just name + company + phone.
  *
  * Output:  "Alice from Pryro\n0790038006"
  */
@@ -88,7 +88,7 @@ export function renderSignOff(profile: SenderProfile): string {
  * Rules:
  *  - Use prospect's first name when it exists: "Hi John,"
  *  - Never use "Dear Sir/Madam" or "To Whom It May Concern"
- *  - Fallback: "Hi there," — neutral and human
+ *  - Fallback: "Hi there,", neutral and human
  */
 export function buildGreeting(contactName?: string | null): string {
   if (!contactName) return 'Hi there,';
@@ -106,18 +106,13 @@ export interface ProfileGap {
   label: string;
 }
 
-export function getMissingFields(profile: Partial<SenderProfile>): ProfileGap[] {
-  const required: Array<{ field: keyof SenderProfile; label: string }> = [
-    { field: 'full_name',    label: 'Full name'    },
-    { field: 'job_title',    label: 'Job title'    },
-    { field: 'company_name', label: 'Company name' },
-    { field: 'phone',        label: 'Phone number' },
-  ];
-  return required.filter(r => !profile[r.field] || String(profile[r.field]).trim() === '');
+export function getMissingFields(_profile: Partial<SenderProfile>): ProfileGap[] {
+  // All fields are optional, no blocking validation
+  return [];
 }
 
 export function isProfileComplete(profile: Partial<SenderProfile>): boolean {
-  return getMissingFields(profile).length === 0;
+  return !!profile.full_name?.trim();
 }
 
 // ─── Supabase helpers (client-side) ─────────────────────────────────────────

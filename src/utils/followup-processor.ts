@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Follow-Up Processor
  *
  * Core engine that processes scheduled follow-ups:
@@ -119,7 +119,7 @@ async function logActivity(
       sent_at: new Date().toISOString(),
     });
   } catch {
-    // Non-critical — never let logging break the send flow
+    // Non-critical, never let logging break the send flow
   }
 }
 
@@ -206,8 +206,7 @@ async function processSingleFollowup(
         const now = new Date();
         const hour = (now.getUTCHours() + 3) % 24;
         const timeGreet = hour >= 5 && hour < 12 ? 'Good morning' : hour >= 12 && hour < 17 ? 'Good afternoon' : 'Greetings';
-        const coName = (queueItem.company_name || 'there').replace(/\b(Ltd|Limited|Inc|LLC|LLP|PLC|Corp|Pty|Pvt)\b\.?\s*/gi, '').trim();
-        body = `${timeGreet} ${coName} team,\n\nJust following up on my previous email about Pryro.\n\nI have 10 minutes free tomorrow afternoon if that works — what do you think?\n\nAlice Umubyeyi — Pryro | 0790038006`;
+        body = `${timeGreet},\n\nJust following up on my previous email about Pryro.\n\nI have 10 minutes free tomorrow afternoon if that works, what do you think?\n\nAlice Umubyeyi\nPryro | 0790038006`;
       }
     }
 
@@ -364,7 +363,7 @@ async function processSingleFollowup(
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
 
-    // Update queue with error — retry_count forced to 2 (already retried once in send)
+    // Update queue with error, retry_count forced to 2 (already retried once in send)
     const retryCount = 2;
     const maxRetries = 3;
 
@@ -403,7 +402,7 @@ async function processSingleFollowup(
 }
 
 /**
- * Main processor — fetches and sends all due follow-ups
+ * Main processor, fetches and sends all due follow-ups
  */
 export async function processFollowUps(
   userId: string,
@@ -542,7 +541,7 @@ export async function processFollowUps(
       }
     }
 
-    // Rate limiting — small delay between sends
+    // Rate limiting, small delay between sends
     await new Promise((r) => setTimeout(r, 1500 + Math.random() * 1000));
   }
 

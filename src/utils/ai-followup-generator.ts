@@ -1,4 +1,4 @@
-/**
+﻿/**
  * AI Follow-Up Generator
  *
  * Generates intelligent, contextual follow-up emails using:
@@ -86,14 +86,14 @@ export function decideFollowUpStyle(ctx: FollowUpContext): {
 
   // Never send if already replied (caller should check this first)
   if (hasReplied) {
-    return { style: "professional", reason: "Lead has replied — should not send follow-up" };
+    return { style: "professional", reason: "Lead has replied, should not send follow-up" };
   }
 
   // Lead opened multiple times → they're interested but haven't replied → stronger CTA
   if (openCount >= 3 && followupNumber <= 2) {
     return {
       style: "value_focused",
-      reason: `Lead opened ${openCount} times — showing interest. Value-focused CTA.`,
+      reason: `Lead opened ${openCount} times, showing interest. Value-focused CTA.`,
     };
   }
 
@@ -101,7 +101,7 @@ export function decideFollowUpStyle(ctx: FollowUpContext): {
   if (clickCount > 0) {
     return {
       style: "direct",
-      reason: "Lead clicked a link — high intent signal. Direct conversion follow-up.",
+      reason: "Lead clicked a link, high intent signal. Direct conversion follow-up.",
     };
   }
 
@@ -133,7 +133,7 @@ export function decideFollowUpStyle(ctx: FollowUpContext): {
   if (followupNumber === 3) {
     return {
       style: "value_focused",
-      reason: "Third follow-up. Lead hasn't responded to previous approaches — lead with value.",
+      reason: "Third follow-up. Lead hasn't responded to previous approaches, lead with value.",
     };
   }
 
@@ -149,7 +149,7 @@ export function decideFollowUpStyle(ctx: FollowUpContext): {
   if (followupNumber >= 5) {
     return {
       style: "breakup",
-      reason: `Follow-up #${followupNumber}. Breakup email — highest reply rate for final touchpoints.`,
+      reason: `Follow-up #${followupNumber}. Breakup email, highest reply rate for final touchpoints.`,
     };
   }
 
@@ -166,15 +166,14 @@ function cleanCompanyNameForGreeting(raw: string): string {
   return cleanCompanyNameShared(raw);
 }
 
-// ── Greeting — time-aware, always company team ────────────────────────────────
-// "Good morning Ke.Cicinsurancegroup team," / "Good afternoon Xyz team,"
+// ── Greeting, time-aware, always company team ────────────────────────────────
+// No name in greeting, just the time-of-day salutation.
 function resolveGreeting(contactName?: string | null, companyName?: string): string {
-  const cleaned = cleanCompanyNameForGreeting(companyName || 'there');
   const timeGreet = getTimeGreeting();
-  return `${timeGreet} ${cleaned} team,`;
+  return `${timeGreet},`;
 }
 
-// ── Signature builder — one-line format ──────────────────────────────────────
+// ── Signature builder, one-line format ──────────────────────────────────────
 // Format: Name \n Title \n Company \n Phone
 // No "Best regards".
 function buildSignature(
@@ -220,7 +219,7 @@ function extractFromOriginalEmail(body: string): {
     /pryro is an erp that/i.test(s) || /pryro connects/i.test(s) || /pryro links/i.test(s)
   ) ?? null;
 
-  // Find the problem sentence — typically the second paragraph or a sentence
+  // Find the problem sentence, typically the second paragraph or a sentence
   // about what the company "deals with" or the specific pain
   const problemLine = sentences.find(s =>
     /many .* businesses|many .* teams|deal with|often deal|still (tracking|reconciling|managing|finding|running)|month-end|payroll|stock|billing|expiry|reconcili/i.test(s) &&
@@ -233,14 +232,14 @@ function extractFromOriginalEmail(body: string): {
 function buildSystemPrompt(style: FollowUpStyle, senderName: string, tone?: FollowUpTone): string {
   return `You write short follow-up emails for Pryro, an ERP platform that connects finance, inventory, HR, and operations.
 
-CRITICAL RULES — no exceptions:
-1. Greeting is ALWAYS time-aware: "Good morning [Company] team," or "Good afternoon [Company] team," — never a first name, never Sir/Madam, never Dear, never "Hi"
-2. Subject MUST start with "Follow-up #[N]: Re: [original subject]" — so the prospect sees it is a follow-up
+CRITICAL RULES, no exceptions:
+1. Greeting is ALWAYS time-aware: "Good morning [Company] team," or "Good afternoon [Company] team,", never a first name, never Sir/Madam, never Dear, never "Hi"
+2. Subject MUST start with "Follow-up #[N]: Re: [original subject]", so the prospect sees it is a follow-up
 3. Every email MUST mention Pryro by name and describe one specific operational outcome it delivers
-4. Never repeat the original email word for word — take a new angle
+4. Never repeat the original email word for word, take a new angle
 5. Never mention: commission, referral, percent, free trial, pryro.com, Sir/Madam, cutting-edge, revolutionary, streamline, leverage, empower, synergy, "I wanted to reach out", "I hope this finds you well", "Best regards"
-6. Signature is ALWAYS the single-line format provided — copy it VERBATIM, never change it, never add "Best regards" before it
-7. CTA must propose a SPECIFIC time slot, e.g. "I have 10 minutes free tomorrow afternoon — does that work?" — never an open-ended question
+6. Signature is ALWAYS the single-line format provided, copy it VERBATIM, never change it, never add "Best regards" before it
+7. CTA must propose a SPECIFIC time slot, e.g. "I have 10 minutes free tomorrow afternoon, does that work?", never an open-ended question
 
 STAGE RULES:
 - Stage 1 (Day 3): Reference previous email, remind them what Pryro does in one sentence, propose a specific time slot. Under 60 words.
@@ -254,7 +253,7 @@ BODY:
 
 [follow-up body]
 
-[signature — one line, no "Best regards"]`;
+[signature, one line, no "Best regards"]`;
 }
 
 function buildUserPrompt(ctx: FollowUpContext, style: FollowUpStyle): string {
@@ -274,25 +273,25 @@ function buildUserPrompt(ctx: FollowUpContext, style: FollowUpStyle): string {
     problemLine ? `Problem we mentioned: "${problemLine}"` : null,
     pryroLine   ? `Pryro solution we mentioned: "${pryroLine}"` : null,
     ctx.originalBody
-      ? `Full original email (for context only — do NOT repeat it verbatim):\n---\n${ctx.originalBody.slice(0, 600)}\n---`
+      ? `Full original email (for context only, do NOT repeat it verbatim):\n---\n${ctx.originalBody.slice(0, 600)}\n---`
       : null,
   ].filter(Boolean).join('\n\n');
 
   const stagePrompts: Record<number, string> = {
-    1: `Write a short follow-up email. (STAGE 1 — Day 3 after original send)
+    1: `Write a short follow-up email. (STAGE 1, Day 3 after original send)
 
 Company: ${ctx.companyName}
 Sector: ${sector}
 Original subject: ${ctx.originalSubject}
 
-WHAT WE ALREADY TOLD THEM (use this to connect the dots — do NOT copy word for word):
+WHAT WE ALREADY TOLD THEM (use this to connect the dots, do NOT copy word for word):
 ${originalContext}
 
 Rules:
 - Greeting must be exactly: ${greeting}
 - Subject must be exactly: ${subject}
 - Open with: "Just following up on my email from a few days ago"
-- In 1–2 sentences, remind them of the specific problem we mentioned and how Pryro solves it — rephrase, don't copy
+- In 1–2 sentences, remind them of the specific problem we mentioned and how Pryro solves it, rephrase, don't copy
 - End with: "Would you be open to a quick 10-minute call?"
 - Under 65 words total body (not counting greeting or signature)
 - Never use Sir/Madam, never use first names
@@ -300,20 +299,20 @@ Rules:
 Signature to use (copy VERBATIM):
 ${sig}`,
 
-    2: `Write a follow-up from a new angle. (STAGE 2 — Day 7 after original send)
+    2: `Write a follow-up from a new angle. (STAGE 2, Day 7 after original send)
 
 Company: ${ctx.companyName}
 Sector: ${sector}
 Original subject: ${ctx.originalSubject}
 
-WHAT WE ALREADY TOLD THEM (use this as context — do NOT repeat it):
+WHAT WE ALREADY TOLD THEM (use this as context, do NOT repeat it):
 ${originalContext}
 
 Rules:
 - Greeting must be exactly: ${greeting}
 - Subject must be exactly: ${subject}
-- Open with: "I know inboxes get busy — one more try from my side."
-- Give a NEW specific outcome from Pryro that is different from what was in the original email — a result this company would care about based on their sector
+- Open with: "I know inboxes get busy, one more try from my side."
+- Give a NEW specific outcome from Pryro that is different from what was in the original email, a result this company would care about based on their sector
 - Make it concrete and short: "Most [sector] teams say the biggest win from Pryro is [outcome]"
 - End with: "Worth 10 minutes to see if it fits ${cleanName}?"
 - Under 70 words total body (not counting greeting or signature)
@@ -322,13 +321,13 @@ Rules:
 Signature to use (copy VERBATIM):
 ${sig}`,
 
-    3: `Write a final follow-up. (STAGE 3 — Day 14 after original send)
+    3: `Write a final follow-up. (STAGE 3, Day 14 after original send)
 
 Company: ${cleanName}
 Sector: ${sector}
 Original subject: ${ctx.originalSubject}
 
-WHAT WE ALREADY TOLD THEM (use this as context — do NOT repeat it):
+WHAT WE ALREADY TOLD THEM (use this as context, do NOT repeat it):
 ${originalContext}
 
 Rules:
@@ -349,7 +348,7 @@ ${sig}`,
   return stagePrompts[stage]!;
 }
 
-// ── Template-based follow-ups — 3 fixed stages, no AI needed ─────────────────
+// ── Template-based follow-ups, 3 fixed stages, no AI needed ─────────────────
 
 export function buildTemplateFollowUp(
   ctx: FollowUpContext,
@@ -378,17 +377,17 @@ export function buildTemplateFollowUp(
     }
     // Sector bank fallback
     const sectorOutcomes: Record<string, string> = {
-      hospital:     `Pryro is an ERP that connects department budgets and HR payroll so your finance team sees live spend against approved limits — not last month's figures.`,
+      hospital:     `Pryro is an ERP that connects department budgets and HR payroll so your finance team sees live spend against approved limits, not last month's figures.`,
       healthcare:   `Pryro is an ERP that connects HR attendance and patient billing so your admin team reconciles both from one screen instead of two separate systems.`,
-      pharmacy:     `Pryro is an ERP that connects drug stock, billing, and payroll so expiry losses and billing errors surface before month-end — not after.`,
+      pharmacy:     `Pryro is an ERP that connects drug stock, billing, and payroll so expiry losses and billing errors surface before month-end, not after.`,
       hotel:        `Pryro is an ERP that connects staff scheduling, vendor billing, and financial management so month-end reconciliation drops from five days to same-day.`,
       lodge:        `Pryro is an ERP that connects bookings, staff costs, and accounts so your real occupancy margin is visible before month-end instead of after.`,
       travel:       `Pryro is an ERP that connects bookings, commissions, and supplier invoicing so your margin on every deal is visible before the trip ends.`,
-      restaurant:   `Pryro is an ERP that connects kitchen stock and daily sales so food cost is a live number your team sees every morning — not a month-end surprise.`,
-      retail:       `Pryro is an ERP that connects inventory, reorder points, and live sales so a stockout triggers an alert — not an empty shelf in your store.`,
+      restaurant:   `Pryro is an ERP that connects kitchen stock and daily sales so food cost is a live number your team sees every morning, not a month-end surprise.`,
+      retail:       `Pryro is an ERP that connects inventory, reorder points, and live sales so a stockout triggers an alert, not an empty shelf in your store.`,
       ngo:          `Pryro is an ERP that connects grant budgets, field expenses, and payroll so donor compliance reports pull together in hours instead of a week.`,
       logistics:    `Pryro is an ERP that connects driver payroll, trip logs, and client billing so month-end reconciliation drops from days to hours.`,
-      school:       `Pryro is an ERP that connects fee collection and staff payroll so your bursar's numbers balance automatically — no two-week reconciliation sprint.`,
+      school:       `Pryro is an ERP that connects fee collection and staff payroll so your bursar's numbers balance automatically, no two-week reconciliation sprint.`,
       construction: `Pryro is an ERP that connects project budgets, contractor payroll, and procurement so cost overruns show up before they show up in the P&L.`,
       generic:      `Pryro is an ERP that connects financial management, HR payroll, and operations into one platform so your team stops moving data between tools every month.`,
     };
@@ -398,66 +397,66 @@ export function buildTemplateFollowUp(
 
   const pryroReminder = buildPryroReminder();
 
-  // Build problem context for FU #2 — what specific problem we told them about
+  // Build problem context for FU #2, what specific problem we told them about
   const buildProblemContext = (): string => {
     if (problemLine) return problemLine;
     const stage2Outcomes: Record<string, string> = {
-      hospital:     `Most hospital finance teams say the biggest win from Pryro is getting payroll and department spend visible in one place — the manual month-end reconciliation stops entirely.`,
-      healthcare:   `Most healthcare admin teams say the biggest win from Pryro is eliminating the back-and-forth between HR and billing at month-end — both come from one screen.`,
+      hospital:     `Most hospital finance teams say the biggest win from Pryro is getting payroll and department spend visible in one place, the manual month-end reconciliation stops entirely.`,
+      healthcare:   `Most healthcare admin teams say the biggest win from Pryro is eliminating the back-and-forth between HR and billing at month-end, both come from one screen.`,
       pharmacy:     `Most pharmacy teams say the biggest win from Pryro is catching expiry and billing issues before month-end instead of finding write-offs in the count.`,
       hotel:        `Most hospitality ops teams say the biggest win from Pryro is month-end going from a five-day manual exercise to same-day because scheduling, billing, and finance finally connect.`,
-      lodge:        `Most lodge operators say the biggest win from Pryro is knowing the real occupancy margin before month-end — not after the decisions are already made.`,
+      lodge:        `Most lodge operators say the biggest win from Pryro is knowing the real occupancy margin before month-end, not after the decisions are already made.`,
       travel:       `Most travel agency teams say the biggest win from Pryro is seeing booking margin before a trip ends instead of weeks after it's already closed.`,
       restaurant:   `Most restaurant operators say the biggest win from Pryro is food cost being a live daily number instead of a month-end surprise.`,
-      retail:       `Most retail teams say the biggest win from Pryro is stockout alerts replacing the empty-shelf discovery — the system warns before the customer finds nothing.`,
+      retail:       `Most retail teams say the biggest win from Pryro is stockout alerts replacing the empty-shelf discovery, the system warns before the customer finds nothing.`,
       ngo:          `Most NGO finance teams say the biggest win from Pryro is cutting donor report preparation from a week to a single afternoon.`,
       logistics:    `Most logistics ops teams say the biggest win from Pryro is month-end driver payroll reconciliation going from days to hours.`,
       school:       `Most school bursars say the biggest win from Pryro is fee collection and staff payroll balancing automatically instead of needing two weeks of chasing.`,
       construction: `Most construction finance managers say the biggest win from Pryro is cost overruns showing up in the system before they show up in the P&L.`,
-      generic:      `Most businesses say the biggest win from Pryro is the team stopping moving data between finance, HR, and operations tools — it flows automatically instead.`,
+      generic:      `Most businesses say the biggest win from Pryro is the team stopping moving data between finance, HR, and operations tools, it flows automatically instead.`,
     };
     const nicheKey = Object.keys(stage2Outcomes).find(k => (niche || '').toLowerCase().includes(k)) ?? 'generic';
     return stage2Outcomes[nicheKey]!;
   };
 
-  // FU #1 — Day 3 — Remind them of the problem + Pryro solution from the original email
+  // FU #1, Day 3, Remind them of the problem + Pryro solution from the original email
   if (followupNumber === 1) {
     return {
       subject,
       body: `${greeting}
 
-Just following up on my email from a few days ago — did it land at a bad time?
+Just following up on my email from a few days ago, did it land at a bad time?
 
 As a quick reminder: ${pryroReminder}
 
-I have 10 minutes free tomorrow afternoon if that works — what do you think?
+I have 10 minutes free tomorrow afternoon if that works, what do you think?
 
 ${sig}`,
     };
   }
 
-  // FU #2 — Day 7 — New angle, different Pryro outcome
+  // FU #2, Day 7, New angle, different Pryro outcome
   if (followupNumber === 2) {
     return {
       subject,
       body: `${greeting}
 
-I know inboxes get busy — one more try from my side.
+I know inboxes get busy, one more try from my side.
 
 ${buildProblemContext()}
 
-I am free for a quick call later today — does that work for you?
+I am free for a quick call later today, does that work for you?
 
 ${sig}`,
     };
   }
 
-  // FU #3 — Day 14 — Final, warm, references original email context
+  // FU #3, Day 14, Final, warm, references original email context
   return {
     subject,
     body: `${greeting}
 
-Last follow-up from me — keeping it short.
+Last follow-up from me, keeping it short.
 
 ${pryroReminder}
 
@@ -602,11 +601,11 @@ async function callAIProvider(
     return null;
   }
 
-  // 3. Try each provider — auto-fallback on rate limit or errors
+  // 3. Try each provider, auto-fallback on rate limit or errors
   for (const provider of providers) {
     try {
       const result = await callSingleProvider(provider, systemPrompt, userPrompt, maxTokens);
-      // Success — return immediately
+      // Success, return immediately
       if (providers.length > 1 && providers[0].provider !== provider.provider) {
         console.log(`[ai-followup-generator] Used fallback provider: ${provider.provider}`);
       }
@@ -618,23 +617,23 @@ async function callAIProvider(
       const isAuthError   = status === 401 || status === 403;
 
       if (isAuthError) {
-        // Bad API key — skip this provider but try others
-        console.warn(`[ai-followup-generator] ${provider.provider} auth error (${status}) — skipping`);
+        // Bad API key, skip this provider but try others
+        console.warn(`[ai-followup-generator] ${provider.provider} auth error (${status}), skipping`);
         continue;
       }
 
       if (isRateLimit) {
-        console.warn(`[ai-followup-generator] ${provider.provider} rate limited (429) — trying next provider`);
+        console.warn(`[ai-followup-generator] ${provider.provider} rate limited (429), trying next provider`);
         continue;
       }
 
       if (isServerError) {
-        console.warn(`[ai-followup-generator] ${provider.provider} server error (${status}) — trying next provider`);
+        console.warn(`[ai-followup-generator] ${provider.provider} server error (${status}), trying next provider`);
         continue;
       }
 
-      // Other error (bad request, parse error, network, etc.) — log and try next
-      console.error(`[ai-followup-generator] ${provider.provider} error: ${err.message} — trying next provider`);
+      // Other error (bad request, parse error, network, etc.), log and try next
+      console.error(`[ai-followup-generator] ${provider.provider} error: ${err.message}, trying next provider`);
       continue;
     }
   }
@@ -692,7 +691,7 @@ export async function generateFollowUp(
     const fallbackSubject = `Re: ${ctx.originalSubject}`;
     const { subject, body } = parseAIFollowUp(aiResult.text, fallbackSubject);
 
-    // Sanity check — body must be more than just a greeting line
+    // Sanity check, body must be more than just a greeting line
     if (subject && body && body.length > 80) {
       return {
         subject,
@@ -711,7 +710,7 @@ export async function generateFollowUp(
     subject,
     body,
     style: decidedStyle,
-    decisionReason: reason + " (template fallback — no AI provider configured)",
+    decisionReason: reason + " (template fallback, no AI provider configured)",
     modelUsed: "template",
   };
 }
@@ -785,7 +784,7 @@ const NEGATIVE_PATTERNS = [
 
 /**
  * Classify an email reply using keyword analysis.
- * Falls back gracefully — no AI required for basic classification.
+ * Falls back gracefully, no AI required for basic classification.
  */
 export function classifyReply(
   body: string,
