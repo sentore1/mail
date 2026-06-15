@@ -159,29 +159,24 @@ export function decideFollowUpStyle(ctx: FollowUpContext): {
 // ── Style-specific prompt builders ────────────────────────────────────────────
 
 // ── Company name cleaner ──────────────────────────────────────────────────────
-// Strips legal suffixes and bracket content before use in follow-up greetings.
+// Re-uses the shared helper from prospect-researcher via import.
+import { getTimeGreeting, cleanCompanyNameForGreeting as cleanCompanyNameShared } from './prospect-researcher';
+
 function cleanCompanyNameForGreeting(raw: string): string {
-  let name = raw
-    .replace(/\s*\([^)]*\)\s*/g, ' ')                                              // (NW), (Pvt), etc.
-    .replace(/\b(Private Limited|Pvt\.?\s*Ltd\.?|Public Limited Company)\b\.?\s*/gi, '')
-    .replace(/\b(Ltd|Limited|Inc|LLC|LLP|PLC|Corp|Corporation|NW|Pty|Pvt)\b\.?\s*/gi, ' ')
-    .replace(/\s*[-–—|/]\s*$/, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return name || raw.trim();
+  return cleanCompanyNameShared(raw);
 }
 
-// ── Greeting — always company team, never first name ─────────────────────────
-// Follow-ups go to scraped contacts who often have no real first name.
-// Using "Hi [Company] team," is always safe, professional, and correct.
+// ── Greeting — time-aware, always company team ────────────────────────────────
+// "Good morning Ke.Cicinsurancegroup team," / "Good afternoon Xyz team,"
 function resolveGreeting(contactName?: string | null, companyName?: string): string {
   const cleaned = cleanCompanyNameForGreeting(companyName || 'there');
-  return `Hi ${cleaned} team,`;
+  const timeGreet = getTimeGreeting();
+  return `${timeGreet} ${cleaned} team,`;
 }
 
-// ── Signature builder — full multi-line from sender profile ──────────────────
-// Format: Best regards, \n Name \n Title \n Company \n Phone
-// All fields are optional except name — only include what exists.
+// ── Signature builder — one-line format ──────────────────────────────────────
+// Format: Name \n Title \n Company \n Phone
+// No "Best regards".
 function buildSignature(
   senderName: string,
   senderPhone?: string,
@@ -189,13 +184,13 @@ function buildSignature(
   senderCompany?: string,
   senderEmail?: string,
 ): string {
-  const lines: string[] = ['Best regards,', ''];
-  lines.push(senderName);
+  const lines: string[] = [];
+  if (senderName)    lines.push(senderName);
   if (senderTitle)   lines.push(senderTitle);
-  lines.push(senderCompany || 'Pryro');
+  if (senderCompany) lines.push(senderCompany);
   if (senderPhone)   lines.push(senderPhone);
   if (senderEmail)   lines.push(senderEmail);
-  return lines.join('\n');
+  return lines.join('\n') || 'Alice Umubyeyi\nPryro';
 }
 
 // ── Extract problem + solution from original email body ───────────────────────
@@ -239,16 +234,17 @@ function buildSystemPrompt(style: FollowUpStyle, senderName: string, tone?: Foll
   return `You write short follow-up emails for Pryro, an ERP platform that connects finance, inventory, HR, and operations.
 
 CRITICAL RULES — no exceptions:
-1. Greeting is ALWAYS "Hi [Company] team," — never a first name, never Sir/Madam, never Dear
+1. Greeting is ALWAYS time-aware: "Good morning [Company] team," or "Good afternoon [Company] team," — never a first name, never Sir/Madam, never Dear, never "Hi"
 2. Subject MUST start with "Follow-up #[N]: Re: [original subject]" — so the prospect sees it is a follow-up
 3. Every email MUST mention Pryro by name and describe one specific operational outcome it delivers
 4. Never repeat the original email word for word — take a new angle
-5. Never mention: free trial, pryro.com, commission, referral, percent, Sir/Madam, cutting-edge, revolutionary, streamline, leverage, empower, synergy, "I wanted to reach out", "I hope this finds you well"
-6. Signature is ALWAYS the multi-line block provided — copy it VERBATIM, never change it
+5. Never mention: commission, referral, percent, free trial, pryro.com, Sir/Madam, cutting-edge, revolutionary, streamline, leverage, empower, synergy, "I wanted to reach out", "I hope this finds you well", "Best regards"
+6. Signature is ALWAYS the single-line format provided — copy it VERBATIM, never change it, never add "Best regards" before it
+7. CTA must propose a SPECIFIC time slot, e.g. "I have 10 minutes free tomorrow afternoon — does that work?" — never an open-ended question
 
 STAGE RULES:
-- Stage 1 (Day 3): Reference previous email, remind them what Pryro does in one sentence, ask for 10-minute call. Under 60 words.
-- Stage 2 (Day 7): New angle, acknowledge busy inbox, share a specific Pryro outcome different from stage 1, ask "Worth 10 minutes to see if it fits [Company]?". Under 65 words.
+- Stage 1 (Day 3): Reference previous email, remind them what Pryro does in one sentence, propose a specific time slot. Under 60 words.
+- Stage 2 (Day 7): New angle, acknowledge busy inbox, share a specific Pryro outcome different from stage 1, propose a specific time slot. Under 65 words.
 - Stage 3 (Day 14): Very short and warm, final follow-up, mention Pryro once, end with "Pryro is here when the time is right." Under 45 words.
 
 OUTPUT FORMAT:
@@ -258,7 +254,7 @@ BODY:
 
 [follow-up body]
 
-[signature block]`;
+[signature — one line, no "Best regards"]`;
 }
 
 function buildUserPrompt(ctx: FollowUpContext, style: FollowUpStyle): string {
@@ -434,7 +430,7 @@ Just following up on my email from a few days ago — did it land at a bad time?
 
 As a quick reminder: ${pryroReminder}
 
-Would you be open to a quick 10-minute call to see if it fits ${cleanName}?
+I have 10 minutes free tomorrow afternoon if that works — what do you think?
 
 ${sig}`,
     };
@@ -450,7 +446,7 @@ I know inboxes get busy — one more try from my side.
 
 ${buildProblemContext()}
 
-Worth 10 minutes to see if it fits ${cleanName}?
+I am free for a quick call later today — does that work for you?
 
 ${sig}`,
     };

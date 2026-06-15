@@ -12,7 +12,7 @@
 import { NextRequest }         from 'next/server';
 import { createClient }        from '../../../../supabase/server';
 import { createServiceClient } from '../../../../supabase/service';
-import { researchProspectSync, isGenericEmailAddress, extractFirstName, cleanCompanyName, isUsableFirstName, buildGuaranteedEmail } from '@/utils/prospect-researcher';
+import { researchProspectSync, isGenericEmailAddress, extractFirstName, cleanCompanyName, isUsableFirstName, buildGuaranteedEmail, buildGreeting } from '@/utils/prospect-researcher';
 import { buildPersonalizedEmail } from '@/utils/personalized-email-builder';
 
 export const runtime    = 'nodejs';
@@ -301,18 +301,8 @@ export async function POST(request: NextRequest) {
           // Stamp correct values from lead data
           signals.isGenericEmail = genericEmail;
 
-          // Build greeting: real name if available, otherwise "Hi there,"
-          const cleanCo = name.replace(/\b(Ltd|Limited|Inc|LLC|LLP|PLC|Corp|Pty|Pvt)\b\.?\s*/gi, '').trim();
-          if (resolvedContactName && isUsableFirstName(resolvedContactName)) {
-            signals.greeting = `Hi ${resolvedContactName},`;
-          } else if (lead.email && !genericEmail) {
-            const { name: emailName } = extractFirstName(null, lead.email);
-            signals.greeting = (emailName && isUsableFirstName(emailName))
-              ? `Hi ${emailName},`
-              : 'Hi there,';
-          } else {
-            signals.greeting = 'Hi there,';
-          }
+          // Build greeting: time-aware + company name — never email prefix
+          signals.greeting = buildGreeting(null, null, name);
 
           console.log(`[bulk-gen] Generating for "${name}" | ai=${!!aiProvider} | greeting="${signals.greeting}" | niche=${lead.niche}`);
 

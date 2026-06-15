@@ -27,6 +27,10 @@ export interface SenderProfile {
   email?: string | null;
   website?: string | null;
   linkedin_url?: string | null;
+  // Optional: custom Pryro sentence typed by the user.
+  // When set, it replaces AI-generated Pryro lines in every email.
+  // Format: "Pryro is an ERP that [what it does for your market]"
+  custom_pryro_sentence?: string | null;
   is_complete?: boolean;
 }
 
@@ -39,31 +43,25 @@ export const EMPTY_PROFILE: Omit<SenderProfile, 'user_id'> = {
   email:        null,
   website:      null,
   linkedin_url: null,
+  custom_pryro_sentence: null,
   is_complete:  false,
 };
 
-// ─── Footer renderer (Q4) ────────────────────────────────────────────────────
+// ─── Footer renderer ─────────────────────────────────────────────────────────
 
 /**
- * Builds the professional plain-text footer that appears at the bottom of
- * every generated email.
- *
- * Output:
- *   Best regards,
- *
- *   Alice UMUBYEYI
- *   Executive Sales
- *   Pryro
- *   0790038006
+ * Builds the plain-text footer from the sender profile.
+ * Format: Name \n Title \n Company \n Phone [\n Email]
+ * No "Best regards," — the email body ends directly with the CTA, then the footer.
  */
 export function renderFooter(profile: SenderProfile): string {
-  const lines: string[] = ['Best regards,', ''];
-  lines.push(profile.full_name || 'Your Name');
+  const lines: string[] = [];
+  if (profile.full_name)    lines.push(profile.full_name);
   if (profile.job_title)    lines.push(profile.job_title);
   if (profile.company_name) lines.push(profile.company_name);
   if (profile.phone)        lines.push(profile.phone);
   if (profile.email)        lines.push(profile.email);
-  return lines.join('\n');
+  return lines.join('\n') || 'Alice Umubyeyi\nPryro';
 }
 
 /**

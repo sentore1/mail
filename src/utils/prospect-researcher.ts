@@ -515,62 +515,62 @@ function getSectorQuestion(niche: string | null, companyName: string, idx: numbe
 
 const SECTOR_SUBJECTS: Record<string, Array<(company: string) => string>> = {
   pharmacy: [
-    (c) => `Is ${c} still tracking drug expiry manually?`,
-    (c) => `Are stock, billing and payroll separate at ${c}?`,
-    (c) => `How is ${c} catching expiry dates before write-offs?`,
+    (c) => `Why is ${c}'s stock team still tracking expiry manually?`,
+    (c) => `Is ${c}'s billing team still reconciling stock and invoices separately?`,
+    (c) => `Why is ${c} still catching expiry write-offs at month-end?`,
   ],
   healthcare: [
-    (c) => `Is ${c} still reconciling payroll and billing manually?`,
-    (c) => `How long does month-end take at ${c}?`,
-    (c) => `Are HR and patient billing still separate at ${c}?`,
+    (c) => `Why is ${c}'s admin team still reconciling payroll and billing manually?`,
+    (c) => `Is ${c}'s HR team still running attendance in a separate system?`,
+    (c) => `Why is ${c}'s finance team still doing a month-end marathon?`,
   ],
   hospital: [
-    (c) => `Are department budgets and payroll connected at ${c}?`,
-    (c) => `Is ${c} getting live department spend visibility?`,
-    (c) => `How does ${c} track HR and finance together?`,
+    (c) => `Why is ${c}'s finance team still working from last month's budget figures?`,
+    (c) => `Is ${c}'s HR team still doing shift payroll in a separate system?`,
+    (c) => `Why is ${c} still blind to live department spend?`,
   ],
   hotel: [
-    (c) => `Is month-end still a manual process at ${c}?`,
-    (c) => `Are staff scheduling and billing connected at ${c}?`,
-    (c) => `How does ${c} reconcile housekeeping and payroll?`,
+    (c) => `Why is ${c}'s ops team still doing month-end manually?`,
+    (c) => `Is ${c}'s finance team still reconciling payroll and vendor bills separately?`,
+    (c) => `Why is ${c} still running housekeeping and billing in separate systems?`,
   ],
   lodge: [
-    (c) => `Are bookings and accounts still separate at ${c}?`,
-    (c) => `Is month-end reconciliation still manual at ${c}?`,
+    (c) => `Why is ${c}'s accounts team still reconciling bookings manually?`,
+    (c) => `Is ${c} still finding out occupancy margin after month-end?`,
   ],
   travel: [
-    (c) => `Does ${c} know its booking margin before trips end?`,
-    (c) => `Are agent commissions still tracked in spreadsheets at ${c}?`,
-    (c) => `Is the P&L always a month behind at ${c}?`,
+    (c) => `Why is ${c}'s finance team still calculating booking margin after the trip?`,
+    (c) => `Is ${c}'s accounts team still tracking commissions in spreadsheets?`,
+    (c) => `Why is ${c}'s P&L always a month behind?`,
   ],
   restaurant: [
-    (c) => `Does ${c} have a live view of food cost?`,
-    (c) => `Are kitchen stock and supplier invoices connected at ${c}?`,
+    (c) => `Why is ${c}'s kitchen team still finding out food cost at month-end?`,
+    (c) => `Is ${c}'s ops team still managing stock and sales in separate systems?`,
   ],
   retail: [
-    (c) => `Is ${c} still getting caught by stockouts?`,
-    (c) => `Are inventory reorders still managed manually at ${c}?`,
+    (c) => `Why is ${c}'s inventory team still getting caught by stockouts?`,
+    (c) => `Is ${c}'s ops team still managing reorders manually?`,
   ],
   ngo: [
-    (c) => `Is donor reporting still taking too long at ${c}?`,
-    (c) => `Are grant budgets and field spend connected at ${c}?`,
+    (c) => `Why is ${c}'s finance team still spending a week on donor reports?`,
+    (c) => `Is ${c}'s accounts team still reconciling grant budgets manually?`,
   ],
   construction: [
-    (c) => `Does ${c} see cost overruns before they happen?`,
-    (c) => `Are project budgets and payroll still separate at ${c}?`,
+    (c) => `Why is ${c}'s finance team still seeing cost overruns after they happen?`,
+    (c) => `Is ${c}'s project team still tracking budgets in a separate system?`,
   ],
   logistics: [
-    (c) => `Is month-end billing still taking days at ${c}?`,
-    (c) => `Are driver payroll and stock connected at ${c}?`,
+    (c) => `Why is ${c}'s finance team still spending days on month-end billing?`,
+    (c) => `Is ${c}'s HR team still reconciling driver payroll manually?`,
   ],
   school: [
-    (c) => `Are fees and staff payroll still separate at ${c}?`,
-    (c) => `Is term-end reporting still a manual process at ${c}?`,
+    (c) => `Why is ${c}'s bursar still reconciling fees and payroll manually?`,
+    (c) => `Is ${c}'s finance team still doing term-end in separate systems?`,
   ],
   generic: [
-    (c) => `Is ${c} still running ops across multiple tools?`,
-    (c) => `Are HR and finance still separate at ${c}?`,
-    (c) => `How does ${c} keep ops data in one place?`,
+    (c) => `Why is ${c}'s finance team still managing operations manually?`,
+    (c) => `Is ${c}'s ops team still running finance and HR in separate tools?`,
+    (c) => `Why is ${c} still managing back-office work across disconnected systems?`,
   ],
 };
 
@@ -603,55 +603,64 @@ export function buildGuaranteedEmail(params: {
   const subject = getSectorSubject(niche, companyName, emailIndex);
   const nicheKey = detectNicheKey(niche);
 
-  // Greeting: real name or "Hi there," — never junk company name
-  const hasName = firstName && firstName.length > 1 && firstName !== 'Sir/Madam';
-  const greeting = hasName ? `Hi ${firstName},` : 'Hi there,';
+  // Greeting: time-aware + company name — never uses email prefix
+  const greeting = buildGreeting(null, null, companyName);
 
-  // Problem sentence — "[Company] in [Location], many [sector] businesses often deal with [pain]."
+  // Problem sentence — personal observation, not generic industry fact
   const problems: Record<string, string> = {
-    pharmacy:     `${companyName} in ${loc}, many pharmacy businesses often deal with drug expiry write-offs and billing errors that only surface at month-end because stock and invoicing run in separate systems.`,
-    healthcare:   `${companyName} in ${loc}, many healthcare businesses often deal with days of manual work every month reconciling staff payroll against patient billing because HR and finance run separately.`,
-    hospital:     `${companyName} in ${loc}, many hospital finance teams often deal with getting a live view of actual department spend being nearly impossible because HR payroll and procurement aren't connected.`,
-    hotel:        `${companyName} in ${loc}, many hospitality businesses often deal with month-end reconciliation taking three to five days because housekeeping rosters, vendor invoices, and payroll each live in a different system.`,
-    lodge:        `${companyName} in ${loc}, many lodge operators often deal with only finding out their real occupancy margin after month-end because bookings and accounts run in separate places.`,
-    travel:       `${companyName} in ${loc}, many travel agencies often deal with only knowing the real margin on a booking after the trip has ended because commissions and supplier costs live in spreadsheets.`,
-    restaurant:   `${companyName} in ${loc}, many restaurant businesses often deal with food cost only becoming visible at month-end because kitchen stock, supplier invoices, and daily sales aren't in the same system.`,
-    retail:       `${companyName} in ${loc}, many retail businesses often deal with stockouts only being caught when the shelf is already empty because inventory and reorder points aren't connected to live sales.`,
-    ngo:          `${companyName} in ${loc}, many NGO finance teams often deal with donor compliance reports taking the better part of a week because field expenses and grant budgets live in separate spreadsheets.`,
-    construction: `${companyName} in ${loc}, many construction businesses often deal with cost overruns only showing up in the P&L after the margin is already gone because project budgets and procurement run separately.`,
-    logistics:    `${companyName} in ${loc}, many logistics businesses often deal with month-end reconciliation taking days because driver payroll, trip logs, and client billing all live in separate places.`,
-    school:       `${companyName} in ${loc}, many schools often deal with bursar reconciliation taking two weeks every term because fee collection and staff payroll run in separate registers.`,
-    generic:      `${companyName} in ${loc}, many financial services businesses often deal with manual workflows and fragmented tools that slow teams down.`,
+    pharmacy:     `I have seen this exact issue in businesses like yours — drug expiry write-offs and billing errors that only surface at month-end because stock and invoicing run in separate systems — and I think ${companyName} might be dealing with the same thing.`,
+    healthcare:   `I have seen this exact issue in businesses like yours — days of manual work every month reconciling staff payroll against patient billing because HR and finance run separately — and I think ${companyName} might be dealing with the same thing.`,
+    hospital:     `I have seen this exact issue in businesses like yours — getting a live view of actual department spend is nearly impossible when HR payroll and procurement aren't connected — and I think ${companyName} might be dealing with the same thing.`,
+    hotel:        `I have seen this exact issue in businesses like yours — month-end reconciliation taking three to five days because housekeeping rosters, vendor invoices, and payroll each live in a different system — and I think ${companyName} might be dealing with the same thing.`,
+    lodge:        `I have seen this exact issue in businesses like yours — only finding out the real occupancy margin after month-end because bookings and accounts run in separate places — and I think ${companyName} might be dealing with the same thing.`,
+    travel:       `I have seen this exact issue in businesses like yours — only knowing the real margin on a booking after the trip has ended because agent commissions and supplier costs live in spreadsheets — and I think ${companyName} might be dealing with the same thing.`,
+    restaurant:   `I have seen this exact issue in businesses like yours — food cost only becoming visible at month-end because kitchen stock, supplier invoices, and daily sales aren't in the same system — and I think ${companyName} might be dealing with the same thing.`,
+    retail:       `I have seen this exact issue in businesses like yours — stockouts only caught when the shelf is already empty because inventory levels and reorder points aren't connected to live sales — and I think ${companyName} might be dealing with the same thing.`,
+    ngo:          `I have seen this exact issue in businesses like yours — donor compliance reports taking the better part of a week because field expenses and grant budgets live in separate spreadsheets — and I think ${companyName} might be dealing with the same thing.`,
+    construction: `I have seen this exact issue in businesses like yours — cost overruns only showing up in the P&L after the margin is already gone because project budgets and procurement run separately — and I think ${companyName} might be dealing with the same thing.`,
+    logistics:    `I have seen this exact issue in businesses like yours — month-end reconciliation taking days because driver payroll, trip logs, and client billing all live in separate places — and I think ${companyName} might be dealing with the same thing.`,
+    school:       `I have seen this exact issue in businesses like yours — bursar reconciliation taking two weeks every term because fee collection and staff payroll run in separate registers — and I think ${companyName} might be dealing with the same thing.`,
+    generic:      `I have seen this exact issue in businesses like yours — finance, HR, inventory, and operations each running in a different tool, with the team spending days every month moving data that should flow automatically — and I think ${companyName} might be dealing with the same thing.`,
   };
 
-  // Pryro sentence WITH commission embedded
+  // Pryro sentence — NO commission
   const pryros: Record<string, string> = {
-    pharmacy:     'Pryro is an ERP that connects your drug stock, billing, and payroll into one live platform so expiry losses and billing errors surface before month-end and we offer a 20–30% commission for every successfully referred client.',
-    healthcare:   'Pryro is an ERP that connects HR attendance and patient billing into one platform so your admin team reconciles both from one screen instead of two separate systems and we offer a 20–30% commission for every successfully referred client.',
-    hospital:     "Pryro is an ERP that connects department budgets and HR payroll so your finance team sees live spend against approved limits — not last month's figures and we offer a 20–30% commission for every successfully referred client.",
-    hotel:        'Pryro is an ERP that connects staff scheduling, vendor billing, and financial management so month-end reconciliation drops from five days to same-day and we offer a 20–30% commission for every successfully referred client.',
-    lodge:        'Pryro is an ERP that connects bookings, staff costs, and accounts so your real occupancy margin is visible before month-end instead of after and we offer a 20–30% commission for every successfully referred client.',
-    travel:       'Pryro is an ERP that connects bookings, commissions, and supplier invoicing so your margin on every deal is visible before the trip ends and we offer a 20–30% commission for every successfully referred client.',
-    restaurant:   'Pryro is an ERP that connects kitchen stock and daily sales so food cost is a live number your team sees every morning — not a month-end surprise and we offer a 20–30% commission for every successfully referred client.',
-    retail:       'Pryro is an ERP that connects inventory, reorder points, and live sales so a stockout triggers an alert in the system — not an empty shelf in your store and we offer a 20–30% commission for every successfully referred client.',
-    ngo:          'Pryro is an ERP that connects grant budgets, field expenses, and payroll so donor compliance reports pull together in hours instead of a week and we offer a 20–30% commission for every successfully referred client.',
-    construction: 'Pryro is an ERP that connects project budgets, contractor payroll, and procurement so cost overruns show up before they show up in the P&L and we offer a 20–30% commission for every successfully referred client.',
-    logistics:    'Pryro is an ERP that connects driver payroll, trip logs, and client billing so month-end reconciliation drops from days to hours and we offer a 20–30% commission for every successfully referred client.',
-    school:       "Pryro is an ERP that connects fee collection and staff payroll so your bursar's numbers balance automatically — no two-week reconciliation sprint and we offer a 20–30% commission for every successfully referred client.",
-    generic:      'Pryro is an ERP that replaces those manual workflows and fragmented tools with one unified system for finance, inventory, HR, and operations and we offer a 20–30% commission for every successfully referred client.',
+    pharmacy:     'Pryro is an ERP that replaces those manual workflows with one unified system for finance, inventory, HR, and operations. Specifically: it connects your drug stock, billing, and payroll into one live platform so expiry losses and billing errors surface before month-end.',
+    healthcare:   'Pryro is an ERP that replaces those manual workflows with one unified system for finance, inventory, HR, and operations. Specifically: it connects HR attendance and patient billing so your admin team reconciles both from one screen instead of two separate systems.',
+    hospital:     "Pryro is an ERP that replaces those manual workflows with one unified system for finance, inventory, HR, and operations. Specifically: it connects department budgets and HR payroll so your finance team sees live spend against approved limits — not last month's figures.",
+    hotel:        'Pryro is an ERP that replaces those manual workflows with one unified system for finance, inventory, HR, and operations. Specifically: it connects staff scheduling, vendor billing, and financial management so month-end reconciliation drops from five days to same-day.',
+    lodge:        'Pryro is an ERP that replaces those manual workflows with one unified system for finance, inventory, HR, and operations. Specifically: it connects bookings, staff costs, and accounts so your real occupancy margin is visible before month-end instead of after.',
+    travel:       'Pryro is an ERP that replaces those manual workflows with one unified system for finance, inventory, HR, and operations. Specifically: it connects bookings, agent commissions, and supplier invoicing so your margin on every deal is visible before the trip ends.',
+    restaurant:   'Pryro is an ERP that replaces those manual workflows with one unified system for finance, inventory, HR, and operations. Specifically: it connects kitchen stock and daily sales so food cost is a live number your team sees every morning — not a month-end surprise.',
+    retail:       'Pryro is an ERP that replaces those manual workflows with one unified system for finance, inventory, HR, and operations. Specifically: it connects inventory, reorder points, and live sales so a stockout triggers an alert — not an empty shelf.',
+    ngo:          'Pryro is an ERP that replaces those manual workflows with one unified system for finance, inventory, HR, and operations. Specifically: it connects grant budgets, field expenses, and payroll so donor compliance reports pull together in hours instead of a week.',
+    construction: 'Pryro is an ERP that replaces those manual workflows with one unified system for finance, inventory, HR, and operations. Specifically: it connects project budgets, contractor payroll, and procurement so cost overruns show up before they show up in the P&L.',
+    logistics:    'Pryro is an ERP that replaces those manual workflows with one unified system for finance, inventory, HR, and operations. Specifically: it connects driver payroll, trip logs, and client billing so month-end reconciliation drops from days to hours.',
+    school:       "Pryro is an ERP that replaces those manual workflows with one unified system for finance, inventory, HR, and operations. Specifically: it connects fee collection and staff payroll so your bursar's numbers balance automatically — no two-week reconciliation sprint.",
+    generic:      'Pryro is an ERP that replaces those manual workflows with one unified system for finance, inventory, HR, and operations.',
   };
+
+  // CTA — specific time slot
+  const ctas = [
+    'I have 10 minutes free tomorrow afternoon if that works — what do you think?',
+    'I am free for a quick call later today — does that work for you?',
+    'I have a slot open tomorrow morning if you want a quick look — does that work?',
+  ];
+  const cta = ctas[emailIndex % ctas.length]!;
 
   const problem = problems[nicheKey] ?? problems['generic']!;
   const pryro   = pryros[nicheKey]   ?? pryros['generic']!;
-  const cta     = 'Would you be open to a 10-minute call to see if it is relevant?';
 
-  const footerLines: string[] = ['Best regards,'];
-  if (params.senderName)    footerLines.push(params.senderName);
-  if (params.senderTitle)   footerLines.push(params.senderTitle);
-  if (params.senderCompany) footerLines.push(params.senderCompany);
-  if (params.senderPhone)   footerLines.push(params.senderPhone);
-  if (params.senderEmail)   footerLines.push(params.senderEmail);
-  const footer = footerLines.join('\n');
+  // Signature from sender profile fields — multi-line, no "Best regards"
+  const senderLine = (() => {
+    const lines: string[] = [];
+    if (params.senderName)    lines.push(params.senderName);
+    if (params.senderTitle)   lines.push(params.senderTitle);
+    if (params.senderCompany) lines.push(params.senderCompany);
+    if (params.senderPhone)   lines.push(params.senderPhone);
+    if (params.senderEmail)   lines.push(params.senderEmail);
+    return lines.join('\n') || 'Alice Umubyeyi\nPryro';
+  })();
 
   const body = `${greeting}
 
@@ -661,7 +670,7 @@ ${pryro}
 
 ${cta}
 
-${footer}`;
+${senderLine}`;
 
   return { subject, body };
 }
@@ -751,7 +760,26 @@ export function cleanCompanyName(raw: string): CompanyNameResult {
     return { cleaned: name, valid: false, reason: `"${name}" contains ellipsis — likely scraped junk, not a company name` };
   }
 
-  // ── Mostly non-letter characters ──────────────────────────────────────────
+  // ── All-caps junk detection ────────────────────────────────────────────────
+  // Real company names are not written in ALL CAPS longer than ~5 words.
+  // Directory titles, scraped headings, and nav items often are.
+  const uppercaseWords = (name.match(/\b[A-Z]{2,}\b/g) || []).length;
+  const totalWords = name.split(/\s+/).length;
+  if (totalWords >= 4 && uppercaseWords / totalWords > 0.6) {
+    return { cleaned: name, valid: false, reason: `"${name}" is mostly ALL CAPS — likely a scraped heading or directory title` };
+  }
+
+  // ── Very long names that are clearly descriptions ─────────────────────────
+  // "PHYSICAL ADDRESSES AND CONTACTS OF THE SIX NGOs THAT FORM PART OF THE"
+  // Real company names are rarely more than 7 words
+  if (totalWords > 8) {
+    // Check if it reads like a sentence/description (common filler words)
+    const fillerWords = (name.toLowerCase().match(/\b(of|the|and|that|form|part|which|with|for|are|have|has|from|this|these|those|addresses|contacts|physical|list|directory)\b/g) || []).length;
+    if (fillerWords >= 3) {
+      return { cleaned: name, valid: false, reason: `"${name.slice(0, 60)}..." looks like a description, not a company name` };
+    }
+  }
+
   // Real company names are mostly letters. If >40% are special chars, skip.
   const letters = (name.match(/[a-zA-ZÀ-ÖØ-öø-ÿ]/g) || []).length;
   if (name.length > 4 && letters / name.length < 0.4) {
@@ -874,7 +902,22 @@ export function extractFirstName(
     }
 
     // Strategy C: pure single word that looks like a name
+    // Extra guard: reject if it matches the company domain name prefix (e.g. "callc" from callc@cic.co.ke)
+    // or if it looks like a company abbreviation (all lowercase, looks like a slug/acronym)
     if (/^[a-z]+$/.test(local) && isValidName(local)) {
+      // Reject short all-lowercase tokens that are likely company slugs or product codes
+      // Real first names are at least 3 chars and not all-caps-when-titlecased from domain context
+      // Additional guard: if local matches domain's first label, it's the company brand, not a name
+      const domainFirstLabel = email.split('@')[1]?.split('.')[0]?.toLowerCase() ?? '';
+      if (local === domainFirstLabel) {
+        // email prefix == domain name (e.g. cic@cic.co.ke) — definitely not a person's name
+        return { name: null, source: 'none' };
+      }
+      // Reject if looks like a company abbreviation: <= 5 chars and all same-type (likely acronym)
+      // or if it starts with a company-sounding pattern
+      if (local.length <= 5 && !/^(ann|bob|dan|eve|ian|ivy|jay|joe|joy|kay|kim|lee|leo|max|may|ray|roy|sue|tom|zoe)$/i.test(local)) {
+        return { name: null, source: 'none' };
+      }
       return { name: capitalize(local), source: 'email_prefix' };
     }
   }
@@ -882,28 +925,66 @@ export function extractFirstName(
   return { name: null, source: 'none' };
 }
 
+// ─── Time-aware greeting helper ──────────────────────────────────────────────
+// Returns "Good morning", "Good afternoon", "Good evening", or "Greetings"
+// based on UTC hour mapped to East Africa Time (UTC+3, the default for Nairobi/Kampala).
+// If a lead timezone offset is known it should be passed; otherwise defaults to EAT.
+
+export function getTimeGreeting(utcHour?: number): 'Good morning' | 'Good afternoon' | 'Good evening' | 'Greetings' {
+  let hour = utcHour;
+  if (hour === undefined) {
+    // Default to East Africa Time (UTC+3) — primary market
+    const now = new Date();
+    hour = (now.getUTCHours() + 3) % 24;
+  }
+  if (hour >= 5  && hour < 12) return 'Good morning';
+  if (hour >= 12 && hour < 17) return 'Good afternoon';
+  if (hour >= 17 && hour < 21) return 'Good evening';
+  return 'Greetings'; // late night / unknown
+}
+
 // ─── Greeting builder ────────────────────────────────────────────────────────
-// Priority:
-//   1. Real first name from contact_name or email prefix → "Hi [Name],"
-//   2. No usable name → "Hi there,"  (safe generic, never exposes junk company name)
-//
-// We deliberately do NOT use "Hi [Company] team," because the company name
-// could be scraped junk like "Ooops....Error 404". "Hi there," is always safe.
+// Format: "[Good morning/afternoon/Greetings] [Company] team,"
+// Uses the company name for all emails — never uses a scraped email prefix as a name.
+// Time-of-day part uses EAT (UTC+3) by default; pass recipientTimezoneOffset to override.
 
 export function buildGreeting(
   contactName?: string | null,
   email?: string | null,
   companyName?: string | null,
+  recipientTimezoneOffset?: number, // hours offset from UTC (e.g. 3 for EAT, 1 for WAT)
 ): string {
-  // Try real first name from contact field or email prefix
-  const { name } = extractFirstName(contactName, email);
-  if (name) return `Hi ${name},`;
+  const timeGreeting = getTimeGreeting(
+    recipientTimezoneOffset !== undefined
+      ? (new Date().getUTCHours() + recipientTimezoneOffset) % 24
+      : undefined
+  );
 
-  // Safe generic fallback — never uses company name directly
-  return 'Hi there,';
+  // Always use company name for the team greeting — never use email prefix as a name
+  if (companyName && companyName.trim().length > 1) {
+    const cleaned = cleanCompanyNameForGreeting(companyName.trim());
+    if (cleaned && cleaned.length > 1) {
+      return `${timeGreeting} ${cleaned} team,`;
+    }
+  }
+
+  // Final fallback if no company name
+  return `${timeGreeting},`;
 }
 
-/** True when no real first name was found (greeting used company team or "Hi there,") */
+/** Helper: strip legal suffixes for use in greeting (shared with follow-up generator) */
+export function cleanCompanyNameForGreeting(raw: string): string {
+  let name = raw
+    .replace(/\s*\([^)]*\)\s*/g, ' ')
+    .replace(/\b(Private Limited|Pvt\.?\s*Ltd\.?|Public Limited Company)\b\.?\s*/gi, '')
+    .replace(/\b(Ltd|Limited|Inc|LLC|LLP|PLC|Corp|Corporation|NW|Pty|Pvt)\b\.?\s*/gi, ' ')
+    .replace(/\s*[-–—|/]\s*$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return name || raw.trim();
+}
+
+/** True when no real first name was found (greeting used company team or "Greetings,") */
 export function greetingIsFallback(
   contactName?: string | null,
   email?: string | null,

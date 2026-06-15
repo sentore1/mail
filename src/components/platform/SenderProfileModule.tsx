@@ -58,7 +58,7 @@ export default function SenderProfileModule({ userId, onSaved }: SenderProfilePr
   };
 
   const missing   = getMissingFields(currentProfile);
-  const complete  = missing.length === 0;
+  const complete  = !!fullName.trim();
   const previewText = renderFooter({
     user_id: userId, full_name: fullName || "Your Name", job_title: jobTitle || "Your Title",
     company_name: companyName || "Your Company", phone: phone || "Your Phone",
@@ -66,8 +66,8 @@ export default function SenderProfileModule({ userId, onSaved }: SenderProfilePr
   });
 
   const handleSave = async () => {
-    if (!complete) {
-      toast.error(`Fill in: ${missing.map(m => m.label).join(", ")}`);
+    if (!fullName.trim()) {
+      toast.error("Full name is required");
       return;
     }
     setSaving(true);
@@ -108,25 +108,11 @@ export default function SenderProfileModule({ userId, onSaved }: SenderProfilePr
         </p>
       </div>
 
-      {/* Incomplete warning (Q7) */}
-      {!complete && (
-        <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-50 border border-amber-200">
-          <AlertCircle size={16} className="text-amber-600 mt-0.5 flex-shrink-0" />
-          <div>
-            <p className="text-sm font-semibold text-amber-800">Profile incomplete</p>
-            <p className="text-xs text-amber-700 mt-0.5">
-              You need to fill in <span className="font-semibold">{missing.map(m => m.label).join(", ")}</span> before
-              you can generate or send emails.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Complete badge */}
+      {/* Saved badge */}
       {complete && (
         <div className="flex items-center gap-2 p-3 rounded-xl bg-green-50 border border-green-200">
           <CheckCircle size={15} className="text-green-600 flex-shrink-0" />
-          <p className="text-sm font-medium text-green-800">Profile complete — footer will be added to every email.</p>
+          <p className="text-sm font-medium text-green-800">Profile saved — footer will be added to every email.</p>
         </div>
       )}
 
@@ -140,7 +126,7 @@ export default function SenderProfileModule({ userId, onSaved }: SenderProfilePr
           {/* Full Name */}
           <div>
             <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-              Full Name <span className="text-red-500">*</span>
+              Full Name
             </label>
             <div className="relative">
               <User size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -156,7 +142,7 @@ export default function SenderProfileModule({ userId, onSaved }: SenderProfilePr
           {/* Job Title */}
           <div>
             <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-              Job Title <span className="text-red-500">*</span>
+              Job Title
             </label>
             <div className="relative">
               <Briefcase size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />

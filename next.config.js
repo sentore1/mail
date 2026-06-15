@@ -15,6 +15,16 @@ const nextConfig = {
 
   // Turbopack config (Next.js 16 default bundler)
   turbopack: {},
+
+  // Suppress invalid source map warnings from third-party packages (e.g. @supabase/auth-js)
+  webpack: (config) => {
+    config.ignoreWarnings = [
+      { message: /Failed to parse source map/ },
+      { message: /Invalid source map/ },
+      { message: /sourceMapURL could not be parsed/ },
+    ];
+    return config;
+  },
 };
 
 module.exports = nextConfig;

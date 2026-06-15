@@ -23,6 +23,10 @@ export interface ScrapedLead {
   source_url?: string;
   phone?: string;
   website?: string;
+  // Enrichment: short description of what the company actually does
+  business_description?: string;
+  // Enrichment: names of team members / decision makers found on site or LinkedIn
+  decision_makers?: string[];
   // Enrichment fields added by lead-enricher
   detected_sector?: string;
   sector_confidence?: 'high' | 'medium' | 'low';
@@ -205,6 +209,68 @@ async function aiPredict(
     const { predictEmailPattern } = await import('./ai-scraper-helper');
     return await predictEmailPattern(companyName, domain, niche, location, aiProvider);
   } catch { return null; }
+}
+
+// ─── Business description + decision maker scraper ───────────────────────────
+// Visits the homepage and /about page to extract:
+//   1. A short business description (meta description or first meaningful paragraph)
+//   2. Names of people mentioned in team/about sections (potential decision makers)
+
+export async function scrapeBusinessEnrichment(website: string): Promise<{
+  description: string | null;
+  decisionMakers: string[];
+}> {
+  if (!website.startsWith('http')) website = `https://${website}`;
+  let origin: string;
+  try { origin = new URL(website).origin; } catch { return { description: null, decisionMakers: [] }; }
+
+  const headers = {
+    'User-Agent': randomUA(),
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  };
+
+  const tryPage = async (url: string): Promise<{ description: string | null; names: string[] }> => {
+    try {
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(6_000) });
+      if (!res.ok) return { description: null, names: [] };
+      const html = await res.text();
+
+      // 1. Meta description — most reliable short description
+      const metaDesc = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']{20,300})["']/i)?.[1]
+                    ?? html.match(/<meta[^>]+content=["']([^"']{20,300})["'][^>]+name=["']description["']/i)?.[1];
+
+      // 2. og:description
+      const ogDesc = html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']{20,300})["']/i)?.[1]
+                  ?? html.match(/<meta[^>]+content=["']([^"']{20,300})["'][^>]+property=["']og:description["']/i)?.[1];
+
+      const description = (metaDesc || ogDesc || null)?.replace(/\s+/g, ' ').trim() ?? null;
+
+      // 3. Extract person names from team/about sections
+      // Look for patterns like: "John Smith, CEO" / "Dr. Jane Doe — Director" / <h3>Alice Brown</h3>
+      const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+      const namePattern = /\b([A-Z][a-z]{1,14})\s+([A-Z][a-z]{1,20})\b(?:\s*[,–—-]\s*(?:CEO|CFO|CTO|COO|Director|Manager|Head|Founder|Owner|Partner|Principal|President|VP|MD|Doctor|Dr\.?|Prof\.?|Engineer|Officer))/g;
+      const names: string[] = [];
+      let m: RegExpExecArray | null;
+      while ((m = namePattern.exec(text)) !== null && names.length < 5) {
+        const fullName = `${m[1]} ${m[2]}`;
+        if (!names.includes(fullName)) names.push(fullName);
+      }
+
+      return { description, names };
+    } catch {
+      return { description: null, names: [] };
+    }
+  };
+
+  // Try homepage first, then /about
+  const home  = await tryPage(origin + '/');
+  const about = home.description ? { description: null, names: [] } : await tryPage(origin + '/about');
+  const team  = await tryPage(origin + '/team');
+
+  const description = home.description ?? about.description ?? null;
+  const decisionMakers = [...new Set([...home.names, ...about.names, ...team.names])].slice(0, 5);
+
+  return { description, decisionMakers };
 }
 
 // ─── Deep website email scraper ───────────────────────────────────────────────
@@ -597,9 +663,19 @@ export async function scrapeGoogleMaps(
           phone: phone || undefined,
           website: website || undefined,
         };
+
+        // Enrich with business description + decision makers from website
+        if (website && !isBlockedDomain(website)) {
+          try {
+            const enrichment = await scrapeBusinessEnrichment(website);
+            if (enrichment.description) lead.business_description = enrichment.description;
+            if (enrichment.decisionMakers.length > 0) lead.decision_makers = enrichment.decisionMakers;
+          } catch { /* enrichment is best-effort */ }
+        }
+
         leads.push(lead);
         onLead(lead);
-        console.log(`  ✅ ${biz.name} → ${email}${emailIsReal ? '' : ' (AI predicted)'}`);
+        console.log(`  ✅ ${biz.name} → ${email}${emailIsReal ? '' : ' (AI predicted)'}${lead.decision_makers?.length ? ` (${lead.decision_makers.length} contacts found)` : ''}`);
       }));
     }
   } catch (err) {

@@ -203,7 +203,11 @@ async function processSingleFollowup(
       } else {
         // Use template fallback
         subject = `Re: ${queueItem.original_subject}`;
-        body = `Hi ${queueItem.company_name || "there"},\n\nJust following up on my previous email.\n\nWould you be interested in learning more?\n\nBest regards`;
+        const now = new Date();
+        const hour = (now.getUTCHours() + 3) % 24;
+        const timeGreet = hour >= 5 && hour < 12 ? 'Good morning' : hour >= 12 && hour < 17 ? 'Good afternoon' : 'Greetings';
+        const coName = (queueItem.company_name || 'there').replace(/\b(Ltd|Limited|Inc|LLC|LLP|PLC|Corp|Pty|Pvt)\b\.?\s*/gi, '').trim();
+        body = `${timeGreet} ${coName} team,\n\nJust following up on my previous email about Pryro.\n\nI have 10 minutes free tomorrow afternoon if that works — what do you think?\n\nAlice Umubyeyi — Pryro | 0790038006`;
       }
     }
 

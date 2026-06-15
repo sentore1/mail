@@ -1,25 +1,20 @@
 /**
- * PERSONALIZED EMAIL BUILDER — v9
+ * PERSONALIZED EMAIL BUILDER — v10
  * ────────────────────────────────
- * EXACT FORMAT (from approved screenshot):
+ * EXACT FORMAT (approved):
  *
- *   Subject:  Still managing [X] manually? [Company Name]
- *   Greeting: Hi there,  (or Hi [FirstName], if name is available)
+ *   Subject:  Why is [Company]'s [department] still [doing X manually]?
+ *   Greeting: [Good morning/afternoon/Greetings] [Company] team,
  *
- *   [Company] in [Location], many [sector] businesses often deal with
- *   [specific operational problem that slows teams down].
+ *   I have seen this exact issue in businesses like yours — [specific pain for
+ *   their sector] — and I think [Company] might be dealing with the same thing.
  *
- *   Pryro is an ERP that [specific fix for their sector] and we offer a
- *   20–30% commission for every successfully referred client.
+ *   Pryro is an ERP that replaces those manual workflows with one unified system
+ *   for finance, inventory, HR, and operations. Specifically: [sector fix].
  *
- *   Would you be open to a 10-minute call to see if it is relevant?
+ *   I have 10 minutes free tomorrow afternoon if that works — what do you think?
  *
- *   Best regards,
- *   [Name]
- *   [Title]
- *   [Company]
- *   [Phone]
- *   [Email]
+ *   Alice Umubyeyi — Pryro | 0790038006
  */
 
 import type { ProspectSignals } from './prospect-researcher';
@@ -44,6 +39,9 @@ export interface EmailGenerationParams {
   senderCompany?: string;
   customPainPoint?: string;
   emailIndex?: number;
+  // When set, bypasses AI entirely and uses this sentence as the Pryro line.
+  // Set from sender_profiles.custom_pryro_sentence.
+  customPryroSentence?: string | null;
 }
 
 export interface GeneratedEmail {
@@ -58,17 +56,15 @@ export interface GeneratedEmail {
 }
 
 // ─── Greeting ─────────────────────────────────────────────────────────────────
-// Real first name → "Hi [Name],"
-// No name → "Hi there,"  (never uses company name — could be junk)
+// Time-aware: "Good morning [Company] team," / "Good afternoon [Company] team," / "Greetings [Company] team,"
+// Never uses email prefix as a name.
 function buildGreetingLine(signals: ProspectSignals): string {
-  const raw = signals.greeting.trim();
-  const m = raw.match(/^hi\s+(.+?),?\s*$/i);
-  const name = m ? m[1]!.trim() : '';
-  if (isUsableFirstName(name)) return `Hi ${name},`;
-  return 'Hi there,';
+  return signals.greeting.trim();
 }
 
-// ─── Footer ───────────────────────────────────────────────────────────────────
+// ─── Signature ────────────────────────────────────────────────────────────────
+// Format from sender profile: Name \n Title \n Company \n Phone [\n Email]
+// No "Best regards," — email ends after CTA, then footer.
 export function buildMultiLineFooter(params: {
   senderName: string;
   senderTitle?: string;
@@ -76,112 +72,113 @@ export function buildMultiLineFooter(params: {
   senderPhone?: string;
   senderEmail?: string;
 }): string {
-  const lines: string[] = ['Best regards,'];
+  const lines: string[] = [];
   if (params.senderName)    lines.push(params.senderName);
   if (params.senderTitle)   lines.push(params.senderTitle);
   if (params.senderCompany) lines.push(params.senderCompany);
   if (params.senderPhone)   lines.push(params.senderPhone);
   if (params.senderEmail)   lines.push(params.senderEmail);
-  return lines.join('\n');
+  return lines.join('\n') || 'Alice Umubyeyi\nPryro';
 }
 
 // ─── Subject bank ─────────────────────────────────────────────────────────────
-// Format: "Still [doing X] manually? [Company Name]"
+// Format: "Why is [Company]'s [department] still [doing X manually]?"
+// Direct challenge that demands a reply.
 
 const SUBJECT_BANK: Record<string, Array<(c: string) => string>> = {
-  pharmacy:     [(c) => `Still tracking drug expiry manually? ${c}`,
-                 (c) => `Stock and billing still in separate systems? ${c}`],
-  healthcare:   [(c) => `Still reconciling payroll and billing manually? ${c}`,
-                 (c) => `HR and patient billing still separate? ${c}`],
-  hospital:     [(c) => `Still managing department budgets manually? ${c}`,
-                 (c) => `Department spend and payroll still disconnected? ${c}`],
-  hotel:        [(c) => `Still reconciling housekeeping and payroll manually? ${c}`,
-                 (c) => `Month-end still a multi-day process? ${c}`],
-  lodge:        [(c) => `Still tracking bookings and accounts separately? ${c}`,
-                 (c) => `Month-end still a manual reconciliation? ${c}`],
-  travel:       [(c) => `Still finding out booking margin after trips end? ${c}`,
-                 (c) => `Commissions still tracked in spreadsheets? ${c}`],
-  restaurant:   [(c) => `Still finding out food cost at month-end? ${c}`,
-                 (c) => `Stock and sales still in separate systems? ${c}`],
-  retail:       [(c) => `Still getting caught by stockouts? ${c}`,
-                 (c) => `Inventory reorders still managed manually? ${c}`],
-  ngo:          [(c) => `Donor reporting still taking a week to prepare? ${c}`,
-                 (c) => `Grant budgets and field spend still separate? ${c}`],
-  construction: [(c) => `Still seeing cost overruns after they happen? ${c}`,
-                 (c) => `Project budgets and payroll still disconnected? ${c}`],
-  logistics:    [(c) => `Month-end billing still taking days to close? ${c}`,
-                 (c) => `Driver payroll and trip records still separate? ${c}`],
-  school:       [(c) => `Still reconciling fees and payroll manually? ${c}`,
-                 (c) => `Term-end still a manual process? ${c}`],
-  generic:      [(c) => `Still managing financial services manually? ${c}`,
-                 (c) => `Finance, HR, and ops still in separate tools? ${c}`,
-                 (c) => `Still running operations across disconnected systems? ${c}`],
+  pharmacy:     [(c) => `Why is ${c}'s stock team still tracking expiry manually?`,
+                 (c) => `Is ${c}'s billing team still reconciling stock and invoices separately?`],
+  healthcare:   [(c) => `Why is ${c}'s admin team still reconciling payroll and billing manually?`,
+                 (c) => `Is ${c}'s HR team still running attendance in a separate system?`],
+  hospital:     [(c) => `Why is ${c}'s finance team still working from last month's budget figures?`,
+                 (c) => `Is ${c}'s HR team still doing shift payroll in a separate system?`],
+  hotel:        [(c) => `Why is ${c}'s ops team still doing month-end manually?`,
+                 (c) => `Is ${c}'s finance team still reconciling payroll and vendor bills separately?`],
+  lodge:        [(c) => `Why is ${c}'s accounts team still reconciling bookings manually?`,
+                 (c) => `Is ${c} still finding out occupancy margin after month-end?`],
+  travel:       [(c) => `Why is ${c}'s finance team still calculating booking margin after the trip?`,
+                 (c) => `Is ${c}'s accounts team still tracking commissions in spreadsheets?`],
+  restaurant:   [(c) => `Why is ${c}'s kitchen team still finding out food cost at month-end?`,
+                 (c) => `Is ${c}'s ops team still managing stock and sales in separate systems?`],
+  retail:       [(c) => `Why is ${c}'s inventory team still getting caught by stockouts?`,
+                 (c) => `Is ${c}'s ops team still managing reorders manually?`],
+  ngo:          [(c) => `Why is ${c}'s finance team still spending a week on donor reports?`,
+                 (c) => `Is ${c}'s accounts team still reconciling grant budgets manually?`],
+  construction: [(c) => `Why is ${c}'s finance team still seeing cost overruns after they happen?`,
+                 (c) => `Is ${c}'s project team still tracking budgets in a separate system?`],
+  logistics:    [(c) => `Why is ${c}'s finance team still spending days on month-end billing?`,
+                 (c) => `Is ${c}'s HR team still reconciling driver payroll manually?`],
+  school:       [(c) => `Why is ${c}'s bursar still reconciling fees and payroll manually?`,
+                 (c) => `Is ${c}'s finance team still doing term-end in separate systems?`],
+  generic:      [(c) => `Why is ${c}'s finance team still managing operations manually?`,
+                 (c) => `Is ${c}'s ops team still running finance and HR in separate tools?`,
+                 (c) => `Why is ${c} still managing back-office work across disconnected systems?`],
 };
 
 // ─── Problem sentence bank ────────────────────────────────────────────────────
-// Format: "[Company] in [Location], many [sector] businesses often deal with [pain]."
-// One sentence. Uses company name + location. Specific to their sector.
+// Format: "I have seen this exact issue in businesses like yours — [specific pain] —
+//          and I think [Company] might be dealing with the same thing."
+// Personal observation, not a generic industry fact.
 
 const PROBLEM_BANK: Record<string, Array<(c: string, l: string) => string>> = {
   pharmacy: [
-    (c, l) => `${c} in ${l}, many pharmacy businesses often deal with drug expiry write-offs and billing errors that only surface at month-end because stock and invoicing run in separate systems.`,
-    (c, l) => `${c} in ${l}, many pharmacy teams deal with stock, billing, and payroll each running in a different tool — which means margin losses often go unnoticed until month-end.`,
+    (c) => `I have seen this exact issue in businesses like yours — drug expiry write-offs and billing errors that only show up at month-end because stock and invoicing run in separate systems — and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen this exact issue in businesses like yours — pharmacy stock, billing, and payroll each running in a different tool, with margin losses that go unnoticed until month-end — and I think ${c} might be dealing with the same thing.`,
   ],
   healthcare: [
-    (c, l) => `${c} in ${l}, many healthcare businesses often deal with days of manual work every month reconciling staff payroll against patient billing because HR and finance run separately.`,
-    (c, l) => `${c} in ${l}, many healthcare admin teams deal with HR attendance and patient billing living in separate systems — which means month-end reconciliation takes days it shouldn't.`,
+    (c) => `I have seen this exact issue in businesses like yours — days of manual work every month reconciling staff payroll against patient billing because HR and finance run separately — and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen this exact issue in businesses like yours — HR attendance and patient billing living in separate systems, making month-end reconciliation take days it shouldn't — and I think ${c} might be dealing with the same thing.`,
   ],
   hospital: [
-    (c, l) => `${c} in ${l}, many hospital finance teams often deal with the challenge of getting a live view of actual department spend because HR payroll and procurement aren't connected.`,
-    (c, l) => `${c} in ${l}, many hospitals deal with department budgets and HR payroll running in separate systems — which means the CFO is always working from last month's numbers.`,
+    (c) => `I have seen this exact issue in businesses like yours — getting a live view of actual department spend is nearly impossible when HR payroll and procurement aren't connected — and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen this exact issue in businesses like yours — department budgets and HR payroll running in separate systems, leaving the finance team always working from last month's numbers — and I think ${c} might be dealing with the same thing.`,
   ],
   hotel: [
-    (c, l) => `${c} in ${l}, many hospitality businesses often deal with month-end reconciliation taking three to five days because housekeeping rosters, vendor invoices, and payroll each live in a different system.`,
-    (c, l) => `${c} in ${l}, many hotel operations deal with staff scheduling, vendor billing, and financials running in separate tools — which means every month-end becomes a manual exercise.`,
+    (c) => `I have seen this exact issue in businesses like yours — month-end reconciliation taking three to five days because housekeeping rosters, vendor invoices, and payroll each live in a different system — and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen this exact issue in businesses like yours — staff scheduling, vendor billing, and financials running in separate tools, making every month-end a manual exercise — and I think ${c} might be dealing with the same thing.`,
   ],
   lodge: [
-    (c, l) => `${c} in ${l}, many lodge operators often deal with only finding out their real occupancy margin after month-end because bookings and accounts run in separate places.`,
-    (c, l) => `${c} in ${l}, many lodges deal with bookings and accounts not being connected — which means month-end is always a scramble to match numbers that should balance automatically.`,
+    (c) => `I have seen this exact issue in businesses like yours — only finding out the real occupancy margin after month-end because bookings and accounts run in separate places — and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen this exact issue in businesses like yours — bookings and accounts not connected, making month-end a scramble to match numbers that should balance automatically — and I think ${c} might be dealing with the same thing.`,
   ],
   travel: [
-    (c, l) => `${c} in ${l}, many travel agencies often deal with only knowing the real margin on a booking after the trip has ended because commissions and supplier costs live in spreadsheets.`,
-    (c, l) => `${c} in ${l}, many travel businesses deal with client bookings, agent commissions, and supplier invoices tracked in different tools — which means the P&L is always a month behind.`,
+    (c) => `I have seen this exact issue in businesses like yours — only knowing the real margin on a booking after the trip has ended because commissions and supplier costs live in spreadsheets — and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen this exact issue in businesses like yours — client bookings, agent commissions, and supplier invoices tracked in different tools, keeping the P&L always a month behind — and I think ${c} might be dealing with the same thing.`,
   ],
   restaurant: [
-    (c, l) => `${c} in ${l}, many restaurant businesses often deal with food cost only becoming visible at month-end because kitchen stock, supplier invoices, and daily sales aren't in the same system.`,
-    (c, l) => `${c} in ${l}, many restaurants deal with stock and sales running separately — which means food cost problems only show up after the margin is already gone.`,
+    (c) => `I have seen this exact issue in businesses like yours — food cost only becoming visible at month-end because kitchen stock, supplier invoices, and daily sales aren't in the same system — and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen this exact issue in businesses like yours — stock and sales running separately, so food cost problems only show up after the margin is already gone — and I think ${c} might be dealing with the same thing.`,
   ],
   retail: [
-    (c, l) => `${c} in ${l}, many retail businesses often deal with stockouts only being caught when the shelf is already empty because inventory levels and reorder points aren't connected to live sales.`,
-    (c, l) => `${c} in ${l}, many retail operations deal with inventory and sales running in different systems — which means stockout surprises become a regular cost of doing business.`,
+    (c) => `I have seen this exact issue in businesses like yours — stockouts only caught when the shelf is already empty because inventory levels and reorder points aren't connected to live sales — and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen this exact issue in businesses like yours — inventory and sales running in different systems, making stockout surprises a regular cost of doing business — and I think ${c} might be dealing with the same thing.`,
   ],
   ngo: [
-    (c, l) => `${c} in ${l}, many NGO finance teams often deal with donor compliance reports taking the better part of a week because field expenses and grant budgets live in separate spreadsheets.`,
-    (c, l) => `${c} in ${l}, many NGOs deal with grant budgets and field costs tracked in different tools — which means the finance team spends more time reconciling data than reporting on impact.`,
+    (c) => `I have seen this exact issue in businesses like yours — donor compliance reports taking the better part of a week because field expenses and grant budgets live in separate spreadsheets — and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen this exact issue in businesses like yours — grant budgets and field costs tracked in different tools, with the finance team spending more time reconciling data than reporting on impact — and I think ${c} might be dealing with the same thing.`,
   ],
   construction: [
-    (c, l) => `${c} in ${l}, many construction businesses often deal with cost overruns only showing up in the P&L after the margin is already gone because project budgets and procurement run separately.`,
-    (c, l) => `${c} in ${l}, many construction firms deal with project management and financial tracking not sharing the same data — which means budget-to-actuals is always a backward-looking exercise.`,
+    (c) => `I have seen this exact issue in businesses like yours — cost overruns only showing up in the P&L after the margin is already gone because project budgets and procurement run separately — and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen this exact issue in businesses like yours — project management and financial tracking not sharing the same data, making budget-to-actuals always a backward-looking exercise — and I think ${c} might be dealing with the same thing.`,
   ],
   logistics: [
-    (c, l) => `${c} in ${l}, many logistics businesses often deal with month-end reconciliation taking days because driver payroll, trip logs, and client billing all live in separate places.`,
-    (c, l) => `${c} in ${l}, many transport operations deal with driver records and client invoicing not being connected — which means billing errors compound quietly every month.`,
+    (c) => `I have seen this exact issue in businesses like yours — month-end reconciliation taking days because driver payroll, trip logs, and client billing all live in separate places — and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen this exact issue in businesses like yours — driver records and client invoicing not connected, with billing errors compounding quietly every month — and I think ${c} might be dealing with the same thing.`,
   ],
   school: [
-    (c, l) => `${c} in ${l}, many schools often deal with bursar reconciliation taking two weeks every term because fee collection and staff payroll run in separate registers.`,
-    (c, l) => `${c} in ${l}, many educational institutions deal with fee records and payroll running in different systems — which means term-end is always a reconciliation sprint.`,
+    (c) => `I have seen this exact issue in businesses like yours — bursar reconciliation taking two weeks every term because fee collection and staff payroll run in separate registers — and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen this exact issue in businesses like yours — fee records and payroll running in different systems, making term-end always a reconciliation sprint — and I think ${c} might be dealing with the same thing.`,
   ],
   generic: [
-    (c, l) => `${c} in ${l}, many financial services businesses often deal with manual workflows and fragmented tools that slow teams down.`,
-    (c, l) => `${c} in ${l}, many businesses deal with finance, HR, inventory, and operations each running in a different tool — which means the team spends days every month moving data that should flow automatically.`,
-    (c, l) => `${c} in ${l}, many businesses deal with disconnected back-office systems where finance, HR, and operations don't share the same data — and the coordination overhead grows quietly.`,
+    (c) => `I have seen this exact issue in businesses like yours — finance, HR, inventory, and operations each running in a different tool, with the team spending days every month moving data that should flow automatically — and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen this exact issue in businesses like yours — disconnected back-office systems where finance, HR, and operations don't share the same data, and the coordination overhead grows quietly — and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen this exact issue in businesses like yours — manual workflows and fragmented tools that slow teams down and make month-end harder than it needs to be — and I think ${c} might be dealing with the same thing.`,
   ],
 };
 
 // ─── Pryro solution bank ──────────────────────────────────────────────────────
-// Format: "Pryro is an ERP that [fix] and we offer a 20–30% commission..."
-// Commission is embedded in this sentence — same line as the solution.
-
+// Format: "Pryro is an ERP that [specific sector fix]"
+// No commission. No referral. Just the outcome.
 const PRYRO_BANK: Record<string, string[]> = {
   pharmacy: [
     'Pryro is an ERP that connects your drug stock, billing, and payroll into one live platform so expiry losses and billing errors surface before month-end',
@@ -245,19 +242,29 @@ function getSubject(niche: string | null, companyName: string, idx: number): str
   return bank[idx % bank.length]!(companyName);
 }
 
-function getProblem(niche: string | null, companyName: string, location: string | null, idx: number): string {
+function getProblem(niche: string | null, companyName: string, _location: string | null, idx: number): string {
   const key = detectNicheKey(niche);
   const bank = PROBLEM_BANK[key] ?? PROBLEM_BANK['generic']!;
-  const loc = (location || 'your area').split(',')[0]?.trim() || 'your area';
-  return bank[idx % bank.length]!(companyName, loc);
+  // Problem bank functions now only take (company) — location no longer used
+  return (bank[idx % bank.length] as (c: string, l: string) => string)(companyName, '');
 }
 
 function getPryro(niche: string | null, idx: number): string {
   const key = detectNicheKey(niche);
   const bank = PRYRO_BANK[key] ?? PRYRO_BANK['generic']!;
-  const base = bank[idx % bank.length]!;
-  // Commission always appended to the Pryro sentence
-  return base.replace(/[.!]?\s*$/, '') + ' and we offer a 20–30% commission for every successfully referred client.';
+  // Return as-is — no commission appended
+  return bank[idx % bank.length]!;
+}
+
+// ─── CTA builder — specific time slot, not an open-ended question ─────────────
+function buildCTA(emailIndex: number): string {
+  const slots = [
+    'I have 10 minutes free tomorrow afternoon if that works — what do you think?',
+    'I am free for a quick call later today — does that work for you?',
+    'I have a slot open tomorrow morning if you want a quick look — does that work?',
+    'I am free for 10 minutes this week — would tomorrow work for a quick call?',
+  ];
+  return slots[emailIndex % slots.length]!;
 }
 
 // ─── Email assembler ──────────────────────────────────────────────────────────
@@ -268,20 +275,18 @@ function assembleEmail(params: {
   pryro: string;
   footer: string;
   subject: string;
+  emailIndex?: number;
 }): { subject: string; body: string } {
   const { greeting, problem, pryro, footer, subject } = params;
+  const idx = params.emailIndex ?? 0;
 
-  if (!greeting.trim().toLowerCase().startsWith('hi ')) {
-    throw new Error('GREETING_MISSING: must start with Hi');
-  }
-
-  const cta = 'Would you be open to a 10-minute call to see if it is relevant?';
+  const cta = buildCTA(idx);
 
   const body = `${greeting}
 
 ${problem}
 
-${pryro}
+Pryro is an ERP that replaces those manual workflows with one unified system for finance, inventory, HR, and operations. Specifically: ${pryro.replace(/^Pryro is an ERP that /i, '')}
 
 ${cta}
 
@@ -381,8 +386,9 @@ Rules:
 - Start with exactly: "Pryro is an ERP that"
 - Name at least one Pryro module
 - Describe the outcome — what stops happening or what starts working
-- Under 35 words. No commission mention (added separately). No greeting. No sign-off.
+- Under 35 words. No commission mention. No greeting. No sign-off.
 - No buzzwords: streamline, leverage, empower, optimize, seamless, innovative, robust
+- NEVER mention commission, referral, percent, free trial, or any incentive
 
 Output: the sentence only.`;
 }
@@ -408,7 +414,8 @@ function cleanAISentence(raw: string): string | null {
   if (!s.toLowerCase().startsWith('pryro is an erp that')) return null;
   const banned = ['commission', 'referral', 'percent', '20-30', '20\u201330',
     'free trial', 'dear sir', 'best regards', 'streamline', 'leverage',
-    'empower', 'optimize', 'seamlessly', 'innovative', 'robust', 'scalable'];
+    'empower', 'optimize', 'seamlessly', 'innovative', 'robust', 'scalable',
+    'hi there', 'greetings', 'good morning', 'good afternoon'];
   if (banned.some(b => s.toLowerCase().includes(b))) return null;
   return s;
 }
@@ -425,16 +432,16 @@ export function buildFollowUpPrompt(
 Company: ${signals.companyName} | Sector: ${signals.niche || 'business'}
 Greeting: ${signals.greeting}
 Max words: ${followUpNumber === 1 ? 50 : followUpNumber === 2 ? 40 : 30}
-CTA: "Would you be open to a 10-minute call to see if it is relevant?"
+CTA: Propose a specific time slot, e.g. "I have 10 minutes free tomorrow afternoon — does that work?"
 Footer: ${senderFooter}
-Rules: mention Pryro, different angle, no commission.
+Rules: mention Pryro, different angle, NO commission, NO "Best regards", footer is one line only.
 FORMAT:
 SUBJECT: Re: ${originalSubject}
 BODY:
 [greeting]
 [new angle + Pryro]
-[CTA]
-[footer]`;
+[CTA with specific time]
+[footer — one line]`;
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
@@ -457,9 +464,27 @@ export async function buildPersonalizedEmail(
     senderEmail:   params.senderEmail,
   });
 
-  console.log(`[EmailBuilder] company="${companyName}" | niche=${niche} | ai=${!!aiProvider}`);
+  console.log(`[EmailBuilder] company="${companyName}" | niche=${niche} | ai=${!!aiProvider} | customPryro=${!!params.customPryroSentence}`);
 
-  // AI writes the Pryro solution sentence — commission appended by code
+  // ── Custom Pryro sentence from profile — bypasses AI entirely ────────────
+  const customPryro = params.customPryroSentence?.trim() || null;
+  if (customPryro) {
+    const pryro = customPryro.toLowerCase().startsWith('pryro is an erp that')
+      ? customPryro
+      : `Pryro is an ERP that ${customPryro.replace(/^pryro\s*/i, '')}`;
+    const { subject: s, body } = assembleEmail({ greeting, problem, pryro, footer, subject, emailIndex: idx });
+    const quality = checkEmailQuality({ subject: s, body, companyName, externalPersonalizationScore: signals.personalizationScore });
+    return {
+      subject: s, body,
+      model: 'custom_pryro',
+      personalizationScore: quality.personalizationScore,
+      qualityScore: quality.score,
+      qualityPassed: true,
+      dataSource: 'ai_industry',
+    };
+  }
+
+  // ── AI writes the Pryro solution sentence ────────────────────────────────
   if (aiProvider) {
     let aiBase: string | null = null;
     for (let attempt = 1; attempt <= 2; attempt++) {
@@ -476,8 +501,8 @@ export async function buildPersonalizedEmail(
     }
 
     if (aiBase) {
-      const pryro = aiBase.replace(/[.!]?\s*$/, '') + ' and we offer a 20–30% commission for every successfully referred client.';
-      const { subject: s, body } = assembleEmail({ greeting, problem, pryro, footer, subject });
+      const pryro = aiBase;
+      const { subject: s, body } = assembleEmail({ greeting, problem, pryro, footer, subject, emailIndex: idx });
       const quality = checkEmailQuality({ subject: s, body, companyName, externalPersonalizationScore: signals.personalizationScore });
       if (quality.passed) {
         return {
@@ -494,7 +519,7 @@ export async function buildPersonalizedEmail(
 
   // Sector bank fallback
   const pryro = getPryro(niche, idx);
-  const { subject: fs, body: fb } = assembleEmail({ greeting, problem, pryro, footer, subject });
+  const { subject: fs, body: fb } = assembleEmail({ greeting, problem, pryro, footer, subject, emailIndex: idx });
   const fq = checkEmailQuality({ subject: fs, body: fb, companyName, externalPersonalizationScore: signals.personalizationScore });
 
   return {

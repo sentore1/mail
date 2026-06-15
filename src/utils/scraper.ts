@@ -14,6 +14,10 @@ export interface ScrapedLead {
   source_url?: string;
   phone?: string;
   website?: string;
+  // Enrichment: short description of what the company actually does
+  business_description?: string;
+  // Enrichment: names of team members / decision makers found on site or LinkedIn
+  decision_makers?: string[];
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

@@ -80,14 +80,14 @@ function getSectorLabel(niche: string | null): string { return getNicheContent(n
 
 // ── Subject patterns (rotated per lead so bulk emails vary) ──────────────────
 const SUBJECT_PATTERNS_BULK = [
-  (company: string, sector: string) => `Still managing ${sector} manually? ${company}`,
-  (company: string, _sector: string) => `Too many tools slowing your team? ${company}`,
-  (company: string, sector: string) => `Is ${sector} admin costing you hours? ${company}`,
-  (company: string, _sector: string) => `Fragmented tools slowing growth? ${company}`,
-  (company: string, sector: string) => `${sector} teams losing hours to this, ${company}`,
-  (company: string, _sector: string) => `What if one system replaced them all? ${company}`,
-  (company: string, sector: string) => `The ${sector} back-office problem, ${company}`,
-  (company: string, _sector: string) => `Could your team save 10 hours a week? ${company}`,
+  (company: string, sector: string) => `Why is ${company}'s finance team still managing ${sector} manually?`,
+  (company: string, _sector: string) => `Is ${company}'s ops team drowning in disconnected tools?`,
+  (company: string, sector: string) => `Why is ${company}'s ${sector} team spending days on month-end?`,
+  (company: string, _sector: string) => `Is ${company}'s finance team still working from last month's numbers?`,
+  (company: string, sector: string) => `Why is ${company}'s ${sector} admin still costing hours a week?`,
+  (company: string, _sector: string) => `Is ${company}'s HR team still doing payroll in a separate system?`,
+  (company: string, sector: string) => `Why is ${company}'s ${sector} back-office still manual?`,
+  (company: string, _sector: string) => `Is ${company}'s ops team still running finance and HR separately?`,
 ];
 
 // ── Direct email builder — no AI, exact template every time ──────────────────
@@ -102,36 +102,40 @@ function buildDirectEmail(
   email?: string | null,
 ): { subject: string; body: string } {
   const company = decodeHtmlEntities(companyName);
-  const { sectorName, painPoint } = getNicheContent(niche);
+  const { sectorName, painPoint, pryroValue } = getNicheContent(niche);
   const patternFn = SUBJECT_PATTERNS_BULK[idx % SUBJECT_PATTERNS_BULK.length]!;
   const subject = patternFn(company, sectorName);
 
-  // Resolve greeting
-  let greeting: string;
-  const firstName = resolveFirstName(contactName, email);
-  if (firstName) {
-    greeting = `Hi ${firstName},`;
-  } else {
-    greeting = 'Dear Sir/Madam,';
-  }
+  // Resolve greeting — time-aware + company name
+  const now  = new Date();
+  const hour = (now.getUTCHours() + 3) % 24; // EAT default
+  const timeGreet = hour >= 5 && hour < 12 ? 'Good morning'
+                  : hour >= 12 && hour < 17 ? 'Good afternoon'
+                  : hour >= 17 && hour < 21 ? 'Good evening'
+                  : 'Greetings';
+  const cleanCo = company.replace(/\b(Private Limited|Pvt\.?\s*Ltd\.?|Ltd|Limited|Inc|LLC|LLP|PLC|Corp|Pty|Pvt)\b\.?\s*/gi, '').replace(/\s+/g, ' ').trim();
+  const greeting = `${timeGreet} ${cleanCo} team,`;
 
-  const cta = `Would a 10 minute call make sense to show you how Pryro could work for ${company}?`;
+  const ctaOptions = [
+    `I have 10 minutes free tomorrow afternoon if that works — what do you think?`,
+    `I am free for a quick call later today — does that work for you?`,
+    `I have a slot open tomorrow morning if you want a quick look — does that work?`,
+  ];
+  const cta = ctaOptions[idx % ctaOptions.length]!;
+
+  // Signature from sender profile — multi-line, no "Best regards"
+  const sig = `${senderName}\nPryro`;
 
   const body =
 `${greeting}
 
-Is ${company} still managing ${sectorName} operations across separate tools?
+I have seen this exact issue in businesses like yours — ${painPoint} — and I think ${company} might be dealing with the same thing.
 
-That kind of fragmentation costs hours every week and makes it hard to see how the business is really running. ${PRYRO_LINE}
-
-We also offer a 20-30% commission for every successfully referred client.
+${PRYRO_LINE} Specifically: it ${pryroValue}.
 
 ${cta}
 
-Best regards,
-${senderName}
-Executive Sales
-Pryro`;
+${sig}`;
 
   return { subject, body };
 }

@@ -52,6 +52,7 @@ interface SenderProfile {
   senderPhone: string;
   senderEmail: string;
   profileComplete: boolean;
+  customPryroSentence: string | null;
 }
 
 /**
@@ -68,7 +69,7 @@ async function resolveSenderProfile(
     const supabase = createClient();
     const { data } = await supabase
       .from('sender_profiles')
-      .select('full_name, job_title, company_name, phone, email, is_complete')
+      .select('full_name, job_title, company_name, phone, email, is_complete, custom_pryro_sentence')
       .eq('user_id', userId)
       .maybeSingle();
 
@@ -80,6 +81,7 @@ async function resolveSenderProfile(
         senderPhone:   data.phone        || '',
         senderEmail:   data.email        || '',
         profileComplete: !!data.is_complete,
+        customPryroSentence: data.custom_pryro_sentence || null,
       };
     }
   } catch { /* fall through */ }
@@ -93,6 +95,7 @@ async function resolveSenderProfile(
       senderPhone:   legacyPhone || '',
       senderEmail:   '',
       profileComplete: false,
+      customPryroSentence: null,
     };
   }
 
@@ -110,11 +113,11 @@ async function resolveSenderProfile(
       const row = rows[0];
       const name = row.sender_name ||
         row.email.split('@')[0].replace(/[._\-]/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
-      return { senderName: name, senderTitle: '', senderCompany: 'Pryro', senderPhone: '', senderEmail: '', profileComplete: false };
+      return { senderName: name, senderTitle: '', senderCompany: 'Pryro', senderPhone: '', senderEmail: '', profileComplete: false, customPryroSentence: null };
     }
   } catch { /* ignore */ }
 
-  return { senderName: 'Sales Team', senderTitle: '', senderCompany: 'Pryro', senderPhone: '', senderEmail: '', profileComplete: false };
+  return { senderName: 'Sales Team', senderTitle: '', senderCompany: 'Pryro', senderPhone: '', senderEmail: '', profileComplete: false, customPryroSentence: null };
 }
 
 export async function generateAIEmail(params: EmailGenerationParams): Promise<{
@@ -142,7 +145,6 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{
 
   // ── 1. Sender profile ────────────────────────────────────────────────────
   const profile = await resolveSenderProfile(userId, params.senderName, params.senderPhone);
-
   // ── 2. AI provider ───────────────────────────────────────────────────────
   let aiProvider: { provider: string; api_key: string; active_model: string } | null = null;
   let aiDiagnostic = 'no_provider';
@@ -211,6 +213,7 @@ export async function generateAIEmail(params: EmailGenerationParams): Promise<{
       senderEmail:    profile.senderEmail,
       customPainPoint: params.customPainPoint,
       emailIndex,
+      customPryroSentence: profile.customPryroSentence,
     },
     aiProvider,
   );

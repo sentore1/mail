@@ -53,6 +53,21 @@ export async function GET(req: NextRequest) {
     for (const { user_id } of users) {
       const result = await processFollowUps(user_id, 50);
       results.push({ user_id, ...result });
+
+      // Insert a per-user daily summary into followup_activity_log
+      try {
+        await supabase.from("followup_activity_log").insert({
+          user_id,
+          lead_id: null,
+          followup_number: 0,
+          subject: `Cron run: ${result.sent} sent, ${result.failed} failed, ${result.skipped} skipped`,
+          status: "daily_summary",
+          is_auto: true,
+          sent_at: new Date().toISOString(),
+        });
+      } catch {
+        // Non-critical
+      }
     }
 
     const totals = results.reduce(
