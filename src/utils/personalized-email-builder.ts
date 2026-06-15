@@ -1,13 +1,13 @@
-﻿/**
+/**
  * PERSONALIZED EMAIL BUILDER, v10
- * ────────────────────────────────
+ * --------------------------------
  * EXACT FORMAT (approved):
  *
  *   Subject:  Why is [Company]'s [department] still [doing X manually]?
  *   Greeting: [Good morning/afternoon/Greetings] [Company] team,
  *
- *   I have seen this exact issue in businesses like yours, [specific pain for
- *   their sector], and I think [Company] might be dealing with the same thing.
+ *   I have seen many [sector] teams your size still tracking [task] on Excel
+ *   sheets and Word documents, and [Company] is most likely doing the same.
  *
  *   Pryro is an ERP that replaces those manual workflows with one unified system
  *   for finance, inventory, HR, and operations. Specifically: [sector fix].
@@ -55,14 +55,14 @@ export interface GeneratedEmail {
   dataSource: 'ai_personalized' | 'ai_industry' | 'template';
 }
 
-// ─── Greeting ─────────────────────────────────────────────────────────────────
+// --- Greeting -----------------------------------------------------------------
 // Time-aware: "Good morning [Company] team," / "Good afternoon [Company] team," / "Greetings [Company] team,"
 // Never uses email prefix as a name.
 function buildGreetingLine(signals: ProspectSignals): string {
   return signals.greeting.trim();
 }
 
-// ─── Signature ────────────────────────────────────────────────────────────────
+// --- Signature ----------------------------------------------------------------
 // Format:
 //   Regards,
 //   [Name]
@@ -79,139 +79,171 @@ export function buildMultiLineFooter(params: {
   return `Regards,\n${name}\n${company}`;
 }
 
-// ─── Subject bank ─────────────────────────────────────────────────────────────
-// Format: "Why is [Company]'s [department] still [doing X manually]?"
-// Direct challenge that demands a reply.
+// --- Department picker --------------------------------------------------------
+// Returns the single most relevant department pain point for this sector.
+// Used to keep every email focused on ONE specific pain, not a list.
 
-const SUBJECT_BANK: Record<string, Array<(c: string) => string>> = {
-  pharmacy:     [(c) => `Why is ${c}'s stock team still tracking expiry manually?`,
-                 (c) => `Still managing drug expiry manually at ${c}?`,
-                 (c) => `Is ${c}'s billing team drowning in stock and invoice mismatches?`,
-                 (c) => `How is ${c} catching expiry write-offs right now?`,
-                 (c) => `${c}, still juggling stock, billing, and payroll separately?`],
-  healthcare:   [(c) => `Why is ${c}'s admin team still reconciling payroll and billing manually?`,
-                 (c) => `Still managing HR and patient billing in separate tools at ${c}?`,
-                 (c) => `Is ${c}'s finance team drowning in month-end reconciliation?`,
-                 (c) => `How is ${c} handling payroll and billing together right now?`,
-                 (c) => `${c}, still juggling HR and billing in separate systems?`],
-  hospital:     [(c) => `Why is ${c}'s finance team still working from last month's budget figures?`,
-                 (c) => `Still managing department budgets and payroll separately at ${c}?`,
-                 (c) => `Is ${c}'s HR team drowning in manual shift reconciliation?`,
-                 (c) => `How is ${c} tracking department spend against budgets right now?`,
-                 (c) => `${c}, still juggling payroll and procurement in different tools?`],
-  hotel:        [(c) => `Why is ${c}'s ops team still doing month-end manually?`,
-                 (c) => `Still reconciling housekeeping and payroll separately at ${c}?`,
-                 (c) => `Is ${c}'s finance team drowning in month-end vendor reconciliation?`,
-                 (c) => `How is ${c} handling staff scheduling and billing right now?`,
-                 (c) => `${c}, still juggling rosters, invoices, and payroll separately?`],
-  lodge:        [(c) => `Why is ${c}'s accounts team still reconciling bookings manually?`,
-                 (c) => `Still finding out occupancy margin after month-end at ${c}?`,
-                 (c) => `Is ${c} still juggling bookings and accounts in separate systems?`,
-                 (c) => `How is ${c} tracking real occupancy margin right now?`],
-  travel:       [(c) => `Why is ${c}'s finance team still calculating booking margin after the trip?`,
-                 (c) => `Still tracking agent commissions in spreadsheets at ${c}?`,
-                 (c) => `Is ${c}'s accounts team drowning in booking reconciliation?`,
-                 (c) => `How is ${c} calculating P&L on bookings right now?`,
-                 (c) => `${c}, still juggling bookings, commissions, and invoices separately?`],
-  restaurant:   [(c) => `Why is ${c}'s kitchen team still finding out food cost at month-end?`,
-                 (c) => `Still managing stock and sales in separate systems at ${c}?`,
-                 (c) => `Is ${c}'s ops team drowning in manual food cost tracking?`,
-                 (c) => `How is ${c} tracking food cost against daily sales right now?`,
-                 (c) => `${c}, still juggling stock, sales, and payroll in different tools?`],
-  retail:       [(c) => `Why is ${c}'s inventory team still getting caught by stockouts?`,
-                 (c) => `Still managing reorders manually at ${c}?`,
-                 (c) => `Is ${c}'s ops team drowning in disconnected inventory data?`,
-                 (c) => `How is ${c} handling stockout alerts right now?`,
-                 (c) => `${c}, still juggling inventory, sales, and reorders separately?`],
-  ngo:          [(c) => `Why is ${c}'s finance team still spending a week on donor reports?`,
-                 (c) => `Still reconciling grant budgets and field expenses manually at ${c}?`,
-                 (c) => `Is ${c}'s finance team drowning in donor compliance reporting?`,
-                 (c) => `How is ${c} tracking field spend against grant budgets right now?`,
-                 (c) => `${c}, still juggling budgets, expenses, and donor reports separately?`],
-  construction: [(c) => `Why is ${c}'s finance team still seeing cost overruns after they happen?`,
-                 (c) => `Still tracking project budgets and payroll separately at ${c}?`,
-                 (c) => `Is ${c}'s project team drowning in budget-to-actuals reconciliation?`,
-                 (c) => `How is ${c} catching cost overruns before they hit the P&L?`,
-                 (c) => `${c}, still juggling project budgets, payroll, and procurement separately?`],
-  logistics:    [(c) => `Why is ${c}'s finance team still spending days on month-end billing?`,
-                 (c) => `Still reconciling driver payroll and trip records manually at ${c}?`,
-                 (c) => `Is ${c}'s HR team drowning in end-of-month payroll reconciliation?`,
-                 (c) => `How is ${c} matching driver payroll to client billing right now?`,
-                 (c) => `${c}, still juggling trip logs, payroll, and invoices separately?`],
-  school:       [(c) => `Why is ${c}'s bursar still reconciling fees and payroll manually?`,
-                 (c) => `Still managing fee collection and payroll in separate systems at ${c}?`,
-                 (c) => `Is ${c}'s finance team drowning in term-end reconciliation?`,
-                 (c) => `How is ${c} balancing fee income against payroll right now?`,
-                 (c) => `${c}, still juggling fees, payroll, and supplies separately?`],
-  generic:      [(c) => `Why is ${c}'s finance team still managing operations manually?`,
-                 (c) => `Still running finance and HR in separate tools at ${c}?`,
-                 (c) => `Is ${c}'s ops team drowning in disconnected back-office systems?`,
-                 (c) => `How is ${c} keeping finance, HR, and operations in sync right now?`,
-                 (c) => `${c}, still juggling finance, inventory, and HR in different tools?`],
+type DeptPain = { dept: string; task: string };
+
+const SECTOR_DEPT: Record<string, DeptPain> = {
+  pharmacy:     { dept: 'inventory team',  task: 'drug stock and expiry tracking'      },
+  healthcare:   { dept: 'HR team',         task: 'staff payroll and attendance'         },
+  hospital:     { dept: 'finance team',    task: 'department budgets and payroll'       },
+  hotel:        { dept: 'finance team',    task: 'month end vendor and payroll reconciliation' },
+  lodge:        { dept: 'accounts team',   task: 'bookings and accounts reconciliation' },
+  travel:       { dept: 'finance team',    task: 'booking margin and commission tracking' },
+  restaurant:   { dept: 'inventory team',  task: 'food cost and stock tracking'         },
+  retail:       { dept: 'inventory team',  task: 'stock levels and reorder tracking'    },
+  ngo:          { dept: 'finance team',    task: 'grant budgets and field expense tracking' },
+  construction: { dept: 'finance team',    task: 'project budgets and cost overrun tracking' },
+  logistics:    { dept: 'HR team',         task: 'driver payroll and trip record reconciliation' },
+  school:       { dept: 'finance team',    task: 'fee collection and payroll reconciliation' },
+  generic:      { dept: 'finance team',    task: 'finance and HR records'               },
 };
 
-// ─── Problem sentence bank ────────────────────────────────────────────────────
-// Format: "I have seen this exact issue in businesses like yours, [specific pain] —
-//          and I think [Company] might be dealing with the same thing."
-// Personal observation, not a generic industry fact.
+function getDeptPain(niche: string | null): DeptPain {
+  const key = detectNicheKey(niche);
+  return SECTOR_DEPT[key] ?? SECTOR_DEPT['generic']!;
+}
+
+// --- Subject bank -------------------------------------------------------------
+// Format: "Why is [Company]'s [department] still [doing X manually]?"
+// Direct challenge that demands a reply.
+// Excel is referenced for sectors where spreadsheet tracking is the obvious habit
+// (retail, restaurant, school, logistics, travel, construction).
+// For clinical/regulated sectors (hospital, healthcare, pharmacy, NGO) the subject
+// avoids Excel because those teams use specialised software, not spreadsheets.
+
+const SUBJECT_BANK: Record<string, Array<(c: string) => string>> = {
+  pharmacy:     [
+    (c) => `Why is ${c}'s stock team still tracking expiry manually?`,
+    (c) => `As a big company like ${c}, why still managing drug expiry in separate systems?`,
+    (c) => `Why is ${c}'s billing team still catching invoice mismatches at month end?`,
+  ],
+  healthcare:   [
+    (c) => `Why is ${c}'s admin team still reconciling payroll and billing manually?`,
+    (c) => `As a big company like ${c}, why still doing HR and patient billing separately?`,
+    (c) => `Why is ${c}'s finance team still drowning in month end reconciliation?`,
+  ],
+  hospital:     [
+    (c) => `Why is ${c}'s finance team still unable to see real department spend in real time?`,
+    (c) => `As a big company like ${c}, why still managing department budgets and payroll separately?`,
+    (c) => `Why is ${c}'s HR team still doing shift reconciliation manually?`,
+  ],
+  hotel:        [
+    (c) => `I have been wondering how a company as big as ${c} still uses Excel for staff rosters and vendor invoices`,
+    (c) => `Why is ${c} still using Excel for payroll and month end reconciliation?`,
+    (c) => `As a big company like ${c}, why still doing month end manually on spreadsheets?`,
+  ],
+  lodge:        [
+    (c) => `I have been wondering how a company as big as ${c} still uses Excel for bookings and accounts`,
+    (c) => `Why is ${c} still using Excel for occupancy and accounts reconciliation?`,
+    (c) => `As a big company like ${c}, why still tracking bookings and margin manually?`,
+  ],
+  travel:       [
+    (c) => `I have been wondering how a company as big as ${c} still uses Excel for booking margins and commissions`,
+    (c) => `Why is ${c} still using Excel to track agent commissions and booking P&L?`,
+    (c) => `As a big company like ${c}, why still calculating booking margin on spreadsheets?`,
+  ],
+  restaurant:   [
+    (c) => `I have been wondering how a company as big as ${c} still uses Excel for food cost and stock tracking`,
+    (c) => `Why is ${c} still using Excel for inventory and daily sales reconciliation?`,
+    (c) => `As a big company like ${c}, why still tracking food cost on spreadsheets?`,
+  ],
+  retail:       [
+    (c) => `I have been wondering how a company as big as ${c} still uses Excel for inventory and reorder tracking`,
+    (c) => `Why is ${c} still using Excel for stock levels and sales data?`,
+    (c) => `As a big company like ${c}, why still managing inventory reorders manually?`,
+  ],
+  ngo:          [
+    (c) => `Why is ${c}'s finance team still spending a week on donor reports?`,
+    (c) => `As a big company like ${c}, why still reconciling grant budgets and field expenses manually?`,
+    (c) => `Why is ${c}'s finance team still drowning in donor compliance reporting?`,
+  ],
+  construction: [
+    (c) => `I have been wondering how a company as big as ${c} still uses Excel for project budgets and contractor payroll`,
+    (c) => `Why is ${c} still using Excel for project cost tracking and procurement?`,
+    (c) => `As a big company like ${c}, why still tracking project budgets manually?`,
+  ],
+  logistics:    [
+    (c) => `I have been wondering how a company as big as ${c} still uses Excel for driver payroll and trip records`,
+    (c) => `Why is ${c} still using Excel for payroll and client billing reconciliation?`,
+    (c) => `As a big company like ${c}, why still reconciling driver records on spreadsheets?`,
+  ],
+  school:       [
+    (c) => `I have been wondering how a company as big as ${c} still uses Excel for fee collection and staff payroll`,
+    (c) => `Why is ${c} still using Excel for fee records and payroll reconciliation?`,
+    (c) => `As a big company like ${c}, why still managing fees and payroll on spreadsheets?`,
+  ],
+  generic:      [
+    (c) => `I have been wondering how a company as big as ${c} still uses Excel for finance and HR records`,
+    (c) => `Why is ${c} still using Excel for finance, payroll, and operations tracking?`,
+    (c) => `As a big company like ${c}, why still running operations on spreadsheets?`,
+  ],
+};
+
+// --- Problem sentence bank ----------------------------------------------------
+// Format: "I have seen many [sector] teams your size still tracking [task] on Excel
+//          sheets and Word documents, and [Company] is most likely doing the same."
+// Confident observation, not a hedge.
 
 const PROBLEM_BANK: Record<string, Array<(c: string, l: string) => string>> = {
   pharmacy: [
-    (c) => `I have seen this exact issue in businesses like yours, drug expiry write-offs and billing errors that only show up at month-end because stock and invoicing run in separate systems, and I think ${c} might be dealing with the same thing.`,
-    (c) => `I have seen this exact issue in businesses like yours, pharmacy stock, billing, and payroll each running in a different tool, with margin losses that go unnoticed until month-end, and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen many pharmacy teams still tracking drug stock and expiry dates on Excel sheets, and ${c} is most likely doing the same.`,
+    (c) => `I have seen many pharmacy businesses tracking billing and stock in separate tools, and ${c} is most likely running the same setup.`,
   ],
   healthcare: [
-    (c) => `I have seen this exact issue in businesses like yours, days of manual work every month reconciling staff payroll against patient billing because HR and finance run separately, and I think ${c} might be dealing with the same thing.`,
-    (c) => `I have seen this exact issue in businesses like yours, HR attendance and patient billing living in separate systems, making month-end reconciliation take days it shouldn't, and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen many healthcare teams still reconciling staff payroll and patient billing manually every month, and ${c} is most likely doing the same.`,
+    (c) => `I have seen many healthcare admin teams tracking HR attendance and patient billing in separate systems, and ${c} is most likely doing the same.`,
   ],
   hospital: [
-    (c) => `I have seen this exact issue in businesses like yours, getting a live view of actual department spend is nearly impossible when HR payroll and procurement aren't connected, and I think ${c} might be dealing with the same thing.`,
-    (c) => `I have seen this exact issue in businesses like yours, department budgets and HR payroll running in separate systems, leaving the finance team always working from last month's numbers, and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen many hospital finance teams unable to get a live view of department spend because HR payroll and procurement sit in separate systems, and ${c} is most likely running the same way.`,
+    (c) => `I have seen many hospitals where the finance team never has a real-time picture of what departments have actually spent, and ${c} is most likely dealing with the same gap.`,
   ],
   hotel: [
-    (c) => `I have seen this exact issue in businesses like yours, month-end reconciliation taking three to five days because housekeeping rosters, vendor invoices, and payroll each live in a different system, and I think ${c} might be dealing with the same thing.`,
-    (c) => `I have seen this exact issue in businesses like yours, staff scheduling, vendor billing, and financials running in separate tools, making every month-end a manual exercise, and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen many hotel operations teams spending three to five days every month reconciling rosters, vendor invoices, and payroll because none of it connects, and ${c} is most likely doing the same.`,
+    (c) => `I have seen many hospitality businesses where staff scheduling, vendor billing, and financials each live in a different tool, and ${c} is most likely running the same setup.`,
   ],
   lodge: [
-    (c) => `I have seen this exact issue in businesses like yours, only finding out the real occupancy margin after month-end because bookings and accounts run in separate places, and I think ${c} might be dealing with the same thing.`,
-    (c) => `I have seen this exact issue in businesses like yours, bookings and accounts not connected, making month-end a scramble to match numbers that should balance automatically, and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen many lodges only finding out their real occupancy margin after month-end because bookings and accounts run separately, and ${c} is most likely in the same position.`,
+    (c) => `I have seen many lodge operators where bookings and accounts are not connected, making every month-end a manual scramble, and ${c} is most likely doing the same.`,
   ],
   travel: [
-    (c) => `I have seen this exact issue in businesses like yours, only knowing the real margin on a booking after the trip has ended because commissions and supplier costs live in spreadsheets, and I think ${c} might be dealing with the same thing.`,
-    (c) => `I have seen this exact issue in businesses like yours, client bookings, agent commissions, and supplier invoices tracked in different tools, keeping the P&L always a month behind, and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen many travel agencies only knowing the real margin on a booking after the trip ends because commissions and supplier costs live in spreadsheets, and ${c} is most likely doing the same.`,
+    (c) => `I have seen many travel businesses tracking bookings, commissions, and supplier invoices in different tools, and ${c} is most likely running the same setup.`,
   ],
   restaurant: [
-    (c) => `I have seen this exact issue in businesses like yours, food cost only becoming visible at month-end because kitchen stock, supplier invoices, and daily sales aren't in the same system, and I think ${c} might be dealing with the same thing.`,
-    (c) => `I have seen this exact issue in businesses like yours, stock and sales running separately, so food cost problems only show up after the margin is already gone, and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen many restaurant teams only seeing their real food cost at month-end because kitchen stock and daily sales are not in the same system, and ${c} is most likely doing the same.`,
+    (c) => `I have seen many restaurant operations where stock and sales run separately so food cost problems only show up after the margin is already gone, and ${c} is most likely in the same situation.`,
   ],
   retail: [
-    (c) => `I have seen this exact issue in businesses like yours, stockouts only caught when the shelf is already empty because inventory levels and reorder points aren't connected to live sales, and I think ${c} might be dealing with the same thing.`,
-    (c) => `I have seen this exact issue in businesses like yours, inventory and sales running in different systems, making stockout surprises a regular cost of doing business, and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen many retail teams catching stockouts only when the shelf is already empty because inventory and live sales data are not connected, and ${c} is most likely doing the same.`,
+    (c) => `I have seen many retail businesses where inventory and sales run in different systems, turning stockout surprises into a regular cost, and ${c} is most likely running the same setup.`,
   ],
   ngo: [
-    (c) => `I have seen this exact issue in businesses like yours, donor compliance reports taking the better part of a week because field expenses and grant budgets live in separate spreadsheets, and I think ${c} might be dealing with the same thing.`,
-    (c) => `I have seen this exact issue in businesses like yours, grant budgets and field costs tracked in different tools, with the finance team spending more time reconciling data than reporting on impact, and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen many NGO finance teams spending close to a week on donor compliance reports because field expenses and grant budgets live in separate spreadsheets, and ${c} is most likely doing the same.`,
+    (c) => `I have seen many NGOs where the finance team spends more time reconciling data than reporting on impact because grants and field costs don't connect, and ${c} is most likely in the same position.`,
   ],
   construction: [
-    (c) => `I have seen this exact issue in businesses like yours, cost overruns only showing up in the P&L after the margin is already gone because project budgets and procurement run separately, and I think ${c} might be dealing with the same thing.`,
-    (c) => `I have seen this exact issue in businesses like yours, project management and financial tracking not sharing the same data, making budget-to-actuals always a backward-looking exercise, and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen many construction finance teams only finding out about cost overruns after the margin is already gone because project budgets and procurement run separately, and ${c} is most likely doing the same.`,
+    (c) => `I have seen many construction businesses where project management and financial tracking don't share the same data, making budget-to-actuals always a backward exercise, and ${c} is most likely running the same way.`,
   ],
   logistics: [
-    (c) => `I have seen this exact issue in businesses like yours, month-end reconciliation taking days because driver payroll, trip logs, and client billing all live in separate places, and I think ${c} might be dealing with the same thing.`,
-    (c) => `I have seen this exact issue in businesses like yours, driver records and client invoicing not connected, with billing errors compounding quietly every month, and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen many logistics teams spending days at month-end reconciling driver payroll, trip logs, and client billing because none of it connects, and ${c} is most likely doing the same.`,
+    (c) => `I have seen many logistics operations where driver records and client invoicing are not connected, letting billing errors build up quietly every month, and ${c} is most likely in the same situation.`,
   ],
   school: [
-    (c) => `I have seen this exact issue in businesses like yours, bursar reconciliation taking two weeks every term because fee collection and staff payroll run in separate registers, and I think ${c} might be dealing with the same thing.`,
-    (c) => `I have seen this exact issue in businesses like yours, fee records and payroll running in different systems, making term-end always a reconciliation sprint, and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen many school finance teams spending two weeks every term reconciling fee collection and staff payroll because the two systems don't connect, and ${c} is most likely doing the same.`,
+    (c) => `I have seen many schools where fee records and payroll run in different systems, turning term-end into a reconciliation sprint, and ${c} is most likely running the same setup.`,
   ],
   generic: [
-    (c) => `I have seen this exact issue in businesses like yours, finance, HR, inventory, and operations each running in a different tool, with the team spending days every month moving data that should flow automatically, and I think ${c} might be dealing with the same thing.`,
-    (c) => `I have seen this exact issue in businesses like yours, disconnected back-office systems where finance, HR, and operations don't share the same data, and the coordination overhead grows quietly, and I think ${c} might be dealing with the same thing.`,
-    (c) => `I have seen this exact issue in businesses like yours, manual workflows and fragmented tools that slow teams down and make month-end harder than it needs to be, and I think ${c} might be dealing with the same thing.`,
+    (c) => `I have seen many businesses still running finance, HR, and operations in separate tools, with the team spending days every month moving data that should flow automatically, and ${c} is most likely doing the same.`,
+    (c) => `I have seen many businesses where finance, HR, and operations don't share the same data, and the coordination overhead keeps growing quietly, and ${c} is most likely in the same position.`,
+    (c) => `I have seen many businesses still managing back-office operations manually across disconnected tools, and ${c} is most likely running the same setup.`,
   ],
 };
 
-// ─── Pryro solution bank ──────────────────────────────────────────────────────
+// --- Pryro solution bank ------------------------------------------------------
 // Format: "Pryro is an ERP that [specific sector fix]"
 // No commission. No referral. Just the outcome.
 const PRYRO_BANK: Record<string, string[]> = {
@@ -224,7 +256,7 @@ const PRYRO_BANK: Record<string, string[]> = {
     'Pryro is an ERP that links staff payroll and patient billing so month-end takes minutes instead of days',
   ],
   hospital: [
-    "Pryro is an ERP that connects department budgets and HR payroll so your finance team sees live spend against approved limits, not last month's figures",
+    "Pryro is an ERP that connects department budgets and HR payroll so your finance team sees live spend against approved limits before decisions are made, not after",
     'Pryro is an ERP that gives your CFO real-time budget-to-actuals visibility by connecting payroll and department procurement in one system',
   ],
   hotel: [
@@ -269,7 +301,7 @@ const PRYRO_BANK: Record<string, string[]> = {
   ],
 };
 
-// ─── Bank helpers ─────────────────────────────────────────────────────────────
+// --- Bank helpers -------------------------------------------------------------
 
 function getSubject(niche: string | null, companyName: string, idx: number): string {
   const key = detectNicheKey(niche);
@@ -291,18 +323,18 @@ function getPryro(niche: string | null, idx: number): string {
   return bank[idx % bank.length]!;
 }
 
-// ─── CTA builder, specific time slot, not an open-ended question ─────────────
+// --- CTA builder - always proposes specific days so the prospect just confirms -
 function buildCTA(emailIndex: number): string {
   const slots = [
-    'I have 10 minutes free tomorrow afternoon if that works, what do you think?',
-    'I am free for a quick call later today, does that work for you?',
-    'I have a slot open tomorrow morning if you want a quick look, does that work?',
-    'I am free for 10 minutes this week, would tomorrow work for a quick call?',
+    'I have 10 minutes free Tuesday or Wednesday if that works, what do you think?',
+    'I am free for a quick call Tuesday or Thursday this week, does either work for you?',
+    'I have a slot open Wednesday or Friday morning, would either work for a quick look?',
+    'I am free for 10 minutes Tuesday afternoon or Wednesday morning, would that work?',
   ];
   return slots[emailIndex % slots.length]!;
 }
 
-// ─── Email assembler ──────────────────────────────────────────────────────────
+// --- Email assembler ----------------------------------------------------------
 
 function assembleEmail(params: {
   greeting: string;
@@ -330,7 +362,7 @@ ${footer}`;
   return { subject, body };
 }
 
-// ─── AI caller ────────────────────────────────────────────────────────────────
+// --- AI caller ----------------------------------------------------------------
 
 interface AIProvider { provider: string; api_key: string; active_model: string; }
 
@@ -404,7 +436,7 @@ async function callAI(p: AIProvider, system: string, user: string): Promise<stri
   throw lastError;
 }
 
-// ─── AI prompt ────────────────────────────────────────────────────────────────
+// --- AI prompt ----------------------------------------------------------------
 // AI writes the Pryro solution sentence (WITHOUT commission, that gets appended by code).
 
 function buildAISystemPrompt(companyName: string, niche: string | null, companyContext?: string | null, emailIndex?: number): string {
@@ -412,16 +444,19 @@ function buildAISystemPrompt(companyName: string, niche: string | null, companyC
     ? `\nWhat this company does: "${companyContext.slice(0, 180)}"\nUse this context to make both the subject and Pryro sentence specific to their actual operation.`
     : '';
 
-  // Rotate the seed style hint so the AI naturally varies across a batch.
-  // This is a hint only — the AI picks the best fit for the company.
-  const styleHints = [
-    `Prefer the "Why is [Company]'s [department] still doing X?" format if it fits.`,
-    `Prefer the "Still managing [pain point] manually at [Company]?" format if it fits.`,
-    `Prefer the "Is [Company]'s [department] drowning in [problem]?" format if it fits.`,
-    `Prefer the "How is [Company] handling [pain point] right now?" format if it fits.`,
-    `Prefer the "[Company], still juggling [pain point]?" format if it fits.`,
+  // Rotate the formula hint so subjects vary naturally across a batch.
+  // These are the three approved formulas from the boss.
+  // The AI picks whichever fits the sector - Excel is only appropriate for sectors
+  // where spreadsheet habits are realistic (retail, restaurant, logistics, school,
+  // construction, travel, hotel, lodge). For clinical/regulated sectors (hospital,
+  // healthcare, pharmacy, NGO) the AI should avoid mentioning Excel and use
+  // the "Why is..." or "As a big company like [Company]..." formulas instead.
+  const formulaHints = [
+    `Prefer formula 1: "I have been wondering how a company as big as [Company] still uses Excel for [specific task]" - ONLY if Excel tracking is realistic for this sector (retail, restaurant, logistics, school, construction, travel, hotel, lodge). Skip Excel for hospital, healthcare, pharmacy, NGO.`,
+    `Prefer formula 2: "Why is [Company] still using Excel for [specific task]?" - ONLY if Excel is realistic for this sector. For hospital, healthcare, pharmacy, NGO use "Why is [Company]'s [dept] still [doing X] manually?" instead.`,
+    `Prefer formula 3: "As a big company like [Company], why still doing [specific task] manually?" - works for all sectors, no Excel reference needed.`,
   ];
-  const styleHint = styleHints[(emailIndex ?? 0) % styleHints.length]!;
+  const formulaHint = formulaHints[(emailIndex ?? 0) % formulaHints.length]!;
 
   return `You write cold email content for Pryro (pryro.com), an ERP platform.
 
@@ -431,22 +466,26 @@ Sector: ${niche || 'business'}${ctxHint}
 
 Your job is to write TWO things:
 
-1. SUBJECT LINE — a short, direct subject that challenges the prospect.
-   Choose ONE of these formats based on what best fits this company's sector and pain point:
-   a) Why is [Company]'s [department] still [doing X manually]?
-   b) Still managing [pain point] manually at [Company]?
-   c) Is [Company]'s [department] drowning in [problem]?
-   d) How is [Company] handling [pain point] right now?
-   e) [Company], still juggling [pain point]?
-   ${styleHint}
-   Replace [Company] with exactly: ${companyName}
-   Make it specific to their sector. Under 12 words. No punctuation after the question mark.
+1. SUBJECT LINE - pick ONE department pain point (HR, payroll, finance, OR inventory - not all of them) that is most relevant to this company's sector, then write a short subject using one of these three approved formulas:
 
-2. PRYRO SENTENCE — one sentence starting with "Pryro is an ERP that" describing the fix.
+   Formula 1: "I have been wondering how a company as big as [Company] still uses Excel for [specific task]"
+   Formula 2: "Why is [Company] still using Excel for [specific task]?"
+   Formula 3: "As a big company like [Company], why still doing [specific task] manually?"
+
+   ${formulaHint}
+
+   Rules:
+   - Replace [Company] with exactly: ${companyName}
+   - [specific task] must name ONE department task, not a list
+   - No hyphens anywhere in the subject line
+   - Under 15 words
+   - No punctuation after the final word except a question mark where the formula ends with one
+
+2. PRYRO SENTENCE - one sentence starting with "Pryro is an ERP that" describing the fix for that SAME single department pain.
    - Name at least one Pryro module
-   - Describe a concrete operational outcome
+   - Describe a concrete operational outcome for that one department
    - Under 35 words
-   - No commission, referral, percent, free trial, buzzwords (streamline, leverage, empower, optimize, seamless, innovative, robust)
+   - No hyphens, no commission, no referral, no buzzwords (streamline, leverage, empower, optimize, seamless, innovative, robust)
 
 OUTPUT FORMAT (exactly, no extra text):
 SUBJECT: [your subject line]
@@ -488,12 +527,12 @@ function parseAIResponse(raw: string, fallbackSubject: string): { subject: strin
   return { subject, pryro };
 }
 
-// Keep for backward compat — used by some fallback paths
+// Keep for backward compat - used by some fallback paths
 function cleanAISentence(raw: string): string | null {
   return parseAIResponse(raw, '').pryro;
 }
 
-// ─── Follow-up prompt ─────────────────────────────────────────────────────────
+// --- Follow-up prompt ---------------------------------------------------------
 
 export function buildFollowUpPrompt(
   signals: ProspectSignals,
@@ -505,7 +544,7 @@ export function buildFollowUpPrompt(
 Company: ${signals.companyName} | Sector: ${signals.niche || 'business'}
 Greeting: ${signals.greeting}
 Max words: ${followUpNumber === 1 ? 50 : followUpNumber === 2 ? 40 : 30}
-CTA: Propose a specific time slot, e.g. "I have 10 minutes free tomorrow afternoon, does that work?"
+CTA: Propose two specific days, e.g. "I have 10 minutes free Tuesday or Wednesday if that works, what do you think?"
 Footer (copy VERBATIM, three lines):
 ${senderFooter}
 Rules: mention Pryro, different angle, NO commission, signature must be exactly three lines: "Regards," then name then company.
@@ -518,7 +557,7 @@ BODY:
 ${senderFooter}`;
 }
 
-// ─── Main export ──────────────────────────────────────────────────────────────
+// --- Main export --------------------------------------------------------------
 
 export async function buildPersonalizedEmail(
   params: EmailGenerationParams,
@@ -540,7 +579,7 @@ export async function buildPersonalizedEmail(
 
   console.log(`[EmailBuilder] company="${companyName}" | niche=${niche} | ai=${!!aiProvider} | customPryro=${!!params.customPryroSentence}`);
 
-  // ── Custom Pryro sentence from profile, bypasses AI entirely ────────────
+  // -- Custom Pryro sentence from profile, bypasses AI entirely ------------
   const customPryro = params.customPryroSentence?.trim() || null;
   if (customPryro) {
     const pryro = customPryro.toLowerCase().startsWith('pryro is an erp that')
@@ -558,7 +597,7 @@ export async function buildPersonalizedEmail(
     };
   }
 
-  // ── AI writes subject + Pryro sentence ───────────────────────────────────
+  // -- AI writes subject + Pryro sentence -----------------------------------
   if (aiProvider) {
     let aiSubject: string | null = null;
     let aiPryro:   string | null = null;
@@ -596,7 +635,7 @@ export async function buildPersonalizedEmail(
     }
   }
 
-  // ── Sector bank fallback (no AI or AI failed quality gate) ───────────────
+  // -- Sector bank fallback (no AI or AI failed quality gate) ---------------
   const pryro = getPryro(niche, idx);
   const { subject: fs, body: fb } = assembleEmail({ greeting, problem, pryro, footer, subject: fallbackSubj, emailIndex: idx });
   const fq = checkEmailQuality({ subject: fs, body: fb, companyName, externalPersonalizationScore: signals.personalizationScore });

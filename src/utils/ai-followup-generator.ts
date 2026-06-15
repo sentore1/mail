@@ -232,31 +232,38 @@ function buildSystemPrompt(style: FollowUpStyle, senderName: string, tone?: Foll
 
 CRITICAL RULES, no exceptions:
 1. Greeting is ALWAYS time-aware: "Good morning," or "Good afternoon," or "Greetings," — never include a name or company in the greeting
-2. Subject MUST start with "Follow-up #[N]: Re: [original subject]", so the prospect sees it is a follow-up
+2. Subject MUST be "Re: [original subject]" — no "Follow-up #N" prefix, keep it clean
 3. Every email MUST mention Pryro by name and describe one specific operational outcome it delivers
 4. Never repeat the original email word for word, take a new angle
 5. Never mention: commission, referral, percent, free trial, pryro.com, Sir/Madam, cutting-edge, revolutionary, streamline, leverage, empower, synergy, "I wanted to reach out", "I hope this finds you well"
-6. Signature is ALWAYS the three-line block provided — copy it VERBATIM in this exact format:
+6. No hyphens anywhere in the email body or subject
+7. Signature is ALWAYS the three-line block provided — copy it VERBATIM in this exact format:
    Regards,
    [Name]
    [Company]
-7. CTA must propose a SPECIFIC time slot, e.g. "I have 10 minutes free tomorrow afternoon, does that work?", never an open-ended question
+8. CTA must always propose TWO specific days, e.g. "I have 10 minutes free Tuesday or Wednesday if that works, what do you think?" — never an open-ended question, never a single vague "tomorrow"
 
 STAGE RULES:
-- Stage 1 (Day 3): Reference previous email, remind them what Pryro does in one sentence, propose a specific time slot. Under 60 words.
-- Stage 2 (Day 7): New angle, acknowledge busy inbox, share a specific Pryro outcome different from stage 1, propose a specific time slot. Under 65 words.
+- Stage 1 (Day 3): Reference previous email, remind them of the ONE department pain Pryro solves for their sector, propose two specific days. Under 60 words.
+- Stage 2 (Day 7): New angle, acknowledge busy inbox, share a specific Pryro outcome for a DIFFERENT department than Stage 1, propose two specific days. Under 65 words.
 - Stage 3 (Day 14): Very short and warm, final follow-up, mention Pryro once, end with "Pryro is here when the time is right." Under 45 words.
 
 OUTPUT FORMAT:
-SUBJECT: Follow-up #[N]: Re: [original subject]
+SUBJECT: Re: [original subject]
 BODY:
 [greeting]
 
-[follow-up body]
+[follow-up body sentence 1]
+
+[follow-up body sentence 2 if needed]
+
+[CTA]
 
 Regards,
 [Name]
-[Company]`;
+[Company]
+
+IMPORTANT: There must be a blank line between EVERY paragraph including between the greeting and first line, between each body sentence, between the last body line and the CTA, and between the CTA and the signature.`;
 }
 
 function buildUserPrompt(ctx: FollowUpContext, style: FollowUpStyle): string {
@@ -268,7 +275,7 @@ function buildUserPrompt(ctx: FollowUpContext, style: FollowUpStyle): string {
   const greeting   = resolveGreeting(null, ctx.companyName);
   const cleanName  = cleanCompanyNameForGreeting(ctx.companyName);
   const sector     = ctx.niche || 'business';
-  const subject    = `Follow-up #${ctx.followupNumber}: Re: ${ctx.originalSubject}`;
+  const subject    = `Re: ${ctx.originalSubject}`;
 
   // Extract the exact problem and Pryro solution from the original email
   const { problemLine, pryroLine } = extractFromOriginalEmail(ctx.originalBody);
@@ -295,7 +302,7 @@ Rules:
 - Subject must be exactly: ${subject}
 - Open with: "Just following up on my email from a few days ago"
 - In 1–2 sentences, remind them of the specific problem we mentioned and how Pryro solves it, rephrase, don't copy
-- End with: "Would you be open to a quick 10-minute call?"
+- End with: "I have 10 minutes free Tuesday or Wednesday if that works, what do you think?"
 - Under 65 words total body (not counting greeting or signature)
 - Never use Sir/Madam, never use first names
 
@@ -366,7 +373,7 @@ export function buildTemplateFollowUp(
   const greeting  = resolveGreeting(null, companyName);
   const cleanName = cleanCompanyNameForGreeting(companyName);
   const sector    = niche || 'business';
-  const subject   = `Follow-up #${followupNumber}: Re: ${originalSubject}`;
+  const subject   = `Re: ${originalSubject}`;
 
   // Extract the exact problem and solution from the original email we sent
   const { problemLine, pryroLine } = extractFromOriginalEmail(originalBody);
@@ -432,7 +439,7 @@ Just following up on my email from a few days ago, did it land at a bad time?
 
 As a quick reminder: ${pryroReminder}
 
-I have 10 minutes free tomorrow afternoon if that works, what do you think?
+I have 10 minutes free Tuesday or Wednesday if that works, what do you think?
 
 ${sig}`,
     };
@@ -448,7 +455,7 @@ I know inboxes get busy, one more try from my side.
 
 ${buildProblemContext()}
 
-I am free for a quick call later today, does that work for you?
+I am free for a quick call Tuesday or Thursday this week, does either work for you?
 
 ${sig}`,
     };
@@ -652,19 +659,28 @@ function parseAIFollowUp(text: string, fallbackSubject: string): { subject: stri
   const subjectMatch = text.match(/^SUBJECT:\s*(.+?)(?:\n|$)/im);
   const bodyMatch = text.match(/^BODY:\s*([\s\S]+?)$/im);
 
+  let subject: string;
+  let body: string;
+
   if (subjectMatch && bodyMatch) {
-    return {
-      subject: subjectMatch[1].trim().replace(/^["']|["']$/g, ""),
-      body: bodyMatch[1].trim().replace(/^["']|["']$/g, ""),
-    };
+    subject = subjectMatch[1].trim().replace(/^["']|["']$/g, "");
+    body = bodyMatch[1].trim().replace(/^["']|["']$/g, "");
+  } else {
+    // Fallback: first line = subject, rest = body
+    const lines = text.trim().split("\n");
+    subject = lines[0]?.replace(/^(SUBJECT:|Subject:)/i, "").trim() || fallbackSubject;
+    body = lines.slice(1).join("\n").replace(/^(BODY:|Body:)/i, "").trim() || text;
   }
 
-  // Fallback: first line = subject, rest = body
-  const lines = text.trim().split("\n");
-  const subject = lines[0]?.replace(/^(SUBJECT:|Subject:)/i, "").trim() || fallbackSubject;
-  const body = lines.slice(1).join("\n").replace(/^(BODY:|Body:)/i, "").trim() || text;
+  // Ensure blank lines between every paragraph (greeting, body lines, CTA, signature)
+  // Split on existing blank lines first, then also split run-on paragraphs
+  const normalized = body
+    .split(/\n{2,}/)                          // split on existing blank lines
+    .map(p => p.trim())
+    .filter(p => p.length > 0)
+    .join("\n\n");                            // rejoin with exactly one blank line
 
-  return { subject, body };
+  return { subject, body: normalized };
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
