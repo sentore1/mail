@@ -37,18 +37,16 @@ CREATE POLICY "Users see own activity"
   ON followup_activity_log FOR ALL
   USING (auth.uid() = user_id);
 
--- 2. Enable auto follow-up for all existing users
+-- 2. Enable auto follow-up for all existing users (only columns that exist in followup_settings)
 INSERT INTO followup_settings (
   user_id,
   auto_followup_enabled,
-  max_followups,
-  followup_interval_days
+  max_followups
 )
 SELECT
   id,
   true,   -- auto_followup_enabled
-  3,      -- max 3 follow-ups per lead
-  3       -- 3 days between each
+  3       -- max 3 follow-ups per lead
 FROM auth.users
 ON CONFLICT (user_id) DO UPDATE
   SET auto_followup_enabled = true;

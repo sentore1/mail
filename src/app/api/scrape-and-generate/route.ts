@@ -121,8 +121,8 @@ function buildDirectEmail(
   ];
   const cta = ctaOptions[idx % ctaOptions.length]!;
 
-  // Signature from sender profile, multi-line, no "Best regards"
-  const sig = `${senderName}\nPryro`;
+  // Signature — Regards, / Name / Company
+  const sig = `Regards,\n${senderName}\nPryro`;
 
   const body =
 `${greeting}

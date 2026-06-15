@@ -683,15 +683,11 @@ export function buildGuaranteedEmail(params: {
   const problem = problems[nicheKey] ?? problems['generic']!;
   const pryro   = pryros[nicheKey]   ?? pryros['generic']!;
 
-  // Signature from sender profile fields, multi-line, no "Best regards"
+  // Signature — Regards, / Name / Company
   const senderLine = (() => {
-    const lines: string[] = [];
-    if (params.senderName)    lines.push(params.senderName);
-    if (params.senderTitle)   lines.push(params.senderTitle);
-    if (params.senderCompany) lines.push(params.senderCompany);
-    if (params.senderPhone)   lines.push(params.senderPhone);
-    if (params.senderEmail)   lines.push(params.senderEmail);
-    return lines.join('\n') || 'Alice Umubyeyi\nPryro';
+    const name    = params.senderName    || 'Alice Umubyeyi';
+    const company = params.senderCompany || 'Pryro';
+    return `Regards,\n${name}\n${company}`;
   })();
 
   const body = `${greeting}

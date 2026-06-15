@@ -4,7 +4,7 @@ import { Lead, EmailReply, AIReply, SentEmail } from "@/types/platform";
 import {
   Send, Loader2, X, ChevronDown, ChevronRight, ChevronLeft,
   Sparkles, RefreshCw, Eye, MousePointer, CheckCircle,
-  Edit3, AtSign, Flame, Search, Filter, Clock, Mail,
+  Edit3, AtSign, Search, Clock, Mail,
   ArrowUpDown, Calendar, RotateCcw, Users, Activity, AlertCircle,
   Bot, User,
 } from "lucide-react";
@@ -68,9 +68,9 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
   const [replies, setReplies] = useState<EmailReply[]>([]);
   const [leads, setLeads] = useState<Map<string, Lead>>(new Map());
   const [loading, setLoading] = useState(true);
-  const [checking, setChecking] = useState(false);
+  const [catchingUp, setCatchingUp]  = useState(false);
 
-  // ── Due-today queue map ────────────────────────────────────────────────────
+  const [checking, setChecking]       = useState(false);
   const [dueLeadIds, setDueLeadIds] = useState<Set<string>>(new Set());
 
   // ── Activity log ──────────────────────────────────────────────────────────
@@ -436,6 +436,22 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
     } catch { toast.error("Inbox check failed"); } finally { setChecking(false); }
   };
 
+  const catchUpNow = async () => {
+    setCatchingUp(true);
+    try {
+      const res = await fetch("/api/followup/catchup", { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(data.message ?? "Catch-up complete");
+        load();
+        if (activeTab === "activity") loadActivityLog();
+      } else {
+        toast.error(data.error ?? "Catch-up failed");
+      }
+    } catch { toast.error("Catch-up failed"); }
+    finally { setCatchingUp(false); }
+  };
+
   // ─────────────────────────────────────────────────────────────────────────
   // BULK REVIEW FULL-SCREEN
   // ─────────────────────────────────────────────────────────────────────────
@@ -679,7 +695,7 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
                           <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-gray-100 text-gray-500 border border-gray-200">Skipped</span>
                         )}
                         {entry.needs_manual_review && (
-                          <span className="ml-1 text-[10px] text-amber-600 font-semibold">⚑ Review</span>
+                          <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-amber-50 text-amber-700 border border-amber-200">Review</span>
                         )}
                       </td>
                       <td className="px-4 py-3">
@@ -730,15 +746,36 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
           <div className="flex items-center justify-between mb-3">
             <div>
               <h1 className="text-lg font-bold text-gray-900">Follow-Up</h1>
-              <p className="text-xs text-gray-400 mt-0.5">
-                {eligible.length} leads eligible · {eligible.filter(t => daysSince(t.emails.filter(e=>!["failed","bounced"].includes(e.status||"")).slice(-1)[0]?.sent_at || "") >= 3).length} overdue
-              </p>
+              {(() => {
+                const overdueCount = eligible.filter(t =>
+                  daysSince(t.emails.filter(e => !["failed","bounced"].includes(e.status||"")).slice(-1)[0]?.sent_at || "") >= 3
+                ).length;
+                return (
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {eligible.length} leads eligible
+                    {overdueCount > 0 && (
+                      <> · <span className="text-red-600 font-semibold">{overdueCount} overdue</span></>
+                    )}
+                  </p>
+                );
+              })()}
             </div>
             <div className="flex items-center gap-2">
               {bulkSelected.size > 0 && (
                 <button onClick={generateBulk} disabled={bulkGenerating}
                   className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
-                  {bulkGenerating ? <><Loader2 size={13} className="animate-spin" />Generating {bulkProgress.done}/{bulkProgress.total}…</> : <><Sparkles size={13} />Generate {bulkSelected.size} Follow-Up{bulkSelected.size !== 1 ? "s" : ""}</>}
+                  {bulkGenerating
+                    ? <><Loader2 size={13} className="animate-spin" />Generating {bulkProgress.done}/{bulkProgress.total}…</>
+                    : <><Sparkles size={13} />Generate {bulkSelected.size} Follow-Up{bulkSelected.size !== 1 ? "s" : ""}</>}
+                </button>
+              )}
+              {/* Catch Up Now — processes all overdue pending follow-ups immediately */}
+              {dueLeadIds.size > 0 && (
+                <button onClick={catchUpNow} disabled={catchingUp}
+                  className="flex items-center gap-1.5 px-3 py-2 border border-amber-300 bg-amber-50 text-amber-800 text-sm font-semibold rounded-lg hover:bg-amber-100 disabled:opacity-50 transition-colors">
+                  {catchingUp
+                    ? <><Loader2 size={13} className="animate-spin" />Processing…</>
+                    : <><Send size={13} />Catch Up Now ({dueLeadIds.size})</>}
                 </button>
               )}
               <button onClick={checkInbox} disabled={checking}
@@ -792,7 +829,7 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
               {(["priority", "days", "name", "stage"] as const).map(s => (
                 <button key={s} onClick={() => setSortBy(s)}
                   className={`px-3 py-2 text-xs font-medium transition-colors ${sortBy === s ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-50"}`}>
-                  {s === "priority" ? "🔥 Priority" : s === "days" ? "⏱ Days" : s === "name" ? "A-Z" : "Stage"}
+                  {s === "priority" ? "Priority" : s === "days" ? "Days" : s === "name" ? "A-Z" : "Stage"}
                 </button>
               ))}
             </div>
@@ -877,8 +914,8 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2 min-w-0">
-                            {isHighPriority && <Flame size={13} className="text-orange-500 shrink-0" />}
-                            {isOpened && !isHighPriority && <Eye size={12} className="text-amber-500 shrink-0" />}
+                            {isHighPriority && <span className="w-2 h-2 rounded-full bg-orange-500 shrink-0" title="Clicked" />}
+                            {isOpened && !isHighPriority && <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" title="Opened" />}
                             <div className="min-w-0">
                               <div className="flex items-center gap-1.5">
                                 <p className="text-sm font-semibold text-gray-900 truncate">{thread.companyName}</p>
@@ -899,7 +936,7 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
                         <td className="px-4 py-3 text-xs text-gray-500">{latest ? fdate(latest.sent_at) : "—"}</td>
                         <td className="px-4 py-3">
                           <span className={`text-xs font-bold ${days >= 7 ? "text-red-600" : days >= 3 ? "text-amber-600" : "text-gray-400"}`}>
-                            {days}d{days >= 3 ? " 🔔" : ""}
+                          {days}d{days >= 7 ? <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-red-100 text-red-700 font-bold border border-red-200">Overdue</span> : days >= 3 ? <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700 font-bold border border-amber-200">Due</span> : null}
                           </span>
                         </td>
                         <td className="px-4 py-3">
@@ -946,8 +983,8 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  {drawerThread.priority === 2 && <Flame size={15} className="text-orange-500 shrink-0" />}
-                  {drawerThread.priority === 1 && <Eye size={14} className="text-amber-500 shrink-0" />}
+                  {drawerThread.priority === 2 && <span className="w-2.5 h-2.5 rounded-full bg-orange-500 shrink-0" title="Clicked" />}
+                  {drawerThread.priority === 1 && <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0" title="Opened" />}
                   <h2 className="text-base font-bold text-gray-900 truncate">{drawerThread.companyName}</h2>
                 </div>
                 <p className="text-xs text-gray-400 mt-0.5 truncate">{drawerThread.leadEmail}</p>
@@ -1026,8 +1063,8 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
               </button>
             ) : (
               <div className="space-y-3">
-                {drawerDraft.decisionReason && (
-                  <p className="text-[11px] text-gray-400 italic bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">💡 {drawerDraft.decisionReason}</p>
+                  {drawerDraft.decisionReason && (
+                  <p className="text-[11px] text-gray-500 bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">{drawerDraft.decisionReason}</p>
                 )}
                 <div>
                   <label className="text-xs font-semibold text-gray-700 mb-1 block">Subject</label>

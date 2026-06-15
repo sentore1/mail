@@ -34,16 +34,33 @@ export async function GET(req: NextRequest) {
   const supabase = createServiceClient();
 
   try {
-    // Get all users with active follow-ups configured
-    const { data: users } = await supabase
+    // Get all users with active follow-ups configured OR who have overdue pending items
+    // This ensures users whose auto_followup_enabled may be off still get processed
+    // if they have items that were manually queued and are now overdue.
+    const { data: autoUsers } = await supabase
       .from("followup_settings")
       .select("user_id")
       .eq("auto_followup_enabled", true);
 
-    if (!users || users.length === 0) {
+    // Also pick up users who have overdue pending queue items but may not have the setting
+    const { data: overdueUsers } = await supabase
+      .from("followup_queue")
+      .select("user_id")
+      .eq("status", "pending")
+      .lte("scheduled_at", new Date().toISOString());
+
+    // Merge unique user IDs
+    const allUserIds = new Set<string>([
+      ...(autoUsers ?? []).map((u: any) => u.user_id),
+      ...(overdueUsers ?? []).map((u: any) => u.user_id),
+    ]);
+
+    const users = Array.from(allUserIds).map(user_id => ({ user_id }));
+
+    if (users.length === 0) {
       return NextResponse.json({
         success: true,
-        message: "No users with auto-followup enabled",
+        message: "No users with pending follow-ups",
         processed: 0,
       });
     }

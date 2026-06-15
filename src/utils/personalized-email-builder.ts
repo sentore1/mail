@@ -63,8 +63,10 @@ function buildGreetingLine(signals: ProspectSignals): string {
 }
 
 // ─── Signature ────────────────────────────────────────────────────────────────
-// Format from sender profile: Name \n Title \n Company \n Phone [\n Email]
-// No "Best regards,", email ends after CTA, then footer.
+// Format:
+//   Regards,
+//   [Name]
+//   [Company]
 export function buildMultiLineFooter(params: {
   senderName: string;
   senderTitle?: string;
@@ -72,13 +74,9 @@ export function buildMultiLineFooter(params: {
   senderPhone?: string;
   senderEmail?: string;
 }): string {
-  const lines: string[] = [];
-  if (params.senderName)    lines.push(params.senderName);
-  if (params.senderTitle)   lines.push(params.senderTitle);
-  if (params.senderCompany) lines.push(params.senderCompany);
-  if (params.senderPhone)   lines.push(params.senderPhone);
-  if (params.senderEmail)   lines.push(params.senderEmail);
-  return lines.join('\n') || 'Alice Umubyeyi\nPryro';
+  const name    = params.senderName    || 'Alice Umubyeyi';
+  const company = params.senderCompany || 'Pryro';
+  return `Regards,\n${name}\n${company}`;
 }
 
 // ─── Subject bank ─────────────────────────────────────────────────────────────
@@ -508,15 +506,16 @@ Company: ${signals.companyName} | Sector: ${signals.niche || 'business'}
 Greeting: ${signals.greeting}
 Max words: ${followUpNumber === 1 ? 50 : followUpNumber === 2 ? 40 : 30}
 CTA: Propose a specific time slot, e.g. "I have 10 minutes free tomorrow afternoon, does that work?"
-Footer: ${senderFooter}
-Rules: mention Pryro, different angle, NO commission, NO "Best regards", footer is one line only.
+Footer (copy VERBATIM, three lines):
+${senderFooter}
+Rules: mention Pryro, different angle, NO commission, signature must be exactly three lines: "Regards," then name then company.
 FORMAT:
 SUBJECT: Re: ${originalSubject}
 BODY:
 [greeting]
 [new angle + Pryro]
 [CTA with specific time]
-[footer, one line]`;
+${senderFooter}`;
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────

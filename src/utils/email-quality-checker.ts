@@ -389,7 +389,7 @@ export function checkEmailQuality(params: {
       type: 'signoff',
       severity: 'warn',
       message: 'Email has no valid one-line signature.',
-      fix: `End with one clean line: "Alice Umubyeyi — Pryro | 0790038006". No "Best regards," block.`,
+      fix: `End with the three-line signature: "Regards,\\n[Name]\\n[Company]". No phone, no title, no extra lines.`,
     });
   }
 

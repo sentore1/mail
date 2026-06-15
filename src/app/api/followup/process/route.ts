@@ -393,20 +393,25 @@ async function markSkipped(
 function buildTemplateFollowup(due: DueFollowup): string {
   const num = due.followup_count + 1;
   const company = due.company_name;
-  const yourCompany = due.your_company ?? "our company";
+  const yourCompany = due.your_company ?? "Pryro";
   const yourService = due.your_service ?? "our service";
 
+  // Time-aware greeting (EAT default)
+  const hour = (new Date().getUTCHours() + 3) % 24;
+  const greeting = hour >= 5 && hour < 12 ? 'Good morning,' : hour >= 12 && hour < 17 ? 'Good afternoon,' : 'Greetings,';
+  const sig = `Regards,\nAlice\n${yourCompany}`;
+
   if (num === 1) {
-    return `Hi ${company} team,\n\nFollowing up on my previous email about ${yourService}.\n\nI genuinely think there's a fit here. Would a 10-minute call this week make sense?\n\nBest,\n${yourCompany}`;
+    return `${greeting}\n\nJust following up on my previous email about ${yourService}.\n\nI have 10 minutes free tomorrow afternoon if that works, what do you think?\n\n${sig}`;
   }
   if (num === 2) {
-    return `Hey,\n\nJust bumping this up in case it got buried.\n\nStill think ${yourService} could be useful for ${company} — happy to keep it to 10 minutes if you're curious.\n\n${yourCompany}`;
+    return `${greeting}\n\nOne more follow-up in case my last email got buried.\n\nStill think ${yourService} could be useful for ${company}. I am free for a quick call later today, does that work?\n\n${sig}`;
   }
   if (num >= 3) {
-    return `Hi ${company},\n\nOne last note before I stop following up.\n\nIf ${yourService} isn't relevant right now, no problem at all. But if there's even a small chance it could help, I'd love a quick call.\n\nEither way — no hard feelings.\n\n${yourCompany}`;
+    return `${greeting}\n\nLast follow-up from me, keeping it short.\n\nIf ${yourService} ever becomes a priority at ${company}, Pryro is here when the time is right.\n\n${sig}`;
   }
 
-  return `Hi ${company},\n\nJust following up again on ${yourService}. Let me know if you'd like to explore this.\n\nBest,\n${yourCompany}`;
+  return `${greeting}\n\nJust following up again on ${yourService}. Let me know if you would like to explore this.\n\n${sig}`;
 }
 
 // ─── Route handlers ───────────────────────────────────────────────────────────

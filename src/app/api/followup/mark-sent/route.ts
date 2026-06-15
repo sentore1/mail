@@ -94,19 +94,23 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4. Log in followup_activity_log
-    await service.from("followup_activity_log").insert({
-      user_id:         user.id,
-      lead_id:         leadId,
-      company_name:    companyName ?? null,
-      email:           leadEmail ?? null,
-      followup_number: followupNumber,
-      subject,
-      body,
-      status:          "sent",
-      is_auto:         false,
-      sent_at:         new Date().toISOString(),
-    }).catch(() => { /* table may not exist yet — non-fatal */ });
+    // 4. Log in followup_activity_log (non-fatal — table may not exist yet)
+    try {
+      await service.from("followup_activity_log").insert({
+        user_id:         user.id,
+        lead_id:         leadId,
+        company_name:    companyName ?? null,
+        email:           leadEmail ?? null,
+        followup_number: followupNumber,
+        subject,
+        body,
+        status:          "sent",
+        is_auto:         false,
+        sent_at:         new Date().toISOString(),
+      });
+    } catch {
+      // Non-fatal — activity log table may not exist yet
+    }
 
     return NextResponse.json({ success: true });
   } catch (err) {

@@ -51,32 +51,27 @@ export const EMPTY_PROFILE: Omit<SenderProfile, 'user_id'> = {
 
 /**
  * Builds the plain-text footer from the sender profile.
- * Format: Name \n Title \n Company \n Phone [\n Email]
- * No "Best regards,", the email body ends directly with the CTA, then the footer.
+ * Format:
+ *   Regards,
+ *   [Name]
+ *   [Company]
  */
 export function renderFooter(profile: SenderProfile): string {
-  const lines: string[] = [];
-  if (profile.full_name)    lines.push(profile.full_name);
-  if (profile.job_title)    lines.push(profile.job_title);
-  if (profile.company_name) lines.push(profile.company_name);
-  if (profile.phone)        lines.push(profile.phone);
-  if (profile.email)        lines.push(profile.email);
-  return lines.join('\n') || 'Alice Umubyeyi\nPryro';
+  const name    = profile.full_name    || 'Alice Umubyeyi';
+  const company = profile.company_name || 'Pryro';
+  return `Regards,\n${name}\n${company}`;
 }
 
 /**
  * Builds the casual sign-off used in AI system prompts.
- * Shorter than the full footer, just name + company + phone.
+ * Shorter than the full footer, just name + company.
  *
- * Output:  "Alice from Pryro\n0790038006"
+ * Output:  "Regards,\nAlice\nPryro"
  */
 export function renderSignOff(profile: SenderProfile): string {
-  const firstName = (profile.full_name || 'Your Name').split(' ')[0]!;
-  const company   = profile.company_name || 'Pryro';
-  const phone     = profile.phone;
-  return phone
-    ? `${firstName} from ${company}\n${phone}`
-    : `${firstName} from ${company}`;
+  const name    = profile.full_name    || 'Alice Umubyeyi';
+  const company = profile.company_name || 'Pryro';
+  return `Regards,\n${name}\n${company}`;
 }
 
 // ─── Greeting builder (Q5) ───────────────────────────────────────────────────

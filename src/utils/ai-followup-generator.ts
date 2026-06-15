@@ -173,9 +173,11 @@ function resolveGreeting(contactName?: string | null, companyName?: string): str
   return `${timeGreet},`;
 }
 
-// ── Signature builder, one-line format ──────────────────────────────────────
-// Format: Name \n Title \n Company \n Phone
-// No "Best regards".
+// ── Signature builder ──────────────────────────────────────────────────────
+// Format:
+//   Regards,
+//   [Name]
+//   [Company]
 function buildSignature(
   senderName: string,
   senderPhone?: string,
@@ -183,13 +185,9 @@ function buildSignature(
   senderCompany?: string,
   senderEmail?: string,
 ): string {
-  const lines: string[] = [];
-  if (senderName)    lines.push(senderName);
-  if (senderTitle)   lines.push(senderTitle);
-  if (senderCompany) lines.push(senderCompany);
-  if (senderPhone)   lines.push(senderPhone);
-  if (senderEmail)   lines.push(senderEmail);
-  return lines.join('\n') || 'Alice Umubyeyi\nPryro';
+  const name    = senderName    || 'Alice Umubyeyi';
+  const company = senderCompany || 'Pryro';
+  return `Regards,\n${name}\n${company}`;
 }
 
 // ── Extract problem + solution from original email body ───────────────────────
@@ -233,12 +231,15 @@ function buildSystemPrompt(style: FollowUpStyle, senderName: string, tone?: Foll
   return `You write short follow-up emails for Pryro, an ERP platform that connects finance, inventory, HR, and operations.
 
 CRITICAL RULES, no exceptions:
-1. Greeting is ALWAYS time-aware: "Good morning [Company] team," or "Good afternoon [Company] team,", never a first name, never Sir/Madam, never Dear, never "Hi"
+1. Greeting is ALWAYS time-aware: "Good morning," or "Good afternoon," or "Greetings," — never include a name or company in the greeting
 2. Subject MUST start with "Follow-up #[N]: Re: [original subject]", so the prospect sees it is a follow-up
 3. Every email MUST mention Pryro by name and describe one specific operational outcome it delivers
 4. Never repeat the original email word for word, take a new angle
-5. Never mention: commission, referral, percent, free trial, pryro.com, Sir/Madam, cutting-edge, revolutionary, streamline, leverage, empower, synergy, "I wanted to reach out", "I hope this finds you well", "Best regards"
-6. Signature is ALWAYS the single-line format provided, copy it VERBATIM, never change it, never add "Best regards" before it
+5. Never mention: commission, referral, percent, free trial, pryro.com, Sir/Madam, cutting-edge, revolutionary, streamline, leverage, empower, synergy, "I wanted to reach out", "I hope this finds you well"
+6. Signature is ALWAYS the three-line block provided — copy it VERBATIM in this exact format:
+   Regards,
+   [Name]
+   [Company]
 7. CTA must propose a SPECIFIC time slot, e.g. "I have 10 minutes free tomorrow afternoon, does that work?", never an open-ended question
 
 STAGE RULES:
@@ -253,7 +254,9 @@ BODY:
 
 [follow-up body]
 
-[signature, one line, no "Best regards"]`;
+Regards,
+[Name]
+[Company]`;
 }
 
 function buildUserPrompt(ctx: FollowUpContext, style: FollowUpStyle): string {

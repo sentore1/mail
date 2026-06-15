@@ -206,7 +206,7 @@ async function processSingleFollowup(
         const now = new Date();
         const hour = (now.getUTCHours() + 3) % 24;
         const timeGreet = hour >= 5 && hour < 12 ? 'Good morning' : hour >= 12 && hour < 17 ? 'Good afternoon' : 'Greetings';
-        body = `${timeGreet},\n\nJust following up on my previous email about Pryro.\n\nI have 10 minutes free tomorrow afternoon if that works, what do you think?\n\nAlice Umubyeyi\nPryro | 0790038006`;
+        body = `${timeGreet},\n\nJust following up on my previous email about Pryro.\n\nI have 10 minutes free tomorrow afternoon if that works, what do you think?\n\nRegards,\nAlice Umubyeyi\nPryro`;
       }
     }
 
