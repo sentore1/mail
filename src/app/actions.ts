@@ -603,15 +603,15 @@ export const sendBulkEmailsChunkedAction = async (
   }>,
   options: {
     chunkSize?: number;           // Emails per batch — default 10
-    delayBetweenEmails?: number;  // ms between each email — default 45s
-    delayBetweenChunks?: number;  // ms between batches — default 10 min
+    delayBetweenEmails?: number;  // ms between each email — default 8s
+    delayBetweenChunks?: number;  // ms between batches — default 1 min
     verifyEmails?: boolean;
   } = {}
 ) => {
   try {
     const chunkSize           = options.chunkSize           ?? 10;
-    const delayBetweenEmails  = options.delayBetweenEmails  ?? 45_000;   // 45 seconds
-    const delayBetweenChunks  = options.delayBetweenChunks  ?? 600_000;  // 10 minutes
+    const delayBetweenEmails  = options.delayBetweenEmails  ?? 8_000;   // 8 seconds (was 45s)
+    const delayBetweenChunks  = options.delayBetweenChunks  ?? 60_000;  // 1 minute (was 10 min)
     const verifyEmails        = options.verifyEmails !== false;
     
     const supabase = await createClient();

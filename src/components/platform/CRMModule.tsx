@@ -60,6 +60,8 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
       .from("leads")
       .select("*")
       .eq("user_id", userId)
+      // Exclude 'new'/'New' — unsent leads belong in Email Writer, not CRM
+      .not("status", "in", '("new","New")')
       .order("created_at", { ascending: false });
 
     if (error) console.error("Error fetching leads:", error);

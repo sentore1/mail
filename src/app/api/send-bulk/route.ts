@@ -107,7 +107,7 @@ export async function POST(request: NextRequest) {
     const payload = (await request.json()) as SendBulkRequest;
     const {
       emails,
-      delayMs = 1500,
+      delayMs = 800,
       verifyEmails = true,
       scheduleFollowups = true,
     } = payload;

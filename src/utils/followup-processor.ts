@@ -553,8 +553,8 @@ export async function processFollowUps(
       }
     }
 
-    // Rate limiting, small delay between sends
-    await new Promise((r) => setTimeout(r, 1500 + Math.random() * 1000));
+    // Rate limiting — short delay between sends to avoid spam flags
+    await new Promise((r) => setTimeout(r, 800 + Math.random() * 400));
   }
 
   // Insert daily summary log entry

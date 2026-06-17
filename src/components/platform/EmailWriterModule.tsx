@@ -161,8 +161,11 @@ export default function EmailWriterModule({ userId, preloadedLead, onGoToProfile
     : leads.filter((l) => l.niche === nicheFilter);
 
   // Split filtered leads into unsent vs already contacted
+  // "unsent" = only status 'new' — genuinely never emailed
+  // failed/bounced/invalid go to their own category, not shown as unsent
   const SENT_STATUSES = new Set(["contacted", "Email Sent", "opened", "clicked", "replied", "Replied", "interested", "Interested", "Closed"]);
-  const unsentLeads  = filteredLeads.filter((l) => !SENT_STATUSES.has(l.status));
+  const SKIP_STATUSES = new Set(["failed", "bounced", "invalid_email"]);
+  const unsentLeads  = filteredLeads.filter((l) => l.status === "new" || l.status === "New");
   const alreadySent  = filteredLeads.filter((l) => SENT_STATUSES.has(l.status));
 
   const searchedLeads = leadSearch.trim()
@@ -731,7 +734,7 @@ export default function EmailWriterModule({ userId, preloadedLead, onGoToProfile
         ))}
         {mode === "bulk" && (
           <span className="ml-auto text-sm text-gray-600 font-medium">
-            {selectedLeadIds.size} selected · {leads.filter(l => !SENT_STATUSES.has(l.status)).length} unsent
+            {selectedLeadIds.size} selected · {unsentLeads.length} unsent
           </span>
         )}
       </div>
@@ -1109,10 +1112,10 @@ ${profileDisplay.phone}`}
                     <div className="flex flex-wrap gap-2">
                       <button onClick={() => { setNicheFilter("all"); setSelectedLeadIds(new Set()); }}
                         className={`px-3 py-1.5 rounded-lg text-xs font-medium border-2 transition-all ${nicheFilter === "all" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200 hover:border-blue-400"}`}>
-                        All ({leads.filter(l => !SENT_STATUSES.has(l.status)).length} unsent)
+                        All ({unsentLeads.length} unsent)
                       </button>
                       {categories.map((cat) => {
-                        const catUnsent = leads.filter((l) => l.niche === cat && !SENT_STATUSES.has(l.status));
+                        const catUnsent = leads.filter((l) => l.niche === cat && (l.status === 'new' || l.status === 'New'));
                         const catSent   = leads.filter((l) => l.niche === cat && SENT_STATUSES.has(l.status));
                         return (
                           <button key={cat} onClick={() => {
