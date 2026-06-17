@@ -50,6 +50,7 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
   const [fuFilter, setFuFilter] = useState<number | "all">("all");
   const [dueOnlyFilter, setDueOnlyFilter] = useState(false);
   const [daysFilter, setDaysFilter] = useState(0);
+  const [sentOnDate, setSentOnDate] = useState(""); // "YYYY-MM-DD" or "" for no filter
   const [sortBy, setSortBy] = useState<"priority" | "days" | "name">("priority");
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 25;
@@ -176,6 +177,7 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
     if (fuFilter !== "all") list = list.filter(t => t.followupCount === fuFilter);
     if (dueOnlyFilter) list = list.filter(t => t.isDueToday);
     if (daysFilter > 0) list = list.filter(t => { const l = getLatest(t); return l ? daysSince(l.sent_at) >= daysFilter : false; });
+    if (sentOnDate) list = list.filter(t => { const l = getLatest(t); return l ? l.sent_at.slice(0, 10) === sentOnDate : false; });
     return [...list].sort((a,b) => {
       if (sortBy === "priority") {
         if (a.isDueToday !== b.isDueToday) return a.isDueToday ? -1 : 1;
@@ -186,7 +188,7 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
       if (sortBy === "name") return a.companyName.localeCompare(b.companyName);
       return 0;
     });
-  }, [eligible, search, nicheFilter, fuFilter, dueOnlyFilter, daysFilter, sortBy]);
+  }, [eligible, search, nicheFilter, fuFilter, dueOnlyFilter, daysFilter, sentOnDate, sortBy]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice(page * PAGE_SIZE, (page+1) * PAGE_SIZE);
@@ -508,6 +510,26 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
               <option value={5}>5+ days</option>
               <option value={7}>7+ days</option>
             </select>
+            {/* Date filter — pick a date to see only leads emailed on that day */}
+            <div className="flex items-center gap-0 border border-gray-200 rounded-md overflow-hidden bg-white">
+              <input
+                type="date"
+                value={sentOnDate}
+                onChange={e => { setSentOnDate(e.target.value); setPage(0); }}
+                className="px-3 py-2 text-xs outline-none bg-white text-gray-600 focus:border-blue-400 cursor-pointer"
+                title="Show leads whose last email was sent on this date"
+              />
+              {sentOnDate && (
+                <button
+                  onClick={() => { setSentOnDate(""); setPage(0); }}
+                  className="px-2 text-gray-400 hover:text-red-500 hover:bg-gray-50 transition-colors text-sm font-bold leading-none"
+                  title="Clear date filter"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+
             {niches.length > 0 && (
               <select value={nicheFilter} onChange={e => { setNicheFilter(e.target.value); setPage(0); }} className="px-3 py-2 text-xs border border-gray-200 rounded-md outline-none bg-white text-gray-600 focus:border-blue-400">
                 <option value="all">All niches</option>

@@ -7,7 +7,7 @@
  *   Greeting: [Good morning/afternoon/Greetings] [Company] team,
  *
  *   I have seen many [sector] teams your size still tracking [task] on Excel
- *   sheets and Word documents, and [Company] is most likely doing the same.
+ *   sheets and Word documents, and [Company] is most likely doing the same, and it is the first thing most businesses in this sector fix with Pryro.
  *
  *   Pryro is an ERP that replaces those manual workflows with one unified system
  *   for finance, inventory, HR, and operations. Specifically: [sector fix].
@@ -80,25 +80,64 @@ export function buildMultiLineFooter(params: {
 }
 
 // --- Department picker --------------------------------------------------------
-// Returns the single most relevant department pain point for this sector.
-// Used to keep every email focused on ONE specific pain, not a list.
+// --- Subject generation -----------------------------------------------------
+// Short, punchy, ONE pain, max 8 words, feels like a real person typed it.
+// 8 rotating formats across contacts. Never list more than one issue.
 
+const SECTOR_PAINS: Record<string, string[]> = {
+  pharmacy:     ['inventory', 'stock', 'payroll'],
+  healthcare:   ['payroll', 'billing', 'HR'],
+  hospital:     ['payroll', 'billing', 'HR'],
+  hotel:        ['HR', 'invoices', 'payroll'],
+  lodge:        ['HR', 'invoices', 'payroll'],
+  travel:       ['billing', 'HR', 'bookings'],
+  restaurant:   ['stock', 'payroll', 'billing'],
+  retail:       ['inventory', 'payroll', 'billing'],
+  ngo:          ['reporting', 'budgets', 'payroll'],
+  construction: ['payroll', 'billing', 'HR'],
+  logistics:    ['fleet', 'stock', 'HR'],
+  school:       ['payroll', 'billing', 'HR'],
+  generic:      ['payroll', 'billing', 'HR'],
+};
+
+// 8 formats — max 8 words, ONE company name, ONE pain point, no jargon
+const SUBJECT_FORMATS: Array<(c: string, p: string) => string> = [
+  (c, _p) => `I have been wondering why ${c} still uses Excel`,
+  (c,  p) => `Why is ${c} still doing ${p} manually?`,
+  (c, _p) => `As a big company, why is ${c} still on Excel?`,
+  (c,  p) => `Don't you think ${c} is wasting time on ${p}?`,
+  (c, _p) => `Why is ${c}'s HR still wasting time?`,
+  (c,  p) => `I think ${c} has a ${p} problem`,
+  (c, _p) => `${c}, is your HR team still on Excel?`,
+  (c, _p) => `Why does a company like ${c} still use Word?`,
+];
+
+function getSubject(niche: string | null, companyName: string, idx: number): string {
+  const key   = detectNicheKey(niche);
+  const pains = SECTOR_PAINS[key] ?? SECTOR_PAINS['generic']!;
+  const pain  = pains[idx % pains.length]!;
+  const fmt   = SUBJECT_FORMATS[idx % SUBJECT_FORMATS.length]!;
+  return fmt(companyName, pain);
+}
+
+
+// Keep a thin DeptPain alias used by the AI prompt builder
 type DeptPain = { dept: string; task: string };
 
 const SECTOR_DEPT: Record<string, DeptPain> = {
-  pharmacy:     { dept: 'inventory team',  task: 'drug stock and expiry tracking'      },
-  healthcare:   { dept: 'HR team',         task: 'staff payroll and attendance'         },
-  hospital:     { dept: 'finance team',    task: 'department budgets and payroll'       },
-  hotel:        { dept: 'finance team',    task: 'month end vendor and payroll reconciliation' },
-  lodge:        { dept: 'accounts team',   task: 'bookings and accounts reconciliation' },
-  travel:       { dept: 'finance team',    task: 'booking margin and commission tracking' },
-  restaurant:   { dept: 'inventory team',  task: 'food cost and stock tracking'         },
-  retail:       { dept: 'inventory team',  task: 'stock levels and reorder tracking'    },
-  ngo:          { dept: 'finance team',    task: 'grant budgets and field expense tracking' },
-  construction: { dept: 'finance team',    task: 'project budgets and cost overrun tracking' },
-  logistics:    { dept: 'HR team',         task: 'driver payroll and trip record reconciliation' },
-  school:       { dept: 'finance team',    task: 'fee collection and payroll reconciliation' },
-  generic:      { dept: 'finance team',    task: 'finance and HR records'               },
+  pharmacy:     { dept: 'inventory team',  task: 'stock expiry tracking'           },
+  healthcare:   { dept: 'HR team',         task: 'staff payroll'                   },
+  hospital:     { dept: 'finance team',    task: 'department budgets and payroll'  },
+  hotel:        { dept: 'ops team',        task: 'staff rosters and invoices'      },
+  lodge:        { dept: 'accounts team',   task: 'bookings and occupancy'          },
+  travel:       { dept: 'finance team',    task: 'client bookings and commissions' },
+  restaurant:   { dept: 'ops team',        task: 'food cost and stock'             },
+  retail:       { dept: 'inventory team',  task: 'stock levels and reorders'       },
+  ngo:          { dept: 'finance team',    task: 'donor reporting and budgets'     },
+  construction: { dept: 'finance team',    task: 'project budgets'                 },
+  logistics:    { dept: 'ops team',        task: 'driver payroll and fleet'        },
+  school:       { dept: 'finance team',    task: 'fee collection and payroll'      },
+  generic:      { dept: 'finance team',    task: 'finance and HR records'          },
 };
 
 function getDeptPain(niche: string | null): DeptPain {
@@ -106,140 +145,64 @@ function getDeptPain(niche: string | null): DeptPain {
   return SECTOR_DEPT[key] ?? SECTOR_DEPT['generic']!;
 }
 
-// --- Subject bank -------------------------------------------------------------
-// Format: "Why is [Company]'s [department] still [doing X manually]?"
-// Direct challenge that demands a reply.
-// Excel is referenced for sectors where spreadsheet tracking is the obvious habit
-// (retail, restaurant, school, logistics, travel, construction).
-// For clinical/regulated sectors (hospital, healthcare, pharmacy, NGO) the subject
-// avoids Excel because those teams use specialised software, not spreadsheets.
-
-const SUBJECT_BANK: Record<string, Array<(c: string) => string>> = {
-  pharmacy:     [
-    (c) => `Why is ${c}'s stock team still tracking expiry manually?`,
-    (c) => `As a big company like ${c}, why still managing drug expiry in separate systems?`,
-    (c) => `Why is ${c}'s billing team still catching invoice mismatches at month end?`,
-  ],
-  healthcare:   [
-    (c) => `Why is ${c}'s admin team still reconciling payroll and billing manually?`,
-    (c) => `As a big company like ${c}, why still doing HR and patient billing separately?`,
-    (c) => `Why is ${c}'s finance team still drowning in month end reconciliation?`,
-  ],
-  hospital:     [
-    (c) => `Why is ${c}'s finance team still unable to see real department spend in real time?`,
-    (c) => `As a big company like ${c}, why still managing department budgets and payroll separately?`,
-    (c) => `Why is ${c}'s HR team still doing shift reconciliation manually?`,
-  ],
-  hotel:        [
-    (c) => `I have been wondering how a company as big as ${c} still uses Excel for staff rosters and vendor invoices`,
-    (c) => `Why is ${c} still using Excel for payroll and month end reconciliation?`,
-    (c) => `As a big company like ${c}, why still doing month end manually on spreadsheets?`,
-  ],
-  lodge:        [
-    (c) => `I have been wondering how a company as big as ${c} still uses Excel for bookings and accounts`,
-    (c) => `Why is ${c} still using Excel for occupancy and accounts reconciliation?`,
-    (c) => `As a big company like ${c}, why still tracking bookings and margin manually?`,
-  ],
-  travel:       [
-    (c) => `I have been wondering how a company as big as ${c} still uses Excel for booking margins and commissions`,
-    (c) => `Why is ${c} still using Excel to track agent commissions and booking P&L?`,
-    (c) => `As a big company like ${c}, why still calculating booking margin on spreadsheets?`,
-  ],
-  restaurant:   [
-    (c) => `I have been wondering how a company as big as ${c} still uses Excel for food cost and stock tracking`,
-    (c) => `Why is ${c} still using Excel for inventory and daily sales reconciliation?`,
-    (c) => `As a big company like ${c}, why still tracking food cost on spreadsheets?`,
-  ],
-  retail:       [
-    (c) => `I have been wondering how a company as big as ${c} still uses Excel for inventory and reorder tracking`,
-    (c) => `Why is ${c} still using Excel for stock levels and sales data?`,
-    (c) => `As a big company like ${c}, why still managing inventory reorders manually?`,
-  ],
-  ngo:          [
-    (c) => `Why is ${c}'s finance team still spending a week on donor reports?`,
-    (c) => `As a big company like ${c}, why still reconciling grant budgets and field expenses manually?`,
-    (c) => `Why is ${c}'s finance team still drowning in donor compliance reporting?`,
-  ],
-  construction: [
-    (c) => `I have been wondering how a company as big as ${c} still uses Excel for project budgets and contractor payroll`,
-    (c) => `Why is ${c} still using Excel for project cost tracking and procurement?`,
-    (c) => `As a big company like ${c}, why still tracking project budgets manually?`,
-  ],
-  logistics:    [
-    (c) => `I have been wondering how a company as big as ${c} still uses Excel for driver payroll and trip records`,
-    (c) => `Why is ${c} still using Excel for payroll and client billing reconciliation?`,
-    (c) => `As a big company like ${c}, why still reconciling driver records on spreadsheets?`,
-  ],
-  school:       [
-    (c) => `I have been wondering how a company as big as ${c} still uses Excel for fee collection and staff payroll`,
-    (c) => `Why is ${c} still using Excel for fee records and payroll reconciliation?`,
-    (c) => `As a big company like ${c}, why still managing fees and payroll on spreadsheets?`,
-  ],
-  generic:      [
-    (c) => `I have been wondering how a company as big as ${c} still uses Excel for finance and HR records`,
-    (c) => `Why is ${c} still using Excel for finance, payroll, and operations tracking?`,
-    (c) => `As a big company like ${c}, why still running operations on spreadsheets?`,
-  ],
-};
-
 // --- Problem sentence bank ----------------------------------------------------
 // Format: "I have seen many [sector] teams your size still tracking [task] on Excel
-//          sheets and Word documents, and [Company] is most likely doing the same."
+//          sheets and Word documents, and [Company] is most likely doing the same, and it is the first thing most businesses in this sector fix with Pryro."
 // Confident observation, not a hedge.
 
 const PROBLEM_BANK: Record<string, Array<(c: string, l: string) => string>> = {
   pharmacy: [
-    (c) => `I have seen many pharmacy teams still tracking drug stock and expiry dates on Excel sheets, and ${c} is most likely doing the same.`,
-    (c) => `I have seen many pharmacy businesses tracking billing and stock in separate tools, and ${c} is most likely running the same setup.`,
+    (c) => `I have seen many pharmacy teams still tracking drug stock and expiry dates on Excel sheets, and ${c} is most likely doing the same, and it is the first thing most businesses in this sector fix with Pryro.`,
+    (c) => `I have seen many pharmacy businesses tracking billing and stock in separate tools, and ${c} is most likely running the same setup, and it is the first thing most businesses in this sector fix with Pryro.`,
   ],
   healthcare: [
-    (c) => `I have seen many healthcare teams still reconciling staff payroll and patient billing manually every month, and ${c} is most likely doing the same.`,
-    (c) => `I have seen many healthcare admin teams tracking HR attendance and patient billing in separate systems, and ${c} is most likely doing the same.`,
+    (c) => `I have seen many healthcare teams still reconciling staff payroll and patient billing manually every month, and ${c} is most likely doing the same, and it is the first thing most businesses in this sector fix with Pryro.`,
+    (c) => `I have seen many healthcare admin teams tracking HR attendance and patient billing in separate systems, and ${c} is most likely doing the same, and it is the first thing most businesses in this sector fix with Pryro.`,
   ],
   hospital: [
-    (c) => `I have seen many hospital finance teams unable to get a live view of department spend because HR payroll and procurement sit in separate systems, and ${c} is most likely running the same way.`,
-    (c) => `I have seen many hospitals where the finance team never has a real-time picture of what departments have actually spent, and ${c} is most likely dealing with the same gap.`,
+    (c) => `I have seen many hospital finance teams unable to get a live view of department spend because HR payroll and procurement sit in separate systems, and ${c} is most likely running the same way, and it is the first thing most businesses in this sector fix with Pryro.`,
+    (c) => `I have seen many hospitals where the finance team never has a real-time picture of what departments have actually spent, and ${c} is most likely dealing with the same gap, and it is the first thing most businesses in this sector fix with Pryro.`,
   ],
   hotel: [
-    (c) => `I have seen many hotel operations teams spending three to five days every month reconciling rosters, vendor invoices, and payroll because none of it connects, and ${c} is most likely doing the same.`,
-    (c) => `I have seen many hospitality businesses where staff scheduling, vendor billing, and financials each live in a different tool, and ${c} is most likely running the same setup.`,
+    (c) => `I have seen many hotel operations teams spending three to five days every month reconciling rosters, vendor invoices, and payroll because none of it connects, and ${c} is most likely doing the same, and it is the first thing most businesses in this sector fix with Pryro.`,
+    (c) => `I have seen many hospitality businesses where staff scheduling, vendor billing, and financials each live in a different tool, and ${c} is most likely running the same setup, and it is the first thing most businesses in this sector fix with Pryro.`,
   ],
   lodge: [
-    (c) => `I have seen many lodges only finding out their real occupancy margin after month-end because bookings and accounts run separately, and ${c} is most likely in the same position.`,
-    (c) => `I have seen many lodge operators where bookings and accounts are not connected, making every month-end a manual scramble, and ${c} is most likely doing the same.`,
+    (c) => `I have seen many lodges only finding out their real occupancy margin after month-end because bookings and accounts run separately, and ${c} is most likely in the same position, and it is the first thing most businesses in this sector fix with Pryro.`,
+    (c) => `I have seen many lodge operators where bookings and accounts are not connected, making every month-end a manual scramble, and ${c} is most likely doing the same, and it is the first thing most businesses in this sector fix with Pryro.`,
   ],
   travel: [
-    (c) => `I have seen many travel agencies only knowing the real margin on a booking after the trip ends because commissions and supplier costs live in spreadsheets, and ${c} is most likely doing the same.`,
-    (c) => `I have seen many travel businesses tracking bookings, commissions, and supplier invoices in different tools, and ${c} is most likely running the same setup.`,
+    (c) => `I have seen many travel agencies only knowing the real margin on a booking after the trip ends because commissions and supplier costs live in spreadsheets, and ${c} is most likely doing the same, and it is the first thing most businesses in this sector fix with Pryro.`,
+    (c) => `I have seen many travel businesses tracking bookings, commissions, and supplier invoices in different tools, and ${c} is most likely running the same setup, and it is the first thing most businesses in this sector fix with Pryro.`,
   ],
   restaurant: [
-    (c) => `I have seen many restaurant teams only seeing their real food cost at month-end because kitchen stock and daily sales are not in the same system, and ${c} is most likely doing the same.`,
-    (c) => `I have seen many restaurant operations where stock and sales run separately so food cost problems only show up after the margin is already gone, and ${c} is most likely in the same situation.`,
+    (c) => `I have seen many restaurant teams only seeing their real food cost at month-end because kitchen stock and daily sales are not in the same system, and ${c} is most likely doing the same, and it is the first thing most businesses in this sector fix with Pryro.`,
+    (c) => `I have seen many restaurant operations where stock and sales run separately so food cost problems only show up after the margin is already gone, and ${c} is most likely in the same situation, and it is the first thing most businesses in this sector fix with Pryro.`,
   ],
   retail: [
-    (c) => `I have seen many retail teams catching stockouts only when the shelf is already empty because inventory and live sales data are not connected, and ${c} is most likely doing the same.`,
-    (c) => `I have seen many retail businesses where inventory and sales run in different systems, turning stockout surprises into a regular cost, and ${c} is most likely running the same setup.`,
+    (c) => `I have seen many retail teams catching stockouts only when the shelf is already empty because inventory and live sales data are not connected, and ${c} is most likely doing the same, and it is the first thing most businesses in this sector fix with Pryro.`,
+    (c) => `I have seen many retail businesses where inventory and sales run in different systems, turning stockout surprises into a regular cost, and ${c} is most likely running the same setup, and it is the first thing most businesses in this sector fix with Pryro.`,
   ],
   ngo: [
-    (c) => `I have seen many NGO finance teams spending close to a week on donor compliance reports because field expenses and grant budgets live in separate spreadsheets, and ${c} is most likely doing the same.`,
-    (c) => `I have seen many NGOs where the finance team spends more time reconciling data than reporting on impact because grants and field costs don't connect, and ${c} is most likely in the same position.`,
+    (c) => `I have seen many NGO finance teams spending close to a week on donor compliance reports because field expenses and grant budgets live in separate spreadsheets, and ${c} is most likely doing the same, and it is the first thing most businesses in this sector fix with Pryro.`,
+    (c) => `I have seen many NGOs where the finance team spends more time reconciling data than reporting on impact because grants and field costs don't connect, and ${c} is most likely in the same position, and it is the first thing most businesses in this sector fix with Pryro.`,
   ],
   construction: [
-    (c) => `I have seen many construction finance teams only finding out about cost overruns after the margin is already gone because project budgets and procurement run separately, and ${c} is most likely doing the same.`,
-    (c) => `I have seen many construction businesses where project management and financial tracking don't share the same data, making budget-to-actuals always a backward exercise, and ${c} is most likely running the same way.`,
+    (c) => `I have seen many construction finance teams only finding out about cost overruns after the margin is already gone because project budgets and procurement run separately, and ${c} is most likely doing the same, and it is the first thing most businesses in this sector fix with Pryro.`,
+    (c) => `I have seen many construction businesses where project management and financial tracking don't share the same data, making budget-to-actuals always a backward exercise, and ${c} is most likely running the same way, and it is the first thing most businesses in this sector fix with Pryro.`,
   ],
   logistics: [
-    (c) => `I have seen many logistics teams spending days at month-end reconciling driver payroll, trip logs, and client billing because none of it connects, and ${c} is most likely doing the same.`,
-    (c) => `I have seen many logistics operations where driver records and client invoicing are not connected, letting billing errors build up quietly every month, and ${c} is most likely in the same situation.`,
+    (c) => `I have seen many logistics teams spending days at month-end reconciling driver payroll, trip logs, and client billing because none of it connects, and ${c} is most likely doing the same, and it is the first thing most businesses in this sector fix with Pryro.`,
+    (c) => `I have seen many logistics operations where driver records and client invoicing are not connected, letting billing errors build up quietly every month, and ${c} is most likely in the same situation, and it is the first thing most businesses in this sector fix with Pryro.`,
   ],
   school: [
-    (c) => `I have seen many school finance teams spending two weeks every term reconciling fee collection and staff payroll because the two systems don't connect, and ${c} is most likely doing the same.`,
-    (c) => `I have seen many schools where fee records and payroll run in different systems, turning term-end into a reconciliation sprint, and ${c} is most likely running the same setup.`,
+    (c) => `I have seen many school finance teams spending two weeks every term reconciling fee collection and staff payroll because the two systems don't connect, and ${c} is most likely doing the same, and it is the first thing most businesses in this sector fix with Pryro.`,
+    (c) => `I have seen many schools where fee records and payroll run in different systems, turning term-end into a reconciliation sprint, and ${c} is most likely running the same setup, and it is the first thing most businesses in this sector fix with Pryro.`,
   ],
   generic: [
-    (c) => `I have seen many businesses still running finance, HR, and operations in separate tools, with the team spending days every month moving data that should flow automatically, and ${c} is most likely doing the same.`,
-    (c) => `I have seen many businesses where finance, HR, and operations don't share the same data, and the coordination overhead keeps growing quietly, and ${c} is most likely in the same position.`,
-    (c) => `I have seen many businesses still managing back-office operations manually across disconnected tools, and ${c} is most likely running the same setup.`,
+    (c) => `I have seen many businesses still running finance, HR, and operations in separate tools, with the team spending days every month moving data that should flow automatically, and ${c} is most likely doing the same, and it is the first thing most businesses in this sector fix with Pryro.`,
+    (c) => `I have seen many businesses where finance, HR, and operations don't share the same data, and the coordination overhead keeps growing quietly, and ${c} is most likely in the same position, and it is the first thing most businesses in this sector fix with Pryro.`,
+    (c) => `I have seen many businesses still managing back-office operations manually across disconnected tools, and ${c} is most likely running the same setup, and it is the first thing most businesses in this sector fix with Pryro.`,
   ],
 };
 
@@ -248,31 +211,31 @@ const PROBLEM_BANK: Record<string, Array<(c: string, l: string) => string>> = {
 // No commission. No referral. Just the outcome.
 const PRYRO_BANK: Record<string, string[]> = {
   pharmacy: [
-    'Pryro is an ERP that connects your drug stock, billing, and payroll into one live platform so expiry losses and billing errors surface before month-end',
-    'Pryro is an ERP that links drug stock, supplier invoicing, and HR payroll so your team catches expiry and billing problems in real time, not at month-end',
+    'Pryro is an ERP that connects your drug stock, billing, and payroll into one live platform so expiry losses and billing errors surface before the end of the month',
+    'Pryro is an ERP that links drug stock, supplier invoicing, and HR payroll so your team catches expiry and billing problems in real time, not at the end of the month',
   ],
   healthcare: [
     'Pryro is an ERP that connects HR attendance and patient billing into one platform so your admin team reconciles both from one screen instead of two separate systems',
-    'Pryro is an ERP that links staff payroll and patient billing so month-end takes minutes instead of days',
+    'Pryro is an ERP that links staff payroll and patient billing so month end takes minutes instead of days',
   ],
   hospital: [
     "Pryro is an ERP that connects department budgets and HR payroll so your finance team sees live spend against approved limits before decisions are made, not after",
-    'Pryro is an ERP that gives your CFO real-time budget-to-actuals visibility by connecting payroll and department procurement in one system',
+    'Pryro is an ERP that gives your CFO real-time budget versus actuals visibility by connecting payroll and department procurement in one system',
   ],
   hotel: [
-    'Pryro is an ERP that connects staff scheduling, vendor billing, and financial management so month-end reconciliation drops from five days to same-day',
+    'Pryro is an ERP that connects staff scheduling, vendor billing, and financial management so month end reconciliation drops from five days to same day',
     'Pryro is an ERP that links housekeeping rosters, vendor invoices, and payroll so your ops and accounts teams stop moving numbers between tools every month',
   ],
   lodge: [
-    'Pryro is an ERP that connects bookings, staff costs, and accounts so your real occupancy margin is visible before month-end instead of after',
-    'Pryro is an ERP that links your booking records and accounts so month-end becomes a five-minute check instead of a multi-day exercise',
+    'Pryro is an ERP that connects bookings, staff costs, and accounts so your real occupancy margin is visible before month end instead of after',
+    'Pryro is an ERP that links your booking records and accounts so month end becomes a five minute check instead of a multi-day exercise',
   ],
   travel: [
     'Pryro is an ERP that connects bookings, commissions, and supplier invoicing so your margin on every deal is visible before the trip ends',
-    "Pryro is an ERP that links CRM and Financial Management so your P&L reflects this week's deals, not last month's",
+    "Pryro is an ERP that links CRM and Financial Management so your P&L reflects this week's deals in real time",
   ],
   restaurant: [
-    'Pryro is an ERP that connects kitchen stock and daily sales so food cost is a live number your team sees every morning, not a month-end surprise',
+    'Pryro is an ERP that connects kitchen stock and daily sales so food cost is a live number your team sees every morning, not an end of month surprise',
     'Pryro is an ERP that links Inventory Management and Financial Management so food cost variance shows up the day it happens',
   ],
   retail: [
@@ -284,30 +247,22 @@ const PRYRO_BANK: Record<string, string[]> = {
     'Pryro is an ERP that links Financial Management and HR Payroll so your finance team reports on impact instead of reconciling spreadsheets',
   ],
   construction: [
-    'Pryro is an ERP that connects project budgets, contractor payroll, and procurement so cost overruns show up before they show up in the P&L',
-    'Pryro is an ERP that links Project Management and Financial Management so your team sees budget versus actuals in real time, not at month-end',
+    'Pryro is an ERP that connects project budgets, contractor payroll, and procurement so cost overruns show up before they reach the P&L',
+    'Pryro is an ERP that links Project Management and Financial Management so your team sees budget versus actuals in real time, not at month end',
   ],
   logistics: [
-    'Pryro is an ERP that connects driver payroll, trip logs, and client billing so month-end reconciliation drops from days to hours',
+    'Pryro is an ERP that connects driver payroll, trip logs, and client billing so month end reconciliation drops from days to hours',
     'Pryro is an ERP that links HR Payroll and Financial Management so driver payroll and client invoicing always come from the same numbers',
   ],
   school: [
-    "Pryro is an ERP that connects fee collection and staff payroll so your bursar's numbers balance automatically, no two-week reconciliation sprint",
-    'Pryro is an ERP that links fee registers and HR Payroll so term-end becomes a one-day check instead of a multi-week exercise',
+    "Pryro is an ERP that connects fee collection and staff payroll so your bursar's numbers balance automatically with no two week reconciliation sprint",
+    'Pryro is an ERP that links fee registers and HR Payroll so term end becomes a one day check instead of a multi-week exercise',
   ],
   generic: [
     'Pryro is an ERP that replaces those manual workflows and fragmented tools with one unified system for finance, inventory, HR, and operations',
-    'Pryro is an ERP that connects Financial Management, Inventory, HR & Payroll, and CRM into one platform so your team runs the business instead of managing tools',
+    'Pryro is an ERP that connects Financial Management, Inventory, HR and Payroll, and CRM into one platform so your team runs the business instead of managing tools',
   ],
 };
-
-// --- Bank helpers -------------------------------------------------------------
-
-function getSubject(niche: string | null, companyName: string, idx: number): string {
-  const key = detectNicheKey(niche);
-  const bank = SUBJECT_BANK[key] ?? SUBJECT_BANK['generic']!;
-  return bank[idx % bank.length]!(companyName);
-}
 
 function getProblem(niche: string | null, companyName: string, _location: string | null, idx: number): string {
   const key = detectNicheKey(niche);
@@ -323,15 +278,44 @@ function getPryro(niche: string | null, idx: number): string {
   return bank[idx % bank.length]!;
 }
 
-// --- CTA builder - always proposes specific days so the prospect just confirms -
+// --- CTA builder - all 4 slots end with "what do you think?" ----------------
 function buildCTA(emailIndex: number): string {
   const slots = [
     'I have 10 minutes free Tuesday or Wednesday if that works, what do you think?',
-    'I am free for a quick call Tuesday or Thursday this week, does either work for you?',
-    'I have a slot open Wednesday or Friday morning, would either work for a quick look?',
-    'I am free for 10 minutes Tuesday afternoon or Wednesday morning, would that work?',
+    'I am free for a quick call Thursday or Friday this week, what do you think?',
+    'I have 10 minutes tomorrow afternoon if that works, what do you think?',
+    'Could we connect for 10 minutes this week, what do you think?',
   ];
   return slots[emailIndex % slots.length]!;
+}
+
+// --- Hyphen / dash stripper --------------------------------------------------
+// Runs on every generated body before it is returned.
+// Removes hyphens, en dashes, em dashes that slip through from AI or templates.
+function stripDashes(text: string): string {
+  return text
+    // em dash and en dash → comma space
+    .replace(/\s*[—–]\s*/g, ', ')
+    // hyphenated compound words used in our copy → plain words
+    .replace(/\bmonth-end\b/gi, 'month end')
+    .replace(/\bmonth-End\b/gi, 'month end')
+    .replace(/\bbudget-to-actuals\b/gi, 'budget versus actuals')
+    .replace(/\bday-to-day\b/gi, 'day to day')
+    .replace(/\breal-time\b/gi, 'real time')
+    .replace(/\bback-office\b/gi, 'back office')
+    .replace(/\bend-of-month\b/gi, 'end of month')
+    .replace(/\bterm-end\b/gi, 'term end')
+    .replace(/\bsame-day\b/gi, 'same day')
+    .replace(/\bone-day\b/gi, 'one day')
+    .replace(/\btwo-week\b/gi, 'two week')
+    .replace(/\bfive-minute\b/gi, 'five minute')
+    .replace(/\bfive-day\b/gi, 'five day')
+    .replace(/\bmulti-day\b/gi, 'multi day')
+    .replace(/\bmulti-week\b/gi, 'multi week')
+    .replace(/\bno-reply\b/gi, 'no reply')
+    .replace(/\bno-repeat\b/gi, 'no repeat')
+    // any remaining standalone hyphen between words → space
+    .replace(/(\w)-(\w)/g, '$1 $2');
 }
 
 // --- Email assembler ----------------------------------------------------------
@@ -349,7 +333,7 @@ function assembleEmail(params: {
 
   const cta = buildCTA(idx);
 
-  const body = `${greeting}
+  const body = stripDashes(`${greeting}
 
 ${problem}
 
@@ -357,9 +341,9 @@ ${pryro}
 
 ${cta}
 
-${footer}`;
+${footer}`);
 
-  return { subject, body };
+  return { subject: stripDashes(subject), body };
 }
 
 // --- AI caller ----------------------------------------------------------------
@@ -452,9 +436,11 @@ function buildAISystemPrompt(companyName: string, niche: string | null, companyC
   // healthcare, pharmacy, NGO) the AI should avoid mentioning Excel and use
   // the "Why is..." or "As a big company like [Company]..." formulas instead.
   const formulaHints = [
-    `Prefer formula 1: "I have been wondering how a company as big as [Company] still uses Excel for [specific task]" - ONLY if Excel tracking is realistic for this sector (retail, restaurant, logistics, school, construction, travel, hotel, lodge). Skip Excel for hospital, healthcare, pharmacy, NGO.`,
-    `Prefer formula 2: "Why is [Company] still using Excel for [specific task]?" - ONLY if Excel is realistic for this sector. For hospital, healthcare, pharmacy, NGO use "Why is [Company]'s [dept] still [doing X] manually?" instead.`,
-    `Prefer formula 3: "As a big company like [Company], why still doing [specific task] manually?" - works for all sectors, no Excel reference needed.`,
+    `Use Format 0: "[Company], still doing [pain] on Excel?"`,
+    `Use Format 1: "I always wonder why [Company] uses Excel for [pain]"`,
+    `Use Format 2: "Why is [Company] not using an ERP for [pain]?"`,
+    `Use Format 3: "[Company], is [pain] still done manually?"`,
+    `Use Format 4: "A company like [Company] still using Excel for [pain]?"`,
   ];
   const formulaHint = formulaHints[(emailIndex ?? 0) % formulaHints.length]!;
 
@@ -466,20 +452,29 @@ Sector: ${niche || 'business'}${ctxHint}
 
 Your job is to write TWO things:
 
-1. SUBJECT LINE - pick ONE department pain point (HR, payroll, finance, OR inventory - not all of them) that is most relevant to this company's sector, then write a short subject using one of these three approved formulas:
+1. SUBJECT LINE - pick ONE pain point for this sector and write it using one of the five formats below. Rotate format based on emailIndex. Max 8 words. ONE issue only. Must feel like a human typed it.
 
-   Formula 1: "I have been wondering how a company as big as [Company] still uses Excel for [specific task]"
-   Formula 2: "Why is [Company] still using Excel for [specific task]?"
-   Formula 3: "As a big company like [Company], why still doing [specific task] manually?"
+   Format 0: "[Company], still doing [pain] on Excel?"
+   Format 1: "I always wonder why [Company] uses Excel for [pain]"
+   Format 2: "Why is [Company] not using an ERP for [pain]?"
+   Format 3: "[Company], is [pain] still done manually?"
+   Format 4: "A company like [Company] still using Excel for [pain]?"
+
+   Pain points by sector:
+   healthcare/hospital: staff payroll, patient billing, staff scheduling
+   pharmacy: stock expiry, inventory tracking, supplier orders
+   hotel/lodge: staff rosters, supplier invoices, occupancy reporting
+   travel: client bookings, commission management, invoice tracking
+   ngo: donor reporting, budget tracking, project management
+   logistics: fleet tracking, driver payroll, delivery management
+   retail: inventory management, supplier payments, staff scheduling
+   construction: project budgets, contractor payroll, procurement records
+   school: fee collection, payroll processing, student records
+   generic: payroll, billing, operations
 
    ${formulaHint}
 
-   Rules:
-   - Replace [Company] with exactly: ${companyName}
-   - [specific task] must name ONE department task, not a list
-   - No hyphens anywhere in the subject line
-   - Under 15 words
-   - No punctuation after the final word except a question mark where the formula ends with one
+   Rules: replace [Company] with exactly ${companyName}, [pain] = 2-3 words max, no hyphens, under 8 words total, question mark only where format requires it.
 
 2. PRYRO SENTENCE - one sentence starting with "Pryro is an ERP that" describing the fix for that SAME single department pain.
    - Name at least one Pryro module

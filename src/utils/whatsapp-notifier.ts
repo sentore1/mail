@@ -33,31 +33,35 @@ interface WASettings {
 function buildMessage(event: WAEvent, data: Record<string, any>, senderName: string): string {
   const company = data.companyName || data.company || data.leadEmail || "a lead";
   const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://pryromail.com").replace(/\/$/, "");
+  const leadId = data.leadId || "";
+  const crmLink     = leadId ? `${appUrl}/dashboard?module=crm&lead=${leadId}` : `${appUrl}/dashboard?module=crm`;
+  const followupLink = leadId ? `${appUrl}/dashboard?module=followup&lead=${leadId}` : `${appUrl}/dashboard?module=followup`;
 
   switch (event) {
     case "email.sent":
-      return `📤 *Email Sent* — ${time}\nHi ${senderName}, your email to *${company}* was just delivered successfully.`;
+      return `📤 *Email Sent* — ${time}\nHi ${senderName}, your email to *${company}* was just delivered successfully.\n\nView lead: ${crmLink}`;
 
     case "email.opened":
-      return `👀 *Email Opened* — ${time}\nHi ${senderName}, *${company}* just opened your email! Consider sending a follow-up.`;
+      return `👀 *Email Opened* — ${time}\nHi ${senderName}, *${company}* just opened your email! Consider sending a follow-up.\n\nView lead: ${crmLink}`;
 
     case "email.clicked":
-      return `🖱️ *Link Clicked* — ${time}\nHi ${senderName}, *${company}* clicked a link in your email — high intent signal!`;
+      return `🖱️ *Link Clicked* — ${time}\nHi ${senderName}, *${company}* clicked a link in your email — high intent signal!\n\nView lead: ${crmLink}`;
 
     case "email.bounced":
-      return `⚠️ *Email Bounced* — ${time}\nHi ${senderName}, your email to *${company}* bounced. The address may be invalid.`;
+      return `⚠️ *Email Bounced* — ${time}\nHi ${senderName}, your email to *${company}* bounced. The address may be invalid.\n\nFix now: ${crmLink}`;
 
     case "reply.received":
-      return `💬 *Reply Received* — ${time}\nHi ${senderName}, *${company}* just replied to your email!\n\nSentiment: ${data.sentiment || "neutral"}\n\nOpen Pryro Mail to respond.`;
+      return `💬 *Reply Received* — ${time}\nHi ${senderName}, *${company}* just replied to your email!\n\nSentiment: ${data.sentiment || "neutral"}\n\nReply now: ${followupLink}`;
 
     case "lead.status_changed":
-      return `🔄 *Lead Updated* — ${time}\nHi ${senderName}, *${company}* moved to status: *${data.newStatus || data.status || "updated"}*.`;
+      return `🔄 *Lead Updated* — ${time}\nHi ${senderName}, *${company}* moved to status: *${data.newStatus || data.status || "updated"}*.\n\nView lead: ${crmLink}`;
 
     case "sequence.completed":
-      return `✅ *Sequence Completed* — ${time}\nHi ${senderName}, the follow-up sequence for *${company}* is complete — no more automated emails will be sent.`;
+      return `✅ *Sequence Completed* — ${time}\nHi ${senderName}, the follow-up sequence for *${company}* is complete.\n\nReview: ${followupLink}`;
 
     default:
-      return `🔔 *Pryro Mail Alert* — ${time}\nEvent: ${event}\nLead: ${company}`;
+      return `🔔 *Pryro Mail Alert* — ${time}\nEvent: ${event}\nLead: ${company}\n\n${crmLink}`;
   }
 }
 

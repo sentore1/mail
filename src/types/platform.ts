@@ -364,7 +364,8 @@ export type ActiveModule =
   | 'integrations'
   | 'whatsapp'
   | 'verification'
-  | 'sender-profile';
+  | 'sender-profile'
+  | 'billing';
 
 // ─── Tone Types ───────────────────────────────────────────────────────────────
 

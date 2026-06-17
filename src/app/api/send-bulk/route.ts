@@ -265,7 +265,11 @@ export async function POST(request: NextRequest) {
 
         // Generate tracking pixel ID and build HTML body
         const trackingPixelId = randomUUID();
-        const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+        const baseUrl = (
+          process.env.NEXT_PUBLIC_APP_URL ||
+          (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ||
+          'http://localhost:3000'
+        ).replace(/\/$/, '');
         const htmlBody = plainToHtml(email.body, trackingPixelId, baseUrl);
 
         // Send

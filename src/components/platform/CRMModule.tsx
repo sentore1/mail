@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Lead, LeadStatus, LEAD_STATUSES } from "@/types/platform";
 import {
   Mail, X, Loader2, Users, Send, MessageSquare,
-  TrendingUp, Save, Clock, Upload, Trash2, Filter, Eraser,
+  TrendingUp, Save, Clock, Upload, Trash2, Filter, Eraser, Tag, Edit2, Check,
 } from "lucide-react";
 import { createClient } from "../../../supabase/client";
 import { toast } from "sonner";
@@ -38,6 +38,9 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
     id: string; subject: string | null; to_email: string | null;
     status: string; sent_at: string; bounce_reason: string | null;
   }>>([]);
+  const [customFields, setCustomFields] = useState<Array<{ id: string; name: string; key: string; value: string | null }>>([]);
+  const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
+  const [editingFieldValue, setEditingFieldValue] = useState("");
   const [notes, setNotes] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
   const [filterStatus, setFilterStatus] = useState<LeadStatus | "all">("all");
@@ -106,6 +109,8 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
   const openDrawer = async (lead: Lead) => {
     setDrawerLead(lead as LeadWithEmails);
     setNotes(lead.notes || "");
+    setCustomFields([]);
+    setEditingFieldId(null);
     const { data } = await supabase
       .from("generated_emails").select("*").eq("lead_id", lead.id).order("created_at", { ascending: false });
     setDrawerEmails(data || []);
@@ -113,6 +118,34 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
       .from("sent_emails").select("id, subject, to_email, status, sent_at, bounce_reason")
       .eq("lead_id", lead.id).order("sent_at", { ascending: false });
     setDrawerSentEmails(sentData || []);
+    // Load custom fields for this lead
+    try {
+      const { data: cfData } = await supabase
+        .from("lead_custom_field_values")
+        .select("id, value, custom_field_definitions(id, name, key)")
+        .eq("lead_id", lead.id)
+        .eq("user_id", userId);
+      if (cfData) {
+        setCustomFields(cfData.map((r: any) => ({
+          id: r.id,
+          name: r.custom_field_definitions?.name ?? "",
+          key: r.custom_field_definitions?.key ?? "",
+          value: r.value,
+        })));
+      }
+    } catch { /* table may not exist yet */ }
+  };
+
+  const saveCustomFieldValue = async (fieldId: string, value: string) => {
+    if (!drawerLead) return;
+    try {
+      await supabase
+        .from("lead_custom_field_values")
+        .upsert({ id: fieldId, value, updated_at: new Date().toISOString() }, { onConflict: "id" });
+      setCustomFields(prev => prev.map(f => f.id === fieldId ? { ...f, value } : f));
+      toast.success("Saved");
+    } catch { toast.error("Could not save field value"); }
+    setEditingFieldId(null);
   };
 
   const saveNotes = async () => {
@@ -591,6 +624,51 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
                   {savingNotes ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
                   Save Notes
                 </button>
+              </div>
+
+              {/* Custom Fields */}
+              <div>
+                <p className="text-[10px] uppercase tracking-widest mb-1.5 text-gray-400 font-semibold flex items-center gap-1">
+                  <Tag size={10} /> Custom Fields
+                </p>
+                {customFields.length === 0 ? (
+                  <p className="text-xs text-gray-400 py-2">No custom fields added yet. Create fields in the Custom Fields module.</p>
+                ) : (
+                  <div className="flex flex-col gap-1.5">
+                    {customFields.map((cf) => (
+                      <div key={cf.id} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50">
+                        <span className="text-[10px] font-semibold text-gray-500 w-28 shrink-0 truncate">{cf.name}</span>
+                        {editingFieldId === cf.id ? (
+                          <div className="flex items-center gap-1 flex-1 min-w-0">
+                            <input
+                              autoFocus
+                              value={editingFieldValue}
+                              onChange={e => setEditingFieldValue(e.target.value)}
+                              onKeyDown={e => { if (e.key === "Enter") saveCustomFieldValue(cf.id, editingFieldValue); if (e.key === "Escape") setEditingFieldId(null); }}
+                              className="flex-1 min-w-0 px-2 py-1 rounded border border-blue-400 text-xs outline-none bg-white"
+                            />
+                            <button onClick={() => saveCustomFieldValue(cf.id, editingFieldValue)} className="p-1 rounded hover:bg-green-100 text-green-600">
+                              <Check size={11} />
+                            </button>
+                            <button onClick={() => setEditingFieldId(null)} className="p-1 rounded hover:bg-gray-100 text-gray-400">
+                              <X size={11} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1 flex-1 min-w-0">
+                            <span className="text-xs text-gray-700 flex-1 truncate">{cf.value || <span className="text-gray-300 italic">empty</span>}</span>
+                            <button
+                              onClick={() => { setEditingFieldId(cf.id); setEditingFieldValue(cf.value ?? ""); }}
+                              className="p-1 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600 shrink-0"
+                            >
+                              <Edit2 size={11} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 

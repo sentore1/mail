@@ -733,9 +733,10 @@ export const sendBulkEmailsChunkedAction = async (
           
           // Generate a unique tracking pixel ID for open tracking
           const trackingPixelId = crypto.randomUUID();
-          const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL
-            ? `https://${process.env.VERCEL_URL}`
-            : 'http://localhost:3000';
+          // Always derive base URL from env — never hardcode localhost
+          const appUrl = process.env.NEXT_PUBLIC_APP_URL
+            || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
+            || 'http://localhost:3000';
 
           // Inject tracking pixel into email body (1×1 transparent GIF)
           const trackingPixelHtml = `<img src="${appUrl}/api/track/open/${trackingPixelId}" width="1" height="1" style="display:none" alt="" />`;

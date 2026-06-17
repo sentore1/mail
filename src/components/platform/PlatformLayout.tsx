@@ -19,6 +19,7 @@ import CustomFieldsModule from "./CustomFieldsModule";
 import IntegrationsModule from "./IntegrationsModule";
 import WhatsAppNotificationsModule from "./WhatsAppNotificationsModule";
 import SenderProfileModule from "./SenderProfileModule";
+import BillingModule from "./BillingModule";
 import { createClient } from "../../../supabase/client";
 import { useRouter } from "next/navigation";
 

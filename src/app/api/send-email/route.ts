@@ -251,6 +251,7 @@ export async function POST(request: NextRequest) {
     const trackingPixelId = randomUUID();
     const baseUrl = (
       process.env.NEXT_PUBLIC_APP_URL ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ||
       request.headers.get("origin") ||
       "http://localhost:3000"
     ).replace(/\/$/, "");

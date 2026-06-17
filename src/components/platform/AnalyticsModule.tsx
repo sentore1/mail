@@ -64,6 +64,8 @@ export default function AnalyticsModule({ userId }: AnalyticsModuleProps) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [topNiches, setTopNiches] = useState<{ niche: string; sent: number; openRate: number }[]>([]);
+  const [fuStages, setFuStages] = useState<{ stage: number; sent: number; openRate: number; replyRate: number }[]>([]);
+  const [sendTimes, setSendTimes] = useState<{ hour: number; opens: number }[]>([]);
 
   const supabase = createClient();
 
@@ -149,6 +151,55 @@ export default function AnalyticsModule({ userId }: AnalyticsModuleProps) {
           .sort((a, b) => b.sent - a.sent)
           .slice(0, 8);
         setTopNiches(niches);
+      }
+
+      // Follow-up stage performance
+      const { data: fuEmails } = await supabase
+        .from("sent_emails")
+        .select("followup_number, opened_at, replied_at")
+        .eq("user_id", userId)
+        .gte("sent_at", since)
+        .not("followup_number", "is", null);
+
+      if (fuEmails && fuEmails.length > 0) {
+        const stageMap = new Map<number, { sent: number; opened: number; replied: number }>();
+        for (const e of fuEmails) {
+          const stage = (e as any).followup_number as number;
+          if (!stageMap.has(stage)) stageMap.set(stage, { sent: 0, opened: 0, replied: 0 });
+          const s = stageMap.get(stage)!;
+          s.sent++;
+          if (e.opened_at) s.opened++;
+          if (e.replied_at) s.replied++;
+        }
+        const stages = Array.from(stageMap.entries())
+          .sort(([a], [b]) => a - b)
+          .slice(0, 5)
+          .map(([stage, v]) => ({
+            stage,
+            sent: v.sent,
+            openRate:  v.sent > 0 ? Math.round((v.opened  / v.sent) * 100) : 0,
+            replyRate: v.sent > 0 ? Math.round((v.replied / v.sent) * 100) : 0,
+          }));
+        setFuStages(stages);
+      }
+
+      // Best sending time (hour of day with most opens)
+      const { data: openedEmails } = await supabase
+        .from("sent_emails")
+        .select("sent_at, opened_at")
+        .eq("user_id", userId)
+        .gte("sent_at", since)
+        .not("opened_at", "is", null);
+
+      if (openedEmails && openedEmails.length > 0) {
+        const hourMap = new Map<number, number>();
+        for (let h = 0; h < 24; h++) hourMap.set(h, 0);
+        for (const e of openedEmails) {
+          const hour = new Date(e.sent_at).getHours();
+          hourMap.set(hour, (hourMap.get(hour) ?? 0) + 1);
+        }
+        const times = Array.from(hourMap.entries()).map(([hour, opens]) => ({ hour, opens }));
+        setSendTimes(times);
       }
     } finally {
       setLoading(false);
@@ -247,6 +298,77 @@ export default function AnalyticsModule({ userId }: AnalyticsModuleProps) {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Follow-up stage performance */}
+          {fuStages.length > 0 && (
+            <div className="rounded-xl border border-gray-200 bg-white p-5">
+              <p className="text-sm font-bold text-gray-800 mb-1">Follow-Up Stage Performance</p>
+              <p className="text-xs text-gray-400 mb-4">Open rate and reply rate per follow-up stage</p>
+              <div className="space-y-3">
+                {fuStages.map(s => (
+                  <div key={s.stage} className="flex items-center gap-3">
+                    <span className="text-xs font-semibold text-gray-600 w-14 shrink-0">FU #{s.stage}</span>
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-amber-600 w-10 shrink-0">Opens</span>
+                        <div className="flex-1"><Bar value={s.openRate} max={100} color="bg-amber-400" /></div>
+                        <span className="text-[10px] text-gray-500 w-8 text-right">{s.openRate}%</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-purple-600 w-10 shrink-0">Replies</span>
+                        <div className="flex-1"><Bar value={s.replyRate} max={100} color="bg-purple-400" /></div>
+                        <span className="text-[10px] text-gray-500 w-8 text-right">{s.replyRate}%</span>
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-gray-400 w-14 text-right shrink-0">{s.sent} sent</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Best send time */}
+          {sendTimes.some(t => t.opens > 0) && (
+            <div className="rounded-xl border border-gray-200 bg-white p-5">
+              <p className="text-sm font-bold text-gray-800 mb-1">Best Sending Time</p>
+              <p className="text-xs text-gray-400 mb-4">Hours of day that generate the most opens</p>
+              <div className="grid grid-cols-12 gap-1 items-end h-20">
+                {sendTimes.map(t => {
+                  const maxOpens = Math.max(...sendTimes.map(x => x.opens), 1);
+                  const pct = Math.round((t.opens / maxOpens) * 100);
+                  const isTop = t.opens === maxOpens && maxOpens > 0;
+                  return (
+                    <div key={t.hour} className="flex flex-col items-center gap-0.5 group relative">
+                      <div
+                        className={`w-full rounded-sm transition-all ${isTop ? "bg-blue-500" : "bg-gray-200 group-hover:bg-blue-300"}`}
+                        style={{ height: `${Math.max(pct, 4)}%` }}
+                      />
+                      {/* Tooltip on hover */}
+                      <div className="absolute bottom-full mb-1 hidden group-hover:block bg-gray-800 text-white text-[9px] px-1.5 py-0.5 rounded whitespace-nowrap z-10">
+                        {t.hour}:00 — {t.opens} opens
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex justify-between mt-1">
+                <span className="text-[10px] text-gray-400">12am</span>
+                <span className="text-[10px] text-gray-400">6am</span>
+                <span className="text-[10px] text-gray-400">12pm</span>
+                <span className="text-[10px] text-gray-400">6pm</span>
+                <span className="text-[10px] text-gray-400">11pm</span>
+              </div>
+              {sendTimes.length > 0 && (() => {
+                const best = sendTimes.reduce((a, b) => a.opens > b.opens ? a : b);
+                if (best.opens === 0) return null;
+                return (
+                  <p className="text-xs text-blue-700 font-semibold mt-2">
+                    Best time: {best.hour}:00 — {best.hour + 1}:00 ({best.opens} opens)
+                  </p>
+                );
+              })()}
             </div>
           )}
 

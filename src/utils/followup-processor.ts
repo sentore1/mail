@@ -161,6 +161,13 @@ async function processSingleFollowup(
           .order("sent_at", { ascending: true })
           .limit(10);
 
+        // Load sender profile so automated follow-ups sign off with the real name
+        const { data: senderProfile } = await supabase
+          .from("sender_profiles")
+          .select("full_name, phone, job_title, company_name, email")
+          .eq("user_id", queueItem.user_id)
+          .maybeSingle();
+
         const context: FollowUpContext = {
           companyName: queueItem.company_name || "there",
           niche: queueItem.niche,
@@ -174,8 +181,13 @@ async function processSingleFollowup(
           openCount: queueItem.lead_opens || 0,
           clickCount: queueItem.lead_clicks || 0,
           hasReplied: false,
-          yourCompany: queueItem.your_company || "our company",
-          yourService: queueItem.your_service || "our service",
+          yourCompany: senderProfile?.company_name || queueItem.your_company || "Pryro",
+          yourService: queueItem.your_service || "ERP platform",
+          senderName:    senderProfile?.full_name    || queueItem.your_company || "Sales Team",
+          senderPhone:   senderProfile?.phone        || "",
+          senderTitle:   senderProfile?.job_title    || "",
+          senderCompany: senderProfile?.company_name || "Pryro",
+          senderEmail:   senderProfile?.email        || "",
           style: style as FollowUpStyle,
         };
 
