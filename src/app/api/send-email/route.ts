@@ -176,8 +176,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Email verification — only block on hard failures (no MX record, disposable domain).
-    // Do NOT block on SMTP probe results — port 25 is blocked on most cloud hosts.
+    // Email verification — block hard failures before wasting an SMTP send.
+    // Checks: disposable domain, no MX record, SMTP-confirmed non-existent mailbox.
     const verification = await verifyEmail(to).catch(() => null);
     if (verification?.status === 'disposable') {
       return NextResponse.json(
@@ -185,22 +185,22 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    if (verification?.status === 'invalid' && !verification.mx_found) {
+    if (verification?.status === 'invalid') {
+      const reason = !verification.mx_found
+        ? `Domain ${to.split('@')[1]} has no mail server — cannot receive email.`
+        : `This email address does not exist on ${to.split('@')[1]}.`;
       const service2 = createServiceClient();
       await service2.from("sent_emails").insert({
         user_id: user.id, lead_id: leadId ?? null, to_email: to,
         subject, body: emailBody, sent_at: new Date().toISOString(), status: "failed",
-        bounce_reason: `Domain ${to.split('@')[1]} has no MX record — cannot receive email`,
+        bounce_reason: reason,
       }).catch(() => {});
       if (leadId) {
         await service2.from("leads").update({
           status: "invalid_email", email_verified: false, updated_at: new Date().toISOString(),
         }).eq("id", leadId).catch(() => {});
       }
-      return NextResponse.json(
-        { success: false, error: `Domain ${to.split('@')[1]} has no mail server.` },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: reason }, { status: 400 });
     }
     // All other statuses (valid, catch_all, risky, unverifiable) — proceed with send
 

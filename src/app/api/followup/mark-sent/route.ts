@@ -40,6 +40,19 @@ export async function POST(req: NextRequest) {
       .eq("followup_number", followupNumber)
       .eq("status", "pending");
 
+    // 1b. Mark the sent_email row as a follow-up so the Follow-Up page tracks stage correctly
+    if (sentEmailId) {
+      await service
+        .from("sent_emails")
+        .update({
+          is_followup:      true,
+          followup_number:  followupNumber,
+          updated_at:       new Date().toISOString(),
+        })
+        .eq("id", sentEmailId)
+        .eq("user_id", user.id);
+    }
+
     // 2. Update lead
     await service
       .from("leads")

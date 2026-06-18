@@ -227,7 +227,7 @@ export async function POST(request: NextRequest) {
         if (verifyEmails) {
           try {
             const verification = await verifyEmail(email.to);
-            // Only hard-block confirmed disposable domains
+            // Block disposable and confirmed-invalid addresses
             if (verification.status === 'disposable') {
               results.failed++;
               results.errors.push(`${email.to}: disposable email domain — skipped`);
@@ -237,10 +237,33 @@ export async function POST(request: NextRequest) {
                 sent_at: new Date().toISOString(), status: "failed",
                 bounce_reason: "Disposable email domain",
               }).catch(() => {});
+              if (email.leadId) {
+                await serviceSupabase.from("leads")
+                  .update({ status: "invalid_email", email_verified: false, updated_at: new Date().toISOString() })
+                  .eq("id", email.leadId).catch(() => {});
+              }
               continue;
             }
-            // For everything else (valid, catch_all, risky, unverifiable, invalid) — proceed to send
-            // The actual SMTP delivery will confirm whether the address works
+            if (verification.status === 'invalid') {
+              const reason = !verification.mx_found
+                ? `Domain ${email.to.split('@')[1]} has no mail server`
+                : `Mailbox does not exist on ${email.to.split('@')[1]}`;
+              results.failed++;
+              results.errors.push(`${email.to}: ${reason}`);
+              await serviceSupabase.from("sent_emails").insert({
+                user_id: user.id, lead_id: email.leadId || null, campaign_id: campaignId,
+                to_email: email.to, subject: email.subject, body: email.body,
+                sent_at: new Date().toISOString(), status: "failed",
+                bounce_reason: reason,
+              }).catch(() => {});
+              if (email.leadId) {
+                await serviceSupabase.from("leads")
+                  .update({ status: "invalid_email", email_verified: false, updated_at: new Date().toISOString() })
+                  .eq("id", email.leadId).catch(() => {});
+              }
+              continue;
+            }
+            // valid, catch_all, risky, unverifiable — proceed to send
           } catch { /* verification failed — proceed anyway */ }
         }
 

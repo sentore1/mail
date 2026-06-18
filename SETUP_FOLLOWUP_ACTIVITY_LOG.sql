@@ -1,9 +1,4 @@
--- ============================================================
--- FOLLOW-UP ACTIVITY LOG — run this in Supabase SQL Editor
--- ============================================================
--- Creates the followup_activity_log table and enables
--- auto-followup for all existing users.
--- ============================================================
+
 
 -- 1. Activity log table
 CREATE TABLE IF NOT EXISTS followup_activity_log (

@@ -474,8 +474,8 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
             <div>
               <h1 className="text-base font-semibold text-gray-900">Follow-Up</h1>
               <p className="text-xs text-gray-400 mt-0.5">
-                {eligible.length} eligible
-                {overdueCount > 0 && <> · <span className="text-red-500 font-medium">{overdueCount} overdue</span></>}
+                {eligible.length} leads waiting for follow-up
+                {overdueCount > 0 && <> · <span className="text-red-500 font-medium">{overdueCount} not followed up in 3+ days</span></>}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -546,14 +546,14 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
             </div>
           </div>
 
-          {/* Stage filter pills — minimal text-only */}
+          {/* Stage filter pills */}
           <div className="flex items-center gap-1.5 mt-3 flex-wrap">
             <button onClick={() => { setFuFilter("all"); setPage(0); }} className={`px-2.5 py-1 text-xs rounded-md border transition-all ${fuFilter==="all" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-500 border-gray-200 hover:border-gray-300"}`}>
               All ({eligible.length})
             </button>
             {fuCounts.map(fc => (
               <button key={fc} onClick={() => { setFuFilter(fc); setPage(0); }} className={`px-2.5 py-1 text-xs rounded-md border transition-all ${fuFilter===fc ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-500 border-gray-200 hover:border-gray-300"}`}>
-                {fc === 0 ? "No FU" : `FU #${fc} sent`} ({stageCounts[fc]||0})
+                {fc === 0 ? "No follow-up sent yet" : fc === 1 ? "1 follow-up sent" : fc === 2 ? "2 follow-ups sent" : `${fc} follow-ups sent`} ({stageCounts[fc]||0})
               </button>
             ))}
           </div>

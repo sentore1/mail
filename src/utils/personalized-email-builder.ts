@@ -81,35 +81,59 @@ export function buildMultiLineFooter(params: {
 
 // --- Department picker --------------------------------------------------------
 // --- Subject generation -----------------------------------------------------
-// Short, punchy, ONE pain, max 8 words, feels like a real person typed it.
-// 8 rotating formats across contacts. Never list more than one issue.
+// WH-question provocative formats — boss approved.
+// Rules: starts with WH word or "I think"/"Don't you", max 10 words,
+// ONE pain point, always company name, feels personal and direct.
 
 const SECTOR_PAINS: Record<string, string[]> = {
-  pharmacy:     ['inventory', 'stock', 'payroll'],
-  healthcare:   ['payroll', 'billing', 'HR'],
-  hospital:     ['payroll', 'billing', 'HR'],
-  hotel:        ['HR', 'invoices', 'payroll'],
-  lodge:        ['HR', 'invoices', 'payroll'],
-  travel:       ['billing', 'HR', 'bookings'],
-  restaurant:   ['stock', 'payroll', 'billing'],
-  retail:       ['inventory', 'payroll', 'billing'],
+  pharmacy:     ['stock management', 'inventory', 'payroll'],
+  healthcare:   ['payroll', 'patient billing', 'HR'],
+  hospital:     ['payroll', 'patient billing', 'HR'],
+  hotel:        ['HR', 'supplier invoices', 'payroll'],
+  lodge:        ['HR', 'supplier invoices', 'payroll'],
+  travel:       ['client billing', 'HR', 'bookings'],
+  restaurant:   ['inventory', 'payroll', 'HR'],
+  retail:       ['inventory', 'supplier payments', 'payroll'],
   ngo:          ['reporting', 'budgets', 'payroll'],
-  construction: ['payroll', 'billing', 'HR'],
-  logistics:    ['fleet', 'stock', 'HR'],
-  school:       ['payroll', 'billing', 'HR'],
-  generic:      ['payroll', 'billing', 'HR'],
+  construction: ['payroll', 'HR', 'client billing'],
+  logistics:    ['fleet management', 'warehouse stock', 'HR'],
+  school:       ['payroll', 'HR', 'client billing'],
+  banking:      ['HR', 'payroll', 'compliance reporting'],
+  accounting:   ['client billing', 'payroll', 'HR'],
+  marketing:    ['client invoicing', 'project tracking', 'HR'],
+  generic:      ['HR', 'payroll', 'billing'],
 };
 
-// 8 formats — max 8 words, ONE company name, ONE pain point, no jargon
+// 19 WH-based provocative formats — rotate across contacts
+// All start with a WH word, "I think", or "Don't you"
+// Every format is max 10 words and points at ONE pain
 const SUBJECT_FORMATS: Array<(c: string, p: string) => string> = [
-  (c, _p) => `I have been wondering why ${c} still uses Excel`,
-  (c,  p) => `Why is ${c} still doing ${p} manually?`,
-  (c, _p) => `As a big company, why is ${c} still on Excel?`,
-  (c,  p) => `Don't you think ${c} is wasting time on ${p}?`,
-  (c, _p) => `Why is ${c}'s HR still wasting time?`,
-  (c,  p) => `I think ${c} has a ${p} problem`,
-  (c, _p) => `${c}, is your HR team still on Excel?`,
-  (c, _p) => `Why does a company like ${c} still use Word?`,
+  // WHY
+  (c, p) => `Why is ${c} still doing ${p} manually?`,
+  (c, _) => `Why is ${c}'s HR team still wasting time?`,
+  (c, _) => `Why does a company like ${c} still use Excel?`,
+  (c, p) => `Why is ${c} not using an ERP for ${p}?`,
+  (c, p) => `Why is ${c} still struggling with ${p}?`,
+  // HOW
+  (c, p) => `How is ${c} managing ${p} right now?`,
+  (c, p) => `How much is ${c} losing on manual ${p}?`,
+  (c, p) => `How is ${c}'s team handling ${p} every month?`,
+  // WHO
+  (c, p) => `Who is handling ${p} at ${c} right now?`,
+  (c, p) => `Who in ${c} is responsible for fixing ${p}?`,
+  // WHAT
+  (c, p) => `What is ${c} using for ${p} right now?`,
+  (c, p) => `What happens at ${c} when ${p} goes wrong?`,
+  // WHEN
+  (c, p) => `When will ${c} stop doing ${p} manually?`,
+  (c, p) => `When did ${c} last review how ${p} is handled?`,
+  // DON'T YOU
+  (c, _) => `Don't you think ${c} deserves better than Excel?`,
+  (c, p) => `Don't you see ${c}'s team wasting time on ${p}?`,
+  // I THINK
+  (c, p) => `I think ${c} has a ${p} problem`,
+  (c, _) => `I think ${c}'s HR team is wasting hours every week`,
+  (c, p) => `I think ${c} is losing money on manual ${p}`,
 ];
 
 function getSubject(niche: string | null, companyName: string, idx: number): string {
@@ -119,26 +143,6 @@ function getSubject(niche: string | null, companyName: string, idx: number): str
   const fmt   = SUBJECT_FORMATS[idx % SUBJECT_FORMATS.length]!;
   return fmt(companyName, pain);
 }
-
-
-// Keep a thin DeptPain alias used by the AI prompt builder
-type DeptPain = { dept: string; task: string };
-
-const SECTOR_DEPT: Record<string, DeptPain> = {
-  pharmacy:     { dept: 'inventory team',  task: 'stock expiry tracking'           },
-  healthcare:   { dept: 'HR team',         task: 'staff payroll'                   },
-  hospital:     { dept: 'finance team',    task: 'department budgets and payroll'  },
-  hotel:        { dept: 'ops team',        task: 'staff rosters and invoices'      },
-  lodge:        { dept: 'accounts team',   task: 'bookings and occupancy'          },
-  travel:       { dept: 'finance team',    task: 'client bookings and commissions' },
-  restaurant:   { dept: 'ops team',        task: 'food cost and stock'             },
-  retail:       { dept: 'inventory team',  task: 'stock levels and reorders'       },
-  ngo:          { dept: 'finance team',    task: 'donor reporting and budgets'     },
-  construction: { dept: 'finance team',    task: 'project budgets'                 },
-  logistics:    { dept: 'ops team',        task: 'driver payroll and fleet'        },
-  school:       { dept: 'finance team',    task: 'fee collection and payroll'      },
-  generic:      { dept: 'finance team',    task: 'finance and HR records'          },
-};
 
 function getDeptPain(niche: string | null): DeptPain {
   const key = detectNicheKey(niche);
