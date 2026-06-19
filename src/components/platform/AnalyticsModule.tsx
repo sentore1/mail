@@ -2,7 +2,14 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "../../../supabase/client";
-import { Loader2, TrendingUp, Mail, MousePointer, MessageSquare, AlertCircle, RefreshCw } from "lucide-react";
+import {
+  Loader2, TrendingUp, Mail, MousePointer, MessageSquare,
+  AlertCircle, RefreshCw, BarChart2, Clock, Layers,
+} from "lucide-react";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Legend, LineChart, Line, Cell,
+} from "recharts";
 
 interface AnalyticsModuleProps { userId: string; }
 
@@ -34,38 +41,53 @@ const RANGES = [
   { label: "90 days", days: 90 },
 ];
 
-function Bar({ value, max, color }: { value: number; max: number; color: string }) {
-  const pct = max > 0 ? Math.round((value / max) * 100) : 0;
+function StatCard({ label, value, sub, color, bg, icon: Icon, trend }: {
+  label: string; value: string; sub: string;
+  color: string; bg: string; icon: any; trend?: string;
+}) {
   return (
-    <div className="w-full bg-gray-100 rounded-full h-2">
-      <div className={`h-2 rounded-full ${color}`} style={{ width: `${pct}%` }} />
+    <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm hover:shadow-md transition-shadow">
+      <div className="flex items-center justify-between mb-3">
+        <div className={`w-9 h-9 rounded-lg ${bg} flex items-center justify-center`}>
+          <Icon size={16} className={color} />
+        </div>
+        {trend && (
+          <span className="text-[10px] font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
+            {trend}
+          </span>
+        )}
+      </div>
+      <p className="text-2xl font-black text-gray-900 leading-none">{value}</p>
+      <p className="text-xs font-medium text-gray-500 mt-1">{label}</p>
+      <p className="text-[10px] text-gray-400 mt-0.5">{sub}</p>
     </div>
   );
 }
 
-function StatCard({ label, value, sub, color, icon: Icon }: {
-  label: string; value: string; sub: string; color: string; icon: any;
-}) {
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4">
-      <div className="flex items-center gap-2 mb-1">
-        <Icon size={14} className={color} />
-        <span className="text-xs font-semibold text-gray-500">{label}</span>
-      </div>
-      <p className="text-2xl font-black text-gray-900">{value}</p>
-      <p className="text-xs text-gray-400 mt-0.5">{sub}</p>
+    <div className="bg-white border border-gray-200 rounded-lg shadow-lg p-3 text-xs">
+      <p className="font-semibold text-gray-700 mb-1.5">{label}</p>
+      {payload.map((p: any) => (
+        <div key={p.dataKey} className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full" style={{ background: p.color }} />
+          <span className="text-gray-500">{p.name}:</span>
+          <span className="font-semibold text-gray-800">{p.value}</span>
+        </div>
+      ))}
     </div>
   );
-}
+};
 
 export default function AnalyticsModule({ userId }: AnalyticsModuleProps) {
   const [range, setRange] = useState(30);
   const [stats, setStats] = useState<DayStat[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [topNiches, setTopNiches] = useState<{ niche: string; sent: number; openRate: number }[]>([]);
+  const [topNiches, setTopNiches] = useState<{ niche: string; sent: number; openRate: number; replyRate: number }[]>([]);
   const [fuStages, setFuStages] = useState<{ stage: number; sent: number; openRate: number; replyRate: number }[]>([]);
-  const [sendTimes, setSendTimes] = useState<{ hour: number; opens: number }[]>([]);
+  const [sendTimes, setSendTimes] = useState<{ hour: number; opens: number; label: string }[]>([]);
 
   const supabase = createClient();
 
@@ -88,7 +110,6 @@ export default function AnalyticsModule({ userId }: AnalyticsModuleProps) {
         .eq("user_id", userId)
         .gte("received_at", since);
 
-      // Build per-day stats
       const byDay = new Map<string, DayStat>();
       const initDay = (d: string): DayStat => ({ date: d, sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 });
 
@@ -108,9 +129,13 @@ export default function AnalyticsModule({ userId }: AnalyticsModuleProps) {
       }
 
       const sorted = Array.from(byDay.values()).sort((a, b) => a.date.localeCompare(b.date));
-      setStats(sorted);
+      // Format date labels for chart
+      const formatted = sorted.map(d => ({
+        ...d,
+        dateLabel: new Date(d.date + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+      }));
+      setStats(formatted as any);
 
-      // Summary totals
       const totSent    = sorted.reduce((s, d) => s + d.sent, 0);
       const totOpened  = sorted.reduce((s, d) => s + d.opened, 0);
       const totClicked = sorted.reduce((s, d) => s + d.clicked, 0);
@@ -118,38 +143,43 @@ export default function AnalyticsModule({ userId }: AnalyticsModuleProps) {
       const totBounced = sorted.reduce((s, d) => s + d.bounced, 0);
 
       setSummary({
-        sent: totSent,
-        opened: totOpened,
-        clicked: totClicked,
-        replied: totReplied,
-        bounced: totBounced,
+        sent: totSent, opened: totOpened, clicked: totClicked,
+        replied: totReplied, bounced: totBounced,
         openRate:   totSent > 0 ? Math.round((totOpened  / totSent) * 100) : 0,
         clickRate:  totSent > 0 ? Math.round((totClicked / totSent) * 100) : 0,
         replyRate:  totSent > 0 ? Math.round((totReplied / totSent) * 100) : 0,
         bounceRate: totSent > 0 ? Math.round((totBounced / totSent) * 100) : 0,
       });
 
-      // Top niches
+      // Top niches with reply rate too
       const leadIds = [...new Set((emails ?? []).map(e => e.lead_id).filter(Boolean))];
       if (leadIds.length > 0) {
         const { data: leads } = await supabase
-          .from("leads")
-          .select("id, niche")
-          .in("id", leadIds.slice(0, 500));
+          .from("leads").select("id, niche").in("id", leadIds.slice(0, 500));
 
-        const nicheMap = new Map<string, { sent: number; opened: number }>();
+        const nicheMap = new Map<string, { sent: number; opened: number; replied: number }>();
         for (const e of emails ?? []) {
           const lead = leads?.find(l => l.id === e.lead_id);
           const niche = lead?.niche || "Unknown";
-          if (!nicheMap.has(niche)) nicheMap.set(niche, { sent: 0, opened: 0 });
+          if (!nicheMap.has(niche)) nicheMap.set(niche, { sent: 0, opened: 0, replied: 0 });
           const n = nicheMap.get(niche)!;
           n.sent++;
           if (e.opened_at) n.opened++;
         }
+        for (const r of replies ?? []) {
+          const lead = leads?.find(l => l.id === r.lead_id);
+          const niche = lead?.niche || "Unknown";
+          if (nicheMap.has(niche)) nicheMap.get(niche)!.replied++;
+        }
         const niches = Array.from(nicheMap.entries())
-          .map(([niche, v]) => ({ niche, sent: v.sent, openRate: v.sent > 0 ? Math.round((v.opened / v.sent) * 100) : 0 }))
+          .map(([niche, v]) => ({
+            niche,
+            sent: v.sent,
+            openRate:  v.sent > 0 ? Math.round((v.opened  / v.sent) * 100) : 0,
+            replyRate: v.sent > 0 ? Math.round((v.replied / v.sent) * 100) : 0,
+          }))
           .sort((a, b) => b.sent - a.sent)
-          .slice(0, 8);
+          .slice(0, 10);
         setTopNiches(niches);
       }
 
@@ -171,24 +201,20 @@ export default function AnalyticsModule({ userId }: AnalyticsModuleProps) {
           if (e.opened_at) s.opened++;
           if (e.replied_at) s.replied++;
         }
-        const stages = Array.from(stageMap.entries())
-          .sort(([a], [b]) => a - b)
-          .slice(0, 5)
+        setFuStages(Array.from(stageMap.entries())
+          .sort(([a], [b]) => a - b).slice(0, 5)
           .map(([stage, v]) => ({
             stage,
             sent: v.sent,
             openRate:  v.sent > 0 ? Math.round((v.opened  / v.sent) * 100) : 0,
             replyRate: v.sent > 0 ? Math.round((v.replied / v.sent) * 100) : 0,
-          }));
-        setFuStages(stages);
+          })));
       }
 
-      // Best sending time (hour of day with most opens)
+      // Best sending time
       const { data: openedEmails } = await supabase
-        .from("sent_emails")
-        .select("sent_at, opened_at")
-        .eq("user_id", userId)
-        .gte("sent_at", since)
+        .from("sent_emails").select("sent_at")
+        .eq("user_id", userId).gte("sent_at", since)
         .not("opened_at", "is", null);
 
       if (openedEmails && openedEmails.length > 0) {
@@ -198,25 +224,29 @@ export default function AnalyticsModule({ userId }: AnalyticsModuleProps) {
           const hour = new Date(e.sent_at).getHours();
           hourMap.set(hour, (hourMap.get(hour) ?? 0) + 1);
         }
-        const times = Array.from(hourMap.entries()).map(([hour, opens]) => ({ hour, opens }));
-        setSendTimes(times);
+        setSendTimes(Array.from(hourMap.entries()).map(([hour, opens]) => ({
+          hour, opens,
+          label: hour === 0 ? "12am" : hour < 12 ? `${hour}am` : hour === 12 ? "12pm" : `${hour - 12}pm`,
+        })));
       }
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }, [userId, range]);
 
   useEffect(() => { load(); }, [load]);
 
-  const maxSent = Math.max(...stats.map(d => d.sent), 1);
+  const chartStats = stats as any[];
+  const bestHour = sendTimes.length > 0 ? sendTimes.reduce((a, b) => a.opens > b.opens ? a : b) : null;
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl">
+    <div className="p-6 space-y-5 max-w-6xl">
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-gray-900">Analytics</h2>
-          <p className="text-xs text-gray-500 mt-0.5">Email performance overview</p>
+          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+            <BarChart2 size={18} className="text-blue-600" /> Analytics
+          </h2>
+          <p className="text-xs text-gray-500 mt-0.5">Real-time campaign performance and insights</p>
         </div>
         <div className="flex items-center gap-2">
           {RANGES.map(r => (
@@ -225,170 +255,154 @@ export default function AnalyticsModule({ userId }: AnalyticsModuleProps) {
               {r.label}
             </button>
           ))}
-          <button onClick={load} disabled={loading} className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50">
+          <button onClick={load} disabled={loading}
+            className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50">
             <RefreshCw size={13} className={loading ? "animate-spin text-blue-500" : "text-gray-400"} />
           </button>
         </div>
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center h-40">
-          <Loader2 size={20} className="animate-spin text-blue-600" />
+        <div className="flex items-center justify-center h-64">
+          <Loader2 size={24} className="animate-spin text-blue-600" />
         </div>
       ) : !summary ? null : (
         <>
-          {/* Summary cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatCard label="Emails Sent"    value={summary.sent.toLocaleString()}    sub={`last ${range} days`}    color="text-blue-500"   icon={Mail} />
-            <StatCard label="Open Rate"      value={`${summary.openRate}%`}           sub={`${summary.opened.toLocaleString()} opens`}    color="text-amber-500"  icon={TrendingUp} />
-            <StatCard label="Click Rate"     value={`${summary.clickRate}%`}          sub={`${summary.clicked.toLocaleString()} clicks`}   color="text-green-500"  icon={MousePointer} />
-            <StatCard label="Reply Rate"     value={`${summary.replyRate}%`}          sub={`${summary.replied.toLocaleString()} replies`}  color="text-purple-500" icon={MessageSquare} />
+          {/* Stat cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard label="Emails Sent"   value={summary.sent.toLocaleString()}   sub={`last ${range} days`}                      color="text-blue-600"   bg="bg-blue-50"   icon={Mail} />
+            <StatCard label="Open Rate"     value={`${summary.openRate}%`}          sub={`${summary.opened.toLocaleString()} opens`}    color="text-amber-600"  bg="bg-amber-50"  icon={TrendingUp} />
+            <StatCard label="Click Rate"    value={`${summary.clickRate}%`}         sub={`${summary.clicked.toLocaleString()} clicks`}   color="text-green-600"  bg="bg-green-50"  icon={MousePointer} />
+            <StatCard label="Reply Rate"    value={`${summary.replyRate}%`}         sub={`${summary.replied.toLocaleString()} replies`}  color="text-purple-600" bg="bg-purple-50" icon={MessageSquare} />
           </div>
 
-          {/* Daily chart */}
-          {stats.length > 0 && (
-            <div className="rounded-xl border border-gray-200 bg-white p-5">
+          {/* Daily Volume — Recharts bar chart */}
+          {chartStats.length > 0 && (
+            <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
               <p className="text-sm font-bold text-gray-800 mb-4">Daily Volume</p>
-              <div className="space-y-1 max-h-72 overflow-y-auto">
-                {stats.map(d => {
-                  const label = new Date(d.date + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
-                  return (
-                    <div key={d.date} className="flex items-center gap-3 text-xs">
-                      <span className="w-12 text-gray-400 shrink-0 text-right">{label}</span>
-                      <div className="flex-1 grid grid-cols-3 gap-1">
-                        <div title={`Sent: ${d.sent}`}>
-                          <Bar value={d.sent} max={maxSent} color="bg-blue-400" />
-                        </div>
-                        <div title={`Opened: ${d.opened}`}>
-                          <Bar value={d.opened} max={maxSent} color="bg-amber-400" />
-                        </div>
-                        <div title={`Replied: ${d.replied}`}>
-                          <Bar value={d.replied} max={maxSent} color="bg-purple-400" />
-                        </div>
-                      </div>
-                      <span className="w-8 text-gray-500 shrink-0">{d.sent}</span>
-                    </div>
-                  );
-                })}
-              </div>
-              {/* Legend */}
-              <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-100">
-                {[["bg-blue-400","Sent"],["bg-amber-400","Opened"],["bg-purple-400","Replied"]].map(([c,l]) => (
-                  <div key={l} className="flex items-center gap-1.5">
-                    <div className={`w-2.5 h-2.5 rounded-full ${c}`}/>
-                    <span className="text-[10px] text-gray-500">{l}</span>
-                  </div>
-                ))}
-              </div>
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={chartStats} margin={{ top: 0, right: 0, left: -20, bottom: 0 }} barSize={6} barCategoryGap="30%">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                  <XAxis dataKey="dateLabel" tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                  <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "12px" }} />
+                  <Bar dataKey="sent"    name="Sent"    fill="#60a5fa" radius={[2,2,0,0]} />
+                  <Bar dataKey="opened"  name="Opened"  fill="#fbbf24" radius={[2,2,0,0]} />
+                  <Bar dataKey="replied" name="Replied" fill="#a78bfa" radius={[2,2,0,0]} />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
           )}
 
-          {/* Top niches */}
+          {/* Performance by Niche — horizontal bars */}
           {topNiches.length > 0 && (
-            <div className="rounded-xl border border-gray-200 bg-white p-5">
+            <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
               <p className="text-sm font-bold text-gray-800 mb-4">Performance by Niche</p>
-              <div className="space-y-3">
+              <ResponsiveContainer width="100%" height={Math.max(topNiches.length * 40, 160)}>
+                <BarChart
+                  layout="vertical"
+                  data={topNiches}
+                  margin={{ top: 0, right: 60, left: 0, bottom: 0 }}
+                  barSize={10}
+                  barCategoryGap="25%"
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
+                  <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} tickFormatter={v => `${v}%`} />
+                  <YAxis type="category" dataKey="niche" width={110} tick={{ fontSize: 11, fill: "#374151" }} axisLine={false} tickLine={false} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "12px" }} />
+                  <Bar dataKey="openRate"  name="Open Rate %"  fill="#60a5fa" radius={[0,2,2,0]} />
+                  <Bar dataKey="replyRate" name="Reply Rate %"  fill="#a78bfa" radius={[0,2,2,0]} />
+                </BarChart>
+              </ResponsiveContainer>
+              <div className="mt-2 pt-2 border-t border-gray-100">
                 {topNiches.map(n => (
-                  <div key={n.niche} className="flex items-center gap-3">
-                    <span className="text-xs font-medium text-gray-700 w-36 truncate shrink-0">{n.niche}</span>
-                    <div className="flex-1">
-                      <Bar value={n.openRate} max={100} color="bg-blue-400" />
-                    </div>
-                    <span className="text-xs text-gray-500 w-16 text-right shrink-0">{n.openRate}% open · {n.sent} sent</span>
-                  </div>
+                  <span key={n.niche} className="inline-flex items-center gap-1 mr-3 mb-1 text-[10px] text-gray-400">
+                    <span className="font-medium text-gray-600">{n.niche}</span>
+                    <span>{n.sent} sent</span>
+                  </span>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Follow-up stage performance */}
-          {fuStages.length > 0 && (
-            <div className="rounded-xl border border-gray-200 bg-white p-5">
-              <p className="text-sm font-bold text-gray-800 mb-1">Follow-Up Stage Performance</p>
-              <p className="text-xs text-gray-400 mb-4">Open rate and reply rate per follow-up stage</p>
-              <div className="space-y-3">
-                {fuStages.map(s => (
-                  <div key={s.stage} className="flex items-center gap-3">
-                    <span className="text-xs font-semibold text-gray-600 w-14 shrink-0">FU #{s.stage}</span>
-                    <div className="flex-1 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-amber-600 w-10 shrink-0">Opens</span>
-                        <div className="flex-1"><Bar value={s.openRate} max={100} color="bg-amber-400" /></div>
-                        <span className="text-[10px] text-gray-500 w-8 text-right">{s.openRate}%</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-purple-600 w-10 shrink-0">Replies</span>
-                        <div className="flex-1"><Bar value={s.replyRate} max={100} color="bg-purple-400" /></div>
-                        <span className="text-[10px] text-gray-500 w-8 text-right">{s.replyRate}%</span>
-                      </div>
-                    </div>
-                    <span className="text-[10px] text-gray-400 w-14 text-right shrink-0">{s.sent} sent</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* Two column: Follow-up stages + Best send time */}
+          {(fuStages.length > 0 || sendTimes.some(t => t.opens > 0)) && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
-          {/* Best send time */}
-          {sendTimes.some(t => t.opens > 0) && (
-            <div className="rounded-xl border border-gray-200 bg-white p-5">
-              <p className="text-sm font-bold text-gray-800 mb-1">Best Sending Time</p>
-              <p className="text-xs text-gray-400 mb-4">Hours of day that generate the most opens</p>
-              <div className="grid grid-cols-12 gap-1 items-end h-20">
-                {sendTimes.map(t => {
-                  const maxOpens = Math.max(...sendTimes.map(x => x.opens), 1);
-                  const pct = Math.round((t.opens / maxOpens) * 100);
-                  const isTop = t.opens === maxOpens && maxOpens > 0;
-                  return (
-                    <div key={t.hour} className="flex flex-col items-center gap-0.5 group relative">
-                      <div
-                        className={`w-full rounded-sm transition-all ${isTop ? "bg-blue-500" : "bg-gray-200 group-hover:bg-blue-300"}`}
-                        style={{ height: `${Math.max(pct, 4)}%` }}
-                      />
-                      {/* Tooltip on hover */}
-                      <div className="absolute bottom-full mb-1 hidden group-hover:block bg-gray-800 text-white text-[9px] px-1.5 py-0.5 rounded whitespace-nowrap z-10">
-                        {t.hour}:00 — {t.opens} opens
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="flex justify-between mt-1">
-                <span className="text-[10px] text-gray-400">12am</span>
-                <span className="text-[10px] text-gray-400">6am</span>
-                <span className="text-[10px] text-gray-400">12pm</span>
-                <span className="text-[10px] text-gray-400">6pm</span>
-                <span className="text-[10px] text-gray-400">11pm</span>
-              </div>
-              {sendTimes.length > 0 && (() => {
-                const best = sendTimes.reduce((a, b) => a.opens > b.opens ? a : b);
-                if (best.opens === 0) return null;
-                return (
-                  <p className="text-xs text-blue-700 font-semibold mt-2">
-                    Best time: {best.hour}:00 — {best.hour + 1}:00 ({best.opens} opens)
-                  </p>
-                );
-              })()}
+              {/* Follow-up stage performance */}
+              {fuStages.length > 0 && (
+                <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Layers size={14} className="text-blue-600" />
+                    <p className="text-sm font-bold text-gray-800">Follow-Up Stages</p>
+                  </div>
+                  <p className="text-[11px] text-gray-400 mb-4">Open and reply rate per follow-up sent</p>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={fuStages.map(s => ({ ...s, name: `FU #${s.stage}` }))} barSize={14} barCategoryGap="30%">
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                      <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#6b7280" }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} tickFormatter={v => `${v}%`} domain={[0, 100]} />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
+                      <Bar dataKey="openRate"  name="Open %"  fill="#fbbf24" radius={[3,3,0,0]} />
+                      <Bar dataKey="replyRate" name="Reply %" fill="#a78bfa" radius={[3,3,0,0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* Best send time */}
+              {sendTimes.some(t => t.opens > 0) && (
+                <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Clock size={14} className="text-blue-600" />
+                    <p className="text-sm font-bold text-gray-800">Best Sending Time</p>
+                  </div>
+                  <p className="text-[11px] text-gray-400 mb-4">Hour of day that gets the most opens</p>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={sendTimes} barSize={10} barCategoryGap="15%">
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                      <XAxis dataKey="label" tick={{ fontSize: 9, fill: "#9ca3af" }} axisLine={false} tickLine={false} interval={2} />
+                      <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Bar dataKey="opens" name="Opens" radius={[2,2,0,0]}>
+                        {sendTimes.map((t, i) => (
+                          <Cell key={i} fill={bestHour && t.hour === bestHour.hour ? "#2563eb" : "#bfdbfe"} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                  {bestHour && bestHour.opens > 0 && (
+                    <p className="text-xs text-blue-700 font-semibold mt-2">
+                      Best: {bestHour.label} — {bestHour.opens} opens
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
           {/* Bounce warning */}
           {summary.bounceRate > 5 && (
-            <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-xl">
-              <AlertCircle size={14} className="text-red-500 shrink-0 mt-0.5" />
+            <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-xl">
+              <AlertCircle size={16} className="text-red-500 shrink-0 mt-0.5" />
               <div>
-                <p className="text-xs font-bold text-red-800">High bounce rate: {summary.bounceRate}%</p>
-                <p className="text-[11px] text-red-700 mt-0.5">A bounce rate above 5% can damage your sender reputation. Review your email list and remove invalid addresses from the CRM.</p>
+                <p className="text-sm font-bold text-red-800">High bounce rate: {summary.bounceRate}%</p>
+                <p className="text-xs text-red-700 mt-0.5">
+                  A bounce rate above 5% damages sender reputation. Review your leads and remove invalid addresses from the CRM.
+                </p>
               </div>
             </div>
           )}
 
           {/* Empty state */}
           {summary.sent === 0 && (
-            <div className="text-center py-12 text-gray-400">
-              <Mail size={28} className="mx-auto mb-3 opacity-40" />
+            <div className="text-center py-16 text-gray-400">
+              <BarChart2 size={36} className="mx-auto mb-4 opacity-30" />
               <p className="text-sm font-medium">No emails sent in the last {range} days</p>
-              <p className="text-xs mt-1">Start sending from the Email Writer to see analytics here</p>
+              <p className="text-xs mt-1">Start sending from the Email Writer to see your analytics here</p>
             </div>
           )}
         </>

@@ -5,8 +5,257 @@ import { createClient } from "../../../supabase/client";
 import { toast } from "sonner";
 import {
   Shield, CheckCircle, XCircle, AlertTriangle, Loader2,
-  Upload, Download, Filter, TrendingUp
+  Download, Filter, TrendingUp, Mail,
 } from "lucide-react";
+import { verifyEmail, canSendTo, getVerificationBadge } from "@/utils/email-verifier";
+import type { VerificationResult } from "@/utils/email-verifier";
+
+interface EmailVerificationModuleProps { userId: string; }
+
+interface LeadVerification {
+  leadId: string;
+  companyName: string;
+  email: string;
+  result: VerificationResult;
+}
+
+export default function EmailVerificationModule({ userId }: EmailVerificationModuleProps) {
+  const supabase = createClient();
+
+  const [verifying, setVerifying] = useState(false);
+  const [results, setResults] = useState<LeadVerification[]>([]);
+  const [progress, setProgress] = useState({ completed: 0, total: 0 });
+  const [filterScore, setFilterScore] = useState(50);
+
+  const verifyLeadsFromCRM = async () => {
+    setVerifying(true);
+    setResults([]);
+    setProgress({ completed: 0, total: 0 });
+
+    try {
+      const { data: leads, error } = await supabase
+        .from("leads")
+        .select("id, email, company_name")
+        .eq("user_id", userId)
+        .not("email", "is", null)
+        .limit(500);
+
+      if (error) throw error;
+      if (!leads || leads.length === 0) {
+        toast.error("No leads with emails found");
+        setVerifying(false);
+        return;
+      }
+
+      setProgress({ completed: 0, total: leads.length });
+      toast.info(`Verifying ${leads.length} email addresses...`);
+
+      const out: LeadVerification[] = [];
+      for (let i = 0; i < leads.length; i++) {
+        const lead = leads[i];
+        const result = await verifyEmail(lead.email!).catch(() => null);
+        if (!result) continue;
+
+        out.push({ leadId: lead.id, companyName: lead.company_name, email: lead.email!, result });
+        setProgress({ completed: i + 1, total: leads.length });
+        setResults([...out]);
+
+        // Update lead in DB
+        await supabase.from("leads").update({
+          email_verified: canSendTo(result),
+          confidence_score: 100 - result.risk_score,
+          updated_at: new Date().toISOString(),
+        }).eq("id", lead.id).catch(() => {});
+
+        // Small delay to avoid rate limiting
+        if (i < leads.length - 1) await new Promise(r => setTimeout(r, 300));
+      }
+
+      const valid = out.filter(r => canSendTo(r.result)).length;
+      toast.success(`Done! ${valid} valid, ${out.length - valid} flagged`);
+    } catch (err: any) {
+      toast.error(err.message || "Verification failed");
+    } finally {
+      setVerifying(false); }
+  };
+
+  const exportResults = () => {
+    if (results.length === 0) { toast.error("Run verification first"); return; }
+    const csv = [
+      ["Company", "Email", "Status", "Risk Score", "Reason"].join(","),
+      ...results.map(r => [
+        `"${r.companyName}"`, r.email, r.result.status,
+        r.result.risk_score, `"${r.result.reason}"`,
+      ].join(","))
+    ].join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    a.download = `email-verification-${Date.now()}.csv`;
+    a.click();
+    toast.success("Exported");
+  };
+
+  const markInvalidAsRemoved = async () => {
+    const invalid = results.filter(r => !canSendTo(r.result));
+    if (invalid.length === 0) { toast.info("No invalid emails found"); return; }
+    for (const r of invalid) {
+      await supabase.from("leads").update({ status: "invalid_email", email_verified: false })
+        .eq("id", r.leadId).catch(() => {});
+    }
+    toast.success(`${invalid.length} invalid leads marked`);
+  };
+
+  const stats = results.length > 0 ? {
+    total:    results.length,
+    valid:    results.filter(r => r.result.status === "valid").length,
+    catchAll: results.filter(r => r.result.status === "catch_all").length,
+    risky:    results.filter(r => r.result.status === "risky").length,
+    invalid:  results.filter(r => r.result.status === "invalid").length,
+    disposable: results.filter(r => r.result.status === "disposable").length,
+  } : null;
+
+  return (
+    <div className="flex flex-col h-full bg-white overflow-hidden">
+
+      {/* Header */}
+      <div className="border-b border-gray-200 px-6 py-5 shrink-0">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-base font-bold text-gray-900 flex items-center gap-2">
+              <Shield size={18} className="text-green-600" /> Email Verification
+            </h1>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Check which emails are valid before sending to reduce bounces
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {results.length > 0 && (
+              <>
+                <button onClick={markInvalidAsRemoved}
+                  className="flex items-center gap-1.5 px-3 py-2 border border-red-200 text-red-600 text-xs font-medium rounded-lg hover:bg-red-50 transition-colors">
+                  <XCircle size={13} /> Mark invalid
+                </button>
+                <button onClick={exportResults}
+                  className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:bg-gray-50 transition-colors">
+                  <Download size={13} /> Export CSV
+                </button>
+              </>
+            )}
+            <button onClick={verifyLeadsFromCRM} disabled={verifying}
+              className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50">
+              {verifying
+                ? <><Loader2 size={14} className="animate-spin" /> Verifying {progress.completed}/{progress.total}</>
+                : <><Shield size={14} /> Verify All Leads</>
+              }
+            </button>
+          </div>
+        </div>
+
+        {/* Stats row */}
+        {stats && (
+          <div className="grid grid-cols-5 gap-3 mt-4">
+            {[
+              { label: "Total",      value: stats.total,      color: "text-blue-600",  bg: "bg-blue-50",  icon: Mail },
+              { label: "Valid",      value: stats.valid,      color: "text-green-600", bg: "bg-green-50", icon: CheckCircle },
+              { label: "Catch-All",  value: stats.catchAll,   color: "text-amber-600", bg: "bg-amber-50", icon: AlertTriangle },
+              { label: "Risky",      value: stats.risky,      color: "text-orange-600",bg: "bg-orange-50",icon: AlertTriangle },
+              { label: "Invalid",    value: stats.invalid + stats.disposable, color: "text-red-600", bg: "bg-red-50", icon: XCircle },
+            ].map(({ label, value, color, bg, icon: Icon }) => (
+              <div key={label} className={`${bg} rounded-xl p-3 border border-gray-100`}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Icon size={12} className={color} />
+                  <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">{label}</span>
+                </div>
+                <p className="text-xl font-black text-gray-900">{value}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Progress bar while verifying */}
+      {verifying && progress.total > 0 && (
+        <div className="px-6 py-3 bg-blue-50 border-b border-blue-100 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="flex-1 bg-blue-100 rounded-full h-2">
+              <div className="bg-blue-600 h-2 rounded-full transition-all"
+                style={{ width: `${(progress.completed / progress.total) * 100}%` }} />
+            </div>
+            <span className="text-xs font-medium text-blue-700 shrink-0">
+              {Math.round((progress.completed / progress.total) * 100)}%
+            </span>
+          </div>
+          <p className="text-xs text-blue-600 mt-1">
+            Checking {progress.completed} of {progress.total} addresses...
+          </p>
+        </div>
+      )}
+
+      {/* Results list */}
+      <div className="flex-1 overflow-y-auto p-6">
+        {results.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
+            <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mb-4">
+              <Shield size={28} className="text-green-400" />
+            </div>
+            <p className="text-base font-semibold text-gray-700">No verification run yet</p>
+            <p className="text-sm text-gray-400 mt-1 max-w-xs">
+              Click "Verify All Leads" to check your lead emails before sending
+            </p>
+            <div className="mt-6 text-left bg-gray-50 border border-gray-200 rounded-xl p-4 max-w-sm">
+              <p className="text-xs font-bold text-gray-700 mb-2">What gets checked:</p>
+              <ul className="text-xs text-gray-500 space-y-1.5">
+                <li className="flex items-center gap-2"><CheckCircle size={11} className="text-green-500 shrink-0"/>Email format is valid</li>
+                <li className="flex items-center gap-2"><CheckCircle size={11} className="text-green-500 shrink-0"/>Domain has a mail server (MX record)</li>
+                <li className="flex items-center gap-2"><CheckCircle size={11} className="text-green-500 shrink-0"/>Not a disposable or throwaway address</li>
+                <li className="flex items-center gap-2"><CheckCircle size={11} className="text-green-500 shrink-0"/>Whether the domain accepts all mail (catch-all)</li>
+                <li className="flex items-center gap-2"><CheckCircle size={11} className="text-green-500 shrink-0"/>Risk score assigned to every address</li>
+              </ul>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-1.5 max-w-4xl">
+            {results.map((r) => {
+              const badge = getVerificationBadge(r.result.status);
+              const sendable = canSendTo(r.result);
+              return (
+                <div key={r.leadId}
+                  className={`flex items-center gap-4 px-4 py-3 rounded-xl border transition-colors ${
+                    sendable ? "border-gray-200 bg-white hover:border-gray-300"
+                             : "border-red-100 bg-red-50"
+                  }`}>
+                  <div className="shrink-0">
+                    {sendable
+                      ? <CheckCircle size={16} className="text-green-500" />
+                      : <XCircle size={16} className="text-red-400" />
+                    }
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{r.companyName}</p>
+                    <p className="text-xs text-gray-500 truncate">{r.email}</p>
+                  </div>
+                  <p className="text-[11px] text-gray-400 max-w-xs truncate hidden md:block">{r.result.reason}</p>
+                  <span className="text-[10px] px-2 py-1 rounded-full font-semibold shrink-0"
+                    style={{ color: badge.color, background: badge.bg }}>
+                    {badge.label}
+                  </span>
+                  <span className={`text-xs font-bold w-8 text-right shrink-0 ${
+                    r.result.risk_score <= 20 ? "text-green-600"
+                    : r.result.risk_score <= 50 ? "text-amber-600"
+                    : "text-red-600"
+                  }`}>
+                    {100 - r.result.risk_score}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 
 interface VerificationResult {
   email: string;

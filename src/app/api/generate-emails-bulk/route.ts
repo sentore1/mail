@@ -306,10 +306,11 @@ export async function POST(request: NextRequest) {
 
           console.log(`[bulk-gen] Generating for "${name}" | ai=${!!aiProvider} | greeting="${signals.greeting}" | niche=${lead.niche}`);
 
-          // Small delay between AI calls to avoid Groq/OpenAI rate limits on free tier
-          // Skip delay for first email and when no AI provider is configured
+          // Delay between AI calls to avoid rate limits on Groq/OpenAI free tier.
+          // Groq free tier = 30 req/min → need ~2s gap. Use 2.2s to be safe.
+          // Skip delay for first email and when no AI provider is configured.
           if (aiProvider && idx > 0) {
-            await new Promise(r => setTimeout(r, 600)); // 600ms = ~100 req/min max
+            await new Promise(r => setTimeout(r, 2200));
           }
 
           const result = await buildPersonalizedEmail(

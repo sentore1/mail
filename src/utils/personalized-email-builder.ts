@@ -417,7 +417,11 @@ async function callAI(p: AIProvider, system: string, user: string): Promise<stri
     try { return await attempt(); }
     catch (err: any) {
       lastError = err;
-      if (err?.status === 429) { await wait((Math.pow(2, n + 1) + n) * 1000); continue; }
+      if (err?.status === 429) {
+        // Rate limited — wait longer before retry: 5s, 10s, 20s
+        await wait((n + 1) * 5000);
+        continue;
+      }
       throw err;
     }
   }
