@@ -357,6 +357,7 @@ export type ActiveModule =
   | 'smtp-manager'
   | 'follow-up'
   | 'analytics'
+  | 'monthly-report'
   | 'webhooks'
   | 'sequences'
   | 'ab-testing'

@@ -1,7 +1,7 @@
 "use client";
 
 import { ActiveModule } from "@/types/platform";
-import { Radio, Mail, Settings, Layout, Server, Send, ShieldCheck, BarChart2, Zap, GitBranch, FlaskConical, Tag, Link2, MessageSquare, UserCircle, CreditCard } from "lucide-react";
+import { Radio, Mail, Settings, Layout, Server, Send, ShieldCheck, BarChart2, Zap, GitBranch, FlaskConical, Tag, Link2, MessageSquare, UserCircle, CreditCard, FileText } from "lucide-react";
 
 interface SidebarProps {
   activeModule: ActiveModule;
@@ -23,6 +23,7 @@ const navGroups = [
       { id: "crm" as ActiveModule,           label: "CRM",            icon: Layout,         badge: null },
       { id: "custom-fields" as ActiveModule, label: "Custom Fields",  icon: Tag,            badge: null },
       { id: "analytics" as ActiveModule,     label: "Analytics",      icon: BarChart2,      badge: null },
+      { id: "monthly-report" as ActiveModule,label: "Monthly Report", icon: FileText,       badge: null },
       { id: "ab-testing" as ActiveModule,    label: "A/B Testing",    icon: FlaskConical,   badge: null },
       { id: "verification" as ActiveModule,  label: "Verify Emails",  icon: ShieldCheck,    badge: null },
     ],

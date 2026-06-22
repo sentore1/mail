@@ -275,7 +275,9 @@ function buildUserPrompt(ctx: FollowUpContext, style: FollowUpStyle): string {
   const greeting   = resolveGreeting(null, ctx.companyName);
   const cleanName  = cleanCompanyNameForGreeting(ctx.companyName);
   const sector     = ctx.niche || 'business';
-  const subject    = `Re: ${ctx.originalSubject}`;
+  // Strip any existing Re: prefix to prevent "Re: Re: Re:"
+  const cleanOrigSubject = ctx.originalSubject.replace(/^(Re:\s*)+/i, '').trim();
+  const subject    = `Re: ${cleanOrigSubject}`;
 
   // Extract the exact problem and Pryro solution from the original email
   const { problemLine, pryroLine } = extractFromOriginalEmail(ctx.originalBody);
@@ -373,7 +375,9 @@ export function buildTemplateFollowUp(
   const greeting  = resolveGreeting(null, companyName);
   const cleanName = cleanCompanyNameForGreeting(companyName);
   const sector    = niche || 'business';
-  const subject   = `Re: ${originalSubject}`;
+  // Strip any existing Re: prefix before adding our own — prevents "Re: Re: Re:"
+  const cleanOriginalSubject = originalSubject.replace(/^(Re:\s*)+/i, '').trim();
+  const subject   = `Re: ${cleanOriginalSubject}`;
 
   // Extract the exact problem and solution from the original email we sent
   const { problemLine, pryroLine } = extractFromOriginalEmail(originalBody);
@@ -382,8 +386,12 @@ export function buildTemplateFollowUp(
   // If we can extract it, use the exact phrasing. Otherwise fall back to sector bank.
   const buildPryroReminder = (): string => {
     if (pryroLine) {
-      // Use the actual sentence from the original email
-      return pryroLine.endsWith('.') ? pryroLine : pryroLine + '.';
+      // Strip "As a quick reminder:" prefix if the extracted line already has it
+      const clean = pryroLine
+        .replace(/^as a quick reminder:\s*/i, '')
+        .replace(/^reminder:\s*/i, '')
+        .trim();
+      return clean.endsWith('.') ? clean : clean + '.';
     }
     // Sector bank fallback
     const sectorOutcomes: Record<string, string> = {

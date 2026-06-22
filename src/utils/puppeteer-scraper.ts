@@ -175,7 +175,7 @@ async function domainHasMX(email: string): Promise<boolean> {
   try {
     const res = await fetch(
       `https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=MX`,
-      { signal: AbortSignal.timeout(4_000) }
+      { signal: AbortSignal.timeout(2_000) }  // reduced from 4s → 2s
     );
     const data = await res.json();
     const ok = Array.isArray(data?.Answer) && data.Answer.length > 0;
@@ -231,7 +231,7 @@ export async function scrapeBusinessEnrichment(website: string): Promise<{
 
   const tryPage = async (url: string): Promise<{ description: string | null; names: string[] }> => {
     try {
-      const res = await fetch(url, { headers, signal: AbortSignal.timeout(6_000) });
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(4_000) });
       if (!res.ok) return { description: null, names: [] };
       const html = await res.text();
 
@@ -262,10 +262,12 @@ export async function scrapeBusinessEnrichment(website: string): Promise<{
     }
   };
 
-  // Try homepage first, then /about
-  const home  = await tryPage(origin + '/');
-  const about = home.description ? { description: null, names: [] } : await tryPage(origin + '/about');
-  const team  = await tryPage(origin + '/team');
+  // Fetch homepage, /about, and /team in parallel (was sequential — 3× faster)
+  const [home, about, team] = await Promise.all([
+    tryPage(origin + '/'),
+    tryPage(origin + '/about'),
+    tryPage(origin + '/team'),
+  ]);
 
   const description = home.description ?? about.description ?? null;
   const decisionMakers = [...new Set([...home.names, ...about.names, ...team.names])].slice(0, 5);
@@ -372,7 +374,7 @@ async function deepScrapeWebsite(
 
   const fetchPage = async (url: string, useAI = false): Promise<{ email: string; name?: string } | null> => {
     try {
-      const res = await fetch(url, { headers, signal: AbortSignal.timeout(7_000) });
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(5_000) });
       if (!res.ok) return null;
       const html = decodeHtml(await res.text());
       const mailtos: string[] = [];
@@ -397,24 +399,25 @@ async function deepScrapeWebsite(
 
   let foundRealName: string | undefined;
 
-  // Phase 1: Try all pages with regex only (fast, no AI calls)
+  // Phase 1: Try all pages in PARALLEL (fast, no AI calls)
+  // Race all regex-only paths concurrently — first hit wins
   const regexUrls = regexOnlyPaths.map(p => `${origin}${p}`);
-  for (const url of regexUrls) {
-    const result = await fetchPage(url, false);
-    if (result) {
-      if (result.name) foundRealName = result.name;
-      return { email: result.email, isReal: true, realName: foundRealName };
+  const phase1Results = await Promise.allSettled(regexUrls.map(url => fetchPage(url, false)));
+  for (const r of phase1Results) {
+    if (r.status === 'fulfilled' && r.value) {
+      if (r.value.name) foundRealName = r.value.name;
+      return { email: r.value.email, isReal: true, realName: foundRealName };
     }
   }
 
-  // Phase 2: Try top 3 pages with AI (only if regex found nothing)
+  // Phase 2: Try AI-assisted pages in PARALLEL (only if regex found nothing)
   if (aiProvider) {
     const aiUrls = aiAssistedPaths.map(p => `${origin}${p}`);
-    for (const url of aiUrls) {
-      const result = await fetchPage(url, true);
-      if (result) {
-        if (result.name) foundRealName = result.name;
-        return { email: result.email, isReal: true, realName: foundRealName };
+    const phase2Results = await Promise.allSettled(aiUrls.map(url => fetchPage(url, true)));
+    for (const r of phase2Results) {
+      if (r.status === 'fulfilled' && r.value) {
+        if (r.value.name) foundRealName = r.value.name;
+        return { email: r.value.email, isReal: true, realName: foundRealName };
       }
     }
   }
@@ -561,18 +564,18 @@ export async function scrapeGoogleMaps(
       .then(() => true).catch(() => false);
     if (!feedLoaded) { console.log('  ⚠️  Maps feed not found'); return []; }
 
-    // Scroll to load more listings
+    // Scroll to load more listings — reduced delay 800ms → 300ms
     let prev = 0, stale = 0;
-    const maxScrolls = Math.min(Math.ceil(maxResults / 3) + 15, 100);
+    const maxScrolls = Math.min(Math.ceil(maxResults / 3) + 10, 80);
     for (let i = 0; i < maxScrolls; i++) {
       await page.evaluate(() => {
         const f = document.querySelector('[role="feed"]');
         if (f) f.scrollTop = f.scrollHeight;
       });
-      await delay(800);
+      await delay(300);
       const count = await page.evaluate(() => document.querySelectorAll('[role="article"]').length);
       if (count >= maxResults * 1.5) break;
-      if (count === prev) { if (++stale >= 5) break; } else stale = 0;
+      if (count === prev) { if (++stale >= 4) break; } else stale = 0;
       prev = count;
     }
 
@@ -593,10 +596,10 @@ export async function scrapeGoogleMaps(
 
     console.log(`  Found ${businesses.length} Maps listings`);
 
-    // Process in batches of 4 — open place page, get website, deep-scrape
-    for (let i = 0; i < businesses.length; i += 4) {
+    // Process in batches of 8 (was 4) — open place page, get website, deep-scrape
+    for (let i = 0; i < businesses.length; i += 8) {
       if (leads.length >= maxResults) break;
-      const batch = businesses.slice(i, i + 4);
+      const batch = businesses.slice(i, i + 8);
 
       await Promise.all(batch.map(async (biz: any) => {
         if (leads.length >= maxResults) return;
@@ -610,8 +613,8 @@ export async function scrapeGoogleMaps(
           const p = await browser!.newPage();
           await p.setUserAgent(ua);
           try {
-            await p.goto(biz.placeUrl, { waitUntil: 'domcontentloaded', timeout: 12_000 });
-            await delay(600);
+            await p.goto(biz.placeUrl, { waitUntil: 'domcontentloaded', timeout: 10_000 });
+            await delay(300);  // reduced from 600ms
             const d = await p.evaluate(() => {
               const skip = ['google.com','facebook.com','instagram.com','twitter.com','maps.google'];
               const auth = document.querySelector<HTMLAnchorElement>('[data-item-id="authority"] a');
@@ -664,18 +667,18 @@ export async function scrapeGoogleMaps(
           website: website || undefined,
         };
 
-        // Enrich with business description + decision makers from website
-        if (website && !isBlockedDomain(website)) {
-          try {
-            const enrichment = await scrapeBusinessEnrichment(website);
-            if (enrichment.description) lead.business_description = enrichment.description;
-            if (enrichment.decisionMakers.length > 0) lead.decision_makers = enrichment.decisionMakers;
-          } catch { /* enrichment is best-effort */ }
-        }
-
+        // Emit lead immediately — don't wait for enrichment
         leads.push(lead);
         onLead(lead);
-        console.log(`  ✅ ${biz.name} → ${email}${emailIsReal ? '' : ' (AI predicted)'}${lead.decision_makers?.length ? ` (${lead.decision_makers.length} contacts found)` : ''}`);
+        console.log(`  ✅ ${biz.name} → ${email}${emailIsReal ? '' : ' (AI predicted)'}`);
+
+        // Enrich in background (non-blocking) — description + decision makers
+        if (website && !isBlockedDomain(website)) {
+          scrapeBusinessEnrichment(website).then(enrichment => {
+            if (enrichment.description) lead.business_description = enrichment.description;
+            if (enrichment.decisionMakers.length > 0) lead.decision_makers = enrichment.decisionMakers;
+          }).catch(() => { /* best-effort */ });
+        }
       }));
     }
   } catch (err) {
@@ -742,55 +745,60 @@ async function scrapeBingSearch(
 
       console.log(`    Found ${items.length} Bing result URLs`);
 
-      for (const item of items) {
+      // Process up to 8 items in parallel instead of sequentially
+      const CONCURRENCY = 8;
+      for (let i = 0; i < items.length; i += CONCURRENCY) {
         if (leads.length >= needed) break;
-        const cleanName = extractCompanyName(item.name, item.url);
-        if (!cleanName || cleanName.length < 3 || cleanName.length > 80) continue;
-        if (BAD_TITLE_PATTERNS.some(p => p.test(cleanName))) continue;
-        if (seen.has(cleanName.toLowerCase())) continue;
+        const batch = items.slice(i, i + CONCURRENCY);
+        await Promise.all(batch.map(async (item) => {
+          if (leads.length >= needed) return;
+          const cleanName = extractCompanyName(item.name, item.url);
+          if (!cleanName || cleanName.length < 3 || cleanName.length > 80) return;
+          if (BAD_TITLE_PATTERNS.some(p => p.test(cleanName))) return;
+          if (seen.has(cleanName.toLowerCase())) return;
 
-        // Check page emails first
-        let email = bestEmail(pageEmails.filter(e => {
-          const d = e.split('@')[1] ?? '';
-          return item.url.includes(d.split('.')[0] ?? '');
-        }));
-        let emailIsReal = !!email;
+          // Check page emails first
+          let email = bestEmail(pageEmails.filter(e => {
+            const d = e.split('@')[1] ?? '';
+            return item.url.includes(d.split('.')[0] ?? '');
+          }));
+          let emailIsReal = !!email;
 
-        if (!email) {
-          const result = await deepScrapeWebsite(item.url, cleanName, niche, location, aiProvider);
-          if (result) {
-            email = result.email;
-            emailIsReal = result.isReal;
-            // Use real name from website if better
-            if (result.realName) {
-              const better = extractCompanyName(result.realName, item.url);
-              if (better && !BAD_TITLE_PATTERNS.some(p => p.test(better))) {
-                seen.add(better.toLowerCase());
-                const lead: ScrapedLead = { company_name: better, email, emailIsReal, niche, location, company_context: `${better} is a ${niche} in ${location}.`, source_url: item.url, website: item.url };
-                leads.push(lead); onLead(lead);
-                console.log(`    ✅ ${better} → ${email}${emailIsReal ? '' : ' (AI predicted)'}`);
-                continue;
+          if (!email) {
+            const result = await deepScrapeWebsite(item.url, cleanName, niche, location, aiProvider);
+            if (result) {
+              email = result.email;
+              emailIsReal = result.isReal;
+              if (result.realName) {
+                const better = extractCompanyName(result.realName, item.url);
+                if (better && !BAD_TITLE_PATTERNS.some(p => p.test(better))) {
+                  seen.add(better.toLowerCase());
+                  const lead: ScrapedLead = { company_name: better, email, emailIsReal, niche, location, company_context: `${better} is a ${niche} in ${location}.`, source_url: item.url, website: item.url };
+                  leads.push(lead); onLead(lead);
+                  console.log(`    ✅ ${better} → ${email}${emailIsReal ? '' : ' (AI predicted)'}`);
+                  return;
+                }
               }
             }
           }
-        }
 
-        if (!email) continue;
-        const mxOk = await domainHasMX(email);
-        if (!mxOk) continue;
+          if (!email) return;
+          const mxOk = await domainHasMX(email);
+          if (!mxOk) return;
 
-        seen.add(cleanName.toLowerCase());
-        const lead: ScrapedLead = {
-          company_name: cleanName, email, emailIsReal, niche, location,
-          company_context: `${cleanName} is a ${niche} in ${location}.`,
-          source_url: item.url, website: item.url,
-        };
-        leads.push(lead);
-        onLead(lead);
-        console.log(`    ✅ ${cleanName} → ${email}${emailIsReal ? '' : ' (AI predicted)'}`);
+          seen.add(cleanName.toLowerCase());
+          const lead: ScrapedLead = {
+            company_name: cleanName, email, emailIsReal, niche, location,
+            company_context: `${cleanName} is a ${niche} in ${location}.`,
+            source_url: item.url, website: item.url,
+          };
+          leads.push(lead);
+          onLead(lead);
+          console.log(`    ✅ ${cleanName} → ${email}${emailIsReal ? '' : ' (AI predicted)'}`);
+        }));
       }
 
-      await delay(1500 + Math.random() * 500);
+      await delay(500 + Math.random() * 200);
     } catch (err: any) {
       console.log(`  ⚠️  Bing query failed: ${err?.message?.slice(0, 60)}`);
     }
@@ -860,55 +868,59 @@ async function scrapeDDGSearch(
         idx++;
       }
 
-      for (const item of items) {
+      for (let i = 0; i < items.length; i += 8) {
         if (leads.length >= needed) break;
-        const cleanName = extractCompanyName(item.name, item.url);
-        if (!cleanName || cleanName.length < 3) continue;
-        if (BAD_TITLE_PATTERNS.some(p => p.test(cleanName))) continue;
-        if (seen.has(cleanName.toLowerCase())) continue;
+        const batch = items.slice(i, i + 8);
+        await Promise.all(batch.map(async (item) => {
+          if (leads.length >= needed) return;
+          const cleanName = extractCompanyName(item.name, item.url);
+          if (!cleanName || cleanName.length < 3) return;
+          if (BAD_TITLE_PATTERNS.some(p => p.test(cleanName))) return;
+          if (seen.has(cleanName.toLowerCase())) return;
 
-        let email = bestEmail(extractEmails(item.snippet));
-        let emailIsReal = !!email;
-        if (!email) {
-          // If the URL is a directory/social site, try to find the real website first
-          let websiteToScrape = item.url;
-          if (isBlockedDomain(item.url)) {
-            // Try to find the company's real website via a direct fetch search
-            try {
-              const searchRes = await fetch(
-                `https://html.duckduckgo.com/html/?q=${encodeURIComponent(cleanName + ' official website')}`,
-                { headers, signal: AbortSignal.timeout(8_000) }
-              );
-              if (searchRes.ok) {
-                const searchHtml = await searchRes.text();
-                const urlMatch = searchHtml.match(/href="(https?:\/\/(?!.*duckduckgo)[^"]+)"/i);
-                if (urlMatch?.[1] && !isBlockedDomain(urlMatch[1])) {
-                  websiteToScrape = urlMatch[1];
+          let email = bestEmail(extractEmails(item.snippet));
+          let emailIsReal = !!email;
+          if (!email) {
+            // If the URL is a directory/social site, try to find the real website first
+            let websiteToScrape = item.url;
+            if (isBlockedDomain(item.url)) {
+              // Try to find the company's real website via a direct fetch search
+              try {
+                const searchRes = await fetch(
+                  `https://html.duckduckgo.com/html/?q=${encodeURIComponent(cleanName + ' official website')}`,
+                  { headers, signal: AbortSignal.timeout(8_000) }
+                );
+                if (searchRes.ok) {
+                  const searchHtml = await searchRes.text();
+                  const urlMatch = searchHtml.match(/href="(https?:\/\/(?!.*duckduckgo)[^"]+)"/i);
+                  if (urlMatch?.[1] && !isBlockedDomain(urlMatch[1])) {
+                    websiteToScrape = urlMatch[1];
+                  }
                 }
-              }
-            } catch { /* keep original */ }
+              } catch { /* keep original */ }
+            }
+            if (!isBlockedDomain(websiteToScrape)) {
+              const result = await deepScrapeWebsite(websiteToScrape, cleanName, niche, location, aiProvider);
+              if (result) { email = result.email; emailIsReal = result.isReal; }
+            }
           }
-          if (!isBlockedDomain(websiteToScrape)) {
-            const result = await deepScrapeWebsite(websiteToScrape, cleanName, niche, location, aiProvider);
-            if (result) { email = result.email; emailIsReal = result.isReal; }
-          }
-        }
-        if (!email) continue;
-        const mxOk = await domainHasMX(email);
-        if (!mxOk) continue;
+          if (!email) return;
+          const mxOk = await domainHasMX(email);
+          if (!mxOk) return;
 
-        seen.add(cleanName.toLowerCase());
-        const lead: ScrapedLead = {
-          company_name: cleanName, email, emailIsReal, niche, location,
-          company_context: item.snippet || `${cleanName} is a ${niche} in ${location}.`,
-          source_url: item.url, website: item.url,
-        };
-        leads.push(lead);
-        onLead(lead);
-        console.log(`    ✅ ${cleanName} → ${email}${emailIsReal ? '' : ' (AI predicted)'}`);
+          seen.add(cleanName.toLowerCase());
+          const lead: ScrapedLead = {
+            company_name: cleanName, email, emailIsReal, niche, location,
+            company_context: item.snippet || `${cleanName} is a ${niche} in ${location}.`,
+            source_url: item.url, website: item.url,
+          };
+          leads.push(lead);
+          onLead(lead);
+          console.log(`    ✅ ${cleanName} → ${email}${emailIsReal ? '' : ' (AI predicted)'}`);
+        }));
       }
 
-      await delay(1500);
+      await delay(500);
     } catch (err: any) {
       console.log(`  ⚠️  DDG query failed: ${err?.message?.slice(0, 60)}`);
     }
@@ -1578,55 +1590,35 @@ export async function scrapeWithoutAPI(
     }
   }
 
-  // 2. Directories (fetch-based, no Puppeteer)
-  if (all.length < maxLeads) {
-    try {
-      const dirLeads = await scrapeDirectories(niche, location, dirTarget, seen, emit, aiProvider);
-      counts.push({ source: 'Dirs', count: dirLeads.length });
-    } catch (e) {
-      console.error('[Dirs] Error:', e);
-      counts.push({ source: 'Dirs', count: 0 });
-    }
-  }
+  // 2. Directories, Bing, DuckDuckGo, AND Maps — all in PARALLEL for maximum speed and yield
+  // Maps runs concurrently with fetch-based sources instead of waiting for them to finish
+  const parallelSources: Promise<any>[] = [
+    scrapeDirectories(niche, location, dirTarget, seen, emit, aiProvider)
+      .then(r => { counts.push({ source: 'Dirs', count: r.length }); return r; })
+      .catch(e => { console.error('[Dirs] Error:', e); counts.push({ source: 'Dirs', count: 0 }); return []; }),
 
-  // 3. Bing search (fetch-based)
-  if (all.length < maxLeads) {
-    try {
-      const bingLeads = await scrapeBingSearch(niche, location, googleTarget, seen, emit, aiProvider);
-      counts.push({ source: 'Bing', count: bingLeads.length });
-    } catch (e) {
-      console.error('[Bing] Error:', e);
-      counts.push({ source: 'Bing', count: 0 });
-    }
-  }
+    scrapeBingSearch(niche, location, googleTarget, seen, emit, aiProvider)
+      .then(r => { counts.push({ source: 'Bing', count: r.length }); return r; })
+      .catch(e => { console.error('[Bing] Error:', e); counts.push({ source: 'Bing', count: 0 }); return []; }),
 
-  // 4. DuckDuckGo (fetch-based)
-  if (all.length < maxLeads) {
-    try {
-      const ddgLeads = await scrapeDDGSearch(niche, location, Math.ceil(maxLeads * 0.40), seen, emit, aiProvider);
-      counts.push({ source: 'DDG', count: ddgLeads.length });
-    } catch (e) {
-      console.error('[DDG] Error:', e);
-      counts.push({ source: 'DDG', count: 0 });
-    }
-  }
+    scrapeDDGSearch(niche, location, Math.ceil(maxLeads * 0.40), seen, emit, aiProvider)
+      .then(r => { counts.push({ source: 'DDG', count: r.length }); return r; })
+      .catch(e => { console.error('[DDG] Error:', e); counts.push({ source: 'DDG', count: 0 }); return []; }),
 
-  // 5. Google Maps (Puppeteer) — only if still need more leads
-  if (all.length < maxLeads) {
-    try {
-      const mapsPromise = scrapeGoogleMaps(niche, location, mapsTarget, seen, emit, aiProvider);
-      const timeoutPromise = new Promise<ScrapedLead[]>((resolve) =>
-        setTimeout(() => { console.log('  ⏱  Maps timed out — skipping'); resolve([]); }, 45_000)
-      );
-      const mapsLeads = await Promise.race([mapsPromise, timeoutPromise]);
-      counts.push({ source: 'Maps', count: mapsLeads.length });
-    } catch (e) {
-      console.error('[Maps] Error:', e);
-      counts.push({ source: 'Maps', count: 0 });
-    }
-  }
+    // Maps runs alongside fetch sources with its own timeout
+    Promise.race([
+      scrapeGoogleMaps(niche, location, mapsTarget, seen, emit, aiProvider),
+      new Promise<ScrapedLead[]>((resolve) =>
+        setTimeout(() => { console.log('  ⏱  Maps timed out — skipping'); resolve([]); }, 60_000)
+      ),
+    ])
+      .then(r => { counts.push({ source: 'Maps', count: r.length }); return r; })
+      .catch(e => { console.error('[Maps] Error:', e); counts.push({ source: 'Maps', count: 0 }); return []; }),
+  ];
 
-  // 6. Google Custom Search API (optional)
+  await Promise.all(parallelSources);
+
+  // 5. Google Custom Search API (optional top-up)
   if (all.length < maxLeads && googleApiKey && googleCx) {
     console.log('🔑 Google Custom Search API key found');
     try {

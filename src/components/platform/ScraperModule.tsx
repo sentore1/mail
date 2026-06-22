@@ -918,6 +918,13 @@ export default function ScraperModule({ userId, onLeadsAdded, onGenerateEmails }
         email_verified: (l as any).emailIsReal ?? false,
       }));
 
+      // Refresh session before saving — scraping can take 30+ minutes and
+      // the JWT expires after ~1 hour, causing silent auth failures on insert.
+      const { error: sessionErr } = await supabase.auth.refreshSession();
+      if (sessionErr) {
+        throw new Error("Your session has expired. Please refresh the page and sign in again.");
+      }
+
       const { error } = await supabase.from("leads").insert(inserts);
       if (error) throw new Error(error.message);
 

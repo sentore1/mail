@@ -56,6 +56,15 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
   const supabase = createClient();
 
   const fetchLeads = useCallback(async () => {
+    // Refresh session before querying — prevents JWT expired errors
+    // after long periods of inactivity (e.g. scraper running for 30+ min)
+    const { error: sessionError } = await supabase.auth.refreshSession();
+    if (sessionError) {
+      // Session is truly gone — redirect to sign-in
+      window.location.href = "/sign-in";
+      return;
+    }
+
     const { data, error } = await supabase
       .from("leads")
       .select("*")
@@ -64,7 +73,14 @@ export default function CRMModule({ userId, onWriteEmail }: CRMModuleProps) {
       .not("status", "in", '("new","New")')
       .order("created_at", { ascending: false });
 
-    if (error) console.error("Error fetching leads:", error);
+    if (error) {
+      // JWT expired or auth error — refresh the page to re-authenticate
+      if ((error as any)?.message?.includes("JWT") || (error as any)?.code === "PGRST301") {
+        toast.error("Session expired — please refresh the page");
+        return;
+      }
+      console.error("Error fetching leads:", error);
+    }
 
     if (data) {
       setLeads(data as Lead[]);

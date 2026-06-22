@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ActiveModule, Lead, ScrapedLead } from "@/types/platform";
 import PlatformSidebar from "./PlatformSidebar";
 import TopBar from "./TopBar";
@@ -12,6 +12,7 @@ import SMTPManager from "./SMTPManager";
 import FollowUpModule from "./FollowUpModule";
 import EmailVerificationModule from "./EmailVerificationModule";
 import AnalyticsModule from "./AnalyticsModule";
+import MonthlyReportModule from "./MonthlyReportModule";
 import WebhooksModule from "./WebhooksModule";
 import SequenceBuilderModule from "./SequenceBuilderModule";
 import ABTestingModule from "./ABTestingModule";
@@ -41,6 +42,20 @@ export default function PlatformLayout({ userId, userEmail }: PlatformLayoutProp
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const router = useRouter();
   const supabase = createClient();
+
+  // Proactively refresh the JWT every 45 minutes so long-running operations
+  // (scraping, bulk send) never hit a JWT expired error mid-operation.
+  useEffect(() => {
+    const REFRESH_INTERVAL = 45 * 60 * 1000; // 45 minutes
+    const interval = setInterval(async () => {
+      const { error } = await supabase.auth.refreshSession();
+      if (error) {
+        // Session truly gone — force sign-in
+        router.push("/sign-in");
+      }
+    }, REFRESH_INTERVAL);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -160,6 +175,10 @@ export default function PlatformLayout({ userId, userEmail }: PlatformLayoutProp
 
           <LazyModule active={activeModule === "analytics"}>
             <AnalyticsModule userId={userId} />
+          </LazyModule>
+
+          <LazyModule active={activeModule === "monthly-report"}>
+            <MonthlyReportModule userId={userId} />
           </LazyModule>
 
           <LazyModule active={activeModule === "webhooks"}>

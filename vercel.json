@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/scan-inbox",
       "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/monthly-report-notify",
+      "schedule": "0 8 1 * *"
     }
   ],
   "functions": {
@@ -30,6 +34,12 @@
     },
     "src/app/api/cron/scan-inbox/route.ts": {
       "maxDuration": 300
+    },
+    "src/app/api/cron/monthly-report-notify/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/monthly-report/route.ts": {
+      "maxDuration": 60
     }
   }
 }
