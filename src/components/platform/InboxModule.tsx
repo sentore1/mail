@@ -139,25 +139,72 @@ export default function InboxModule({ userId }: InboxModuleProps) {
     loadReplies();
   }, [loadConfigs, loadReplies]);
 
+  const [checkStatus, setCheckStatus] = useState<string>("");
+  const [testing, setTesting]         = useState(false);
+  const [testResults, setTestResults] = useState<any[]>([]);
+
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResults([]);
+    try {
+      const res = await fetch("/api/inbox/test");
+      const d   = await res.json();
+      setTestResults(d.accounts ?? []);
+      if (d.ok) toast.success("All inboxes connected ✅");
+      else      toast.error("Connection issue — see details below");
+    } catch (e: any) {
+      toast.error(`Test failed: ${e?.message}`);
+    }
+    setTesting(false);
+  };
+
   const handleCheck = async () => {
     setChecking(true);
+    setCheckStatus("Connecting to Gmail…");
+    // Show progress messages while waiting
+    const msgs = [
+      "Connecting to Gmail…",
+      "Scanning inbox…",
+      "Matching replies to sent emails…",
+      "Almost done…",
+    ];
+    let msgIdx = 0;
+    const ticker = setInterval(() => {
+      msgIdx = Math.min(msgIdx + 1, msgs.length - 1);
+      setCheckStatus(msgs[msgIdx] ?? "");
+    }, 8_000);
+
     try {
       const res = await fetch("/api/inbox/check", { method: "POST" });
-      const d = await res.json();
+      clearInterval(ticker);
+      const d = await res.json().catch(() => ({ success: false, error: `HTTP ${res.status}` }));
+      if (!res.ok) {
+        toast.error(`Server error: ${d.error ?? res.statusText}`);
+        setCheckStatus("");
+        setChecking(false);
+        return;
+      }
       if (d.success) {
         if (d.totalNewReplies > 0) {
           toast.success(`✅ Found ${d.totalNewReplies} new repl${d.totalNewReplies === 1 ? "y" : "ies"}!`);
           await loadReplies();
         } else {
-          toast.info(d.message || "No new replies found");
+          const errors = (d.results ?? []).flatMap((r: any) => r.errors ?? []);
+          if (errors.length > 0) {
+            toast.error(`IMAP error: ${errors[0]}`);
+          } else {
+            toast.info(d.message || "No new replies found");
+          }
         }
         await loadConfigs();
       } else {
         toast.error(d.error ?? "Check failed");
       }
-    } catch {
-      toast.error("Check failed — see console for details");
+    } catch (err: any) {
+      clearInterval(ticker);
+      toast.error(`Network error: ${err?.message ?? err}`);
     }
+    setCheckStatus("");
     setChecking(false);
   };
 
@@ -219,10 +266,10 @@ export default function InboxModule({ userId }: InboxModuleProps) {
           <button
             onClick={handleCheck}
             disabled={checking}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-70 transition-colors min-w-[140px] justify-center"
           >
-            {checking ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            {checking ? "Checking…" : "Check Now"}
+            {checking ? <Loader2 size={14} className="animate-spin shrink-0" /> : <RefreshCw size={14} />}
+            {checking ? (checkStatus || "Checking…") : "Check Now"}
           </button>
         </div>
       </div>
@@ -397,12 +444,47 @@ export default function InboxModule({ userId }: InboxModuleProps) {
             )}
 
             {configs.length > 0 && (
-              <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-500 space-y-1">
-                <p className="font-semibold text-gray-700">How sync works</p>
-                <p>• Click <strong>Check Now</strong> at the top to manually scan your inbox right now</p>
-                <p>• The platform automatically checks for new replies every 15–30 minutes via cron</p>
-                <p>• Only emails that are replies to emails you sent through the platform are imported</p>
-              </div>
+              <>
+                {/* Test connection button */}
+                <button
+                  onClick={handleTest}
+                  disabled={testing}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                >
+                  {testing ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} className="text-green-600" />}
+                  {testing ? "Testing connection…" : "Test IMAP Connection"}
+                </button>
+
+                {/* Test results */}
+                {testResults.length > 0 && (
+                  <div className="space-y-2">
+                    {testResults.map((r, i) => (
+                      <div key={i} className={`p-3 rounded-xl border text-xs ${r.ok ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
+                        <div className="flex items-center gap-2 font-semibold mb-1">
+                          {r.ok
+                            ? <CheckCircle2 size={13} className="text-green-600" />
+                            : <AlertCircle  size={13} className="text-red-500" />}
+                          <span className={r.ok ? "text-green-800" : "text-red-700"}>{r.email}</span>
+                          {r.ok && <span className="text-green-600 font-normal ml-auto">{r.messages} msgs · {r.unseen} unread</span>}
+                        </div>
+                        {!r.ok && (
+                          <p className="text-red-700 leading-relaxed pl-5">{r.error}</p>
+                        )}
+                        {r.ok && (
+                          <p className="text-green-600 pl-5">Connected to {r.imapHost} ✓</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-500 space-y-1">
+                  <p className="font-semibold text-gray-700">How sync works</p>
+                  <p>• Click <strong>Check Now</strong> at the top to manually scan your inbox right now</p>
+                  <p>• The platform automatically checks for new replies every 15 minutes via cron</p>
+                  <p>• Only replies to emails sent through the platform are imported</p>
+                </div>
+              </>
             )}
           </div>
         )}

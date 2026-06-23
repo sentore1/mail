@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/scan-inbox",
-      "schedule": "*/30 * * * *"
+      "schedule": "*/15 * * * *"
     },
     {
       "path": "/api/cron/monthly-report-notify",

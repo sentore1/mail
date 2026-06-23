@@ -63,16 +63,18 @@ export function NotificationsBell({ userId }: NotificationsPanelProps) {
       .subscribe();
 
     // Auto poll inbox every 5 minutes to catch new replies without user action
+    // Delay first poll by 30s so the route is fully compiled before we hit it
     const pollInbox = async () => {
       try {
         await fetch('/api/inbox/check', { method: 'POST' });
       } catch { /* silent */ }
     };
-    pollInbox(); // check on mount
-    const pollInterval = setInterval(pollInbox, 5 * 60 * 1000); // every 5 min
+    const firstPollTimer = setTimeout(pollInbox, 30_000); // wait 30s before first call
+    const pollInterval = setInterval(pollInbox, 5 * 60 * 1000); // every 5 min after that
 
     return () => {
       supabase.removeChannel(channel);
+      clearTimeout(firstPollTimer);
       clearInterval(pollInterval);
     };
   }, [userId, fetchNotifications]);
