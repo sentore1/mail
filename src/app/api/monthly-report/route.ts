@@ -33,23 +33,68 @@ export async function GET(request: NextRequest) {
   const service = createServiceClient();
 
   try {
-    // ── 1. All sent emails for the month ─────────────────────────────────────
-    const { data: emails } = await service
+    // ── 1. Get true total count first, then paginate correctly ──────────────
+    // Using count:'exact' with head:true bypasses the row cap entirely.
+    const { count: totalCount } = await service
       .from("sent_emails")
-      .select(`
-        id, to_email, subject, body,
-        sent_at, opened_at, clicked_at, replied_at,
-        status, bounce_reason,
-        is_followup, followup_number,
-        open_count, click_count,
-        campaign_id, lead_id
-      `)
+      .select("*", { count: "exact", head: true })
       .eq("user_id", user.id)
       .gte("sent_at", startOfMonth)
-      .lte("sent_at", endOfMonth)
-      .order("sent_at", { ascending: true });
+      .lte("sent_at", endOfMonth);
 
-    const allEmails = emails ?? [];
+    const REAL_TOTAL = totalCount ?? 0;
+
+    // ── Summary stats via count queries — NO rows fetched, bypasses cap ─────
+    const baseQ = () => service
+      .from("sent_emails")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .gte("sent_at", startOfMonth)
+      .lte("sent_at", endOfMonth);
+
+    const [
+      { count: cOpened },
+      { count: cClicked },
+      { count: cReplied },
+      { count: cBounced },
+      { count: cFollowups },
+      { count: cNotOpened },
+    ] = await Promise.all([
+      baseQ().not("opened_at", "is", null),
+      baseQ().not("clicked_at", "is", null),
+      baseQ().not("replied_at", "is", null),
+      baseQ().eq("status", "bounced"),
+      baseQ().eq("is_followup", true),
+      baseQ().is("opened_at", null).not("status", "in", '("bounced","failed")'),
+    ]);
+
+    // ── 2. Fetch ALL rows using range pagination ──────────────────────────────
+    // We know the real total from the count above, so we can paginate correctly.
+    const allEmails: any[] = [];
+    const PAGE_SIZE = 1000; // match PostgREST's actual page size
+    const totalPages = Math.ceil(REAL_TOTAL / PAGE_SIZE);
+
+    for (let page = 0; page < totalPages; page++) {
+      const rangeFrom = page * PAGE_SIZE;
+      const rangeTo   = rangeFrom + PAGE_SIZE - 1;
+      const { data: rows, error: pageErr } = await service
+        .from("sent_emails")
+        .select(`
+          id, to_email, subject,
+          sent_at, opened_at, clicked_at, replied_at,
+          status, bounce_reason,
+          is_followup, followup_number,
+          open_count, click_count,
+          campaign_id, lead_id
+        `)
+        .eq("user_id", user.id)
+        .gte("sent_at", startOfMonth)
+        .lte("sent_at", endOfMonth)
+        .order("sent_at", { ascending: true })
+        .range(rangeFrom, rangeTo);
+      if (pageErr) throw new Error(`Page ${page} fetch failed: ${pageErr.message}`);
+      if (rows && rows.length > 0) allEmails.push(...rows);
+    }
 
     // ── 2. Fetch lead info for company names ─────────────────────────────────
     const leadIds = [...new Set(allEmails.map(e => e.lead_id).filter(Boolean))];
@@ -90,9 +135,17 @@ export async function GET(request: NextRequest) {
       for (const c of campaigns ?? []) campaignMap.set(c.id, c.name);
     }
 
-    // ── Calculations ──────────────────────────────────────────────────────────
+    // ── Calculations — use DB count results for the summary numbers ──────────
+    // allEmails has ALL rows from pagination; counts are from DB aggregate queries.
 
-    const totalSent   = allEmails.length;
+    const totalSent     = REAL_TOTAL;
+    const totalOpened   = cOpened   ?? allEmails.filter(e => e.opened_at).length;
+    const totalClicked  = cClicked  ?? allEmails.filter(e => e.clicked_at).length;
+    const totalBounced  = cBounced  ?? allEmails.filter(e => e.status === "bounced").length;
+    const totalFollowups = cFollowups ?? allEmails.filter(e => e.is_followup).length;
+    const totalNotOpened = cNotOpened ?? allEmails.filter(e => !e.opened_at && e.status !== "bounced" && e.status !== "failed").length;
+
+    // Keep filtered arrays for list building (these work on allEmails which has all rows)
     const opened      = allEmails.filter(e => e.opened_at);
     const clicked     = allEmails.filter(e => e.clicked_at);
     const bounced     = allEmails.filter(e => e.status === "bounced");
@@ -100,7 +153,7 @@ export async function GET(request: NextRequest) {
     const followups   = allEmails.filter(e => e.is_followup);
     const initialEmails = allEmails.filter(e => !e.is_followup);
 
-    const openRate  = totalSent > 0 ? Math.round((opened.length / totalSent) * 100) : 0;
+    const openRate  = totalSent > 0 ? Math.round((totalOpened  / totalSent) * 100) : 0;
     const replyRate = totalSent > 0 ? Math.round((allReplies.length / totalSent) * 100) : 0;
 
     // ── Emails sent per day ───────────────────────────────────────────────────
@@ -289,13 +342,13 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // ── Donut chart data ──────────────────────────────────────────────────────
+    // ── Donut chart data — use DB counts for accuracy ────────────────────────
     const donutData = [
-      { name: "Not Opened", value: notOpened.length, color: "#e5e7eb" },
-      { name: "Opened",     value: opened.length - clicked.length - allReplies.length, color: "#fbbf24" },
-      { name: "Clicked",    value: clicked.length, color: "#34d399" },
+      { name: "Not Opened", value: totalNotOpened, color: "#e5e7eb" },
+      { name: "Opened",     value: Math.max(0, totalOpened - totalClicked - allReplies.length), color: "#fbbf24" },
+      { name: "Clicked",    value: totalClicked, color: "#34d399" },
       { name: "Replied",    value: allReplies.length, color: "#a78bfa" },
-      { name: "Bounced",    value: bounced.length, color: "#f87171" },
+      { name: "Bounced",    value: totalBounced, color: "#f87171" },
     ].filter(d => d.value > 0);
 
     return NextResponse.json({
@@ -303,18 +356,18 @@ export async function GET(request: NextRequest) {
       year,
       month,
       summary: {
-        total_sent: totalSent,
-        total_opened: opened.length,
-        open_rate: openRate,
-        total_replied: allReplies.length,
-        reply_rate: replyRate,
-        total_clicked: clicked.length,
-        click_rate: totalSent > 0 ? Math.round((clicked.length / totalSent) * 100) : 0,
-        total_bounced: bounced.length,
-        bounce_rate: totalSent > 0 ? Math.round((bounced.length / totalSent) * 100) : 0,
-        total_followups: followups.length,
-        total_not_opened: notOpened.length,
-        initial_emails: initialEmails.length,
+        total_sent:      totalSent,
+        total_opened:    totalOpened,
+        open_rate:       openRate,
+        total_replied:   allReplies.length,
+        reply_rate:      replyRate,
+        total_clicked:   totalClicked,
+        click_rate:      totalSent > 0 ? Math.round((totalClicked  / totalSent) * 100) : 0,
+        total_bounced:   totalBounced,
+        bounce_rate:     totalSent > 0 ? Math.round((totalBounced  / totalSent) * 100) : 0,
+        total_followups: totalFollowups,
+        total_not_opened: totalNotOpened,
+        initial_emails:  totalSent - totalFollowups,
       },
       by_day: byDay,
       donut_data: donutData,

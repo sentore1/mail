@@ -91,7 +91,7 @@ export default function FollowUpModule({ userId }: FollowUpModuleProps) {
         sb.from("sent_emails").select("*").eq("user_id", userId)
           .not("lead_id", "is", null)
           .not("status", "in", '("failed","bounced","invalid_email")')
-          .order("sent_at", { ascending: false }).limit(1000),
+          .order("sent_at", { ascending: false }).range(0, 4999),
         sb.from("email_replies").select("*").eq("user_id", userId).order("received_at", { ascending: false }),
         sb.from("followup_queue").select("lead_id").eq("user_id", userId)
           .eq("status", "pending").lte("scheduled_at", new Date().toISOString()),

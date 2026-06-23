@@ -96,13 +96,31 @@ export default function AnalyticsModule({ userId }: AnalyticsModuleProps) {
     try {
       const since = new Date(Date.now() - range * 24 * 60 * 60 * 1000).toISOString();
 
-      const { data: emails } = await supabase
+      // Step 1: get the real total count — bypasses row cap entirely
+      const { count: realTotal } = await supabase
         .from("sent_emails")
-        .select("sent_at, opened_at, clicked_at, status, lead_id")
+        .select("*", { count: "exact", head: true })
         .eq("user_id", userId)
         .gte("sent_at", since)
-        .not("status", "in", '("failed","invalid_email")')
-        .order("sent_at", { ascending: true });
+        .not("status", "in", '("failed","invalid_email")');
+
+      // Step 2: paginate using known total (PostgREST caps at 1000/page)
+      const PAGE = 1000;
+      const totalPages = Math.ceil((realTotal ?? 0) / PAGE);
+      const allEmails: any[] = [];
+
+      for (let page = 0; page < totalPages; page++) {
+        const { data: pageData } = await supabase
+          .from("sent_emails")
+          .select("sent_at, opened_at, clicked_at, status, lead_id")
+          .eq("user_id", userId)
+          .gte("sent_at", since)
+          .not("status", "in", '("failed","invalid_email")')
+          .order("sent_at", { ascending: true })
+          .range(page * PAGE, page * PAGE + PAGE - 1);
+        if (pageData && pageData.length > 0) allEmails.push(...pageData);
+      }
+      const emails = allEmails;
 
       const { data: replies } = await supabase
         .from("email_replies")
@@ -183,13 +201,27 @@ export default function AnalyticsModule({ userId }: AnalyticsModuleProps) {
         setTopNiches(niches);
       }
 
-      // Follow-up stage performance
-      const { data: fuEmails } = await supabase
+      // Follow-up stage performance — paginate using count-first approach
+      const { count: fuTotal } = await supabase
         .from("sent_emails")
-        .select("followup_number, opened_at, replied_at")
+        .select("*", { count: "exact", head: true })
         .eq("user_id", userId)
         .gte("sent_at", since)
         .not("followup_number", "is", null);
+
+      const fuPages: any[] = [];
+      const fuTotalPages = Math.ceil((fuTotal ?? 0) / 1000);
+      for (let p = 0; p < fuTotalPages; p++) {
+        const { data: fuPage } = await supabase
+          .from("sent_emails")
+          .select("followup_number, opened_at, replied_at")
+          .eq("user_id", userId)
+          .gte("sent_at", since)
+          .not("followup_number", "is", null)
+          .range(p * 1000, p * 1000 + 999);
+        if (fuPage && fuPage.length > 0) fuPages.push(...fuPage);
+      }
+      const fuEmails = fuPages;
 
       if (fuEmails && fuEmails.length > 0) {
         const stageMap = new Map<number, { sent: number; opened: number; replied: number }>();
@@ -211,11 +243,21 @@ export default function AnalyticsModule({ userId }: AnalyticsModuleProps) {
           })));
       }
 
-      // Best sending time
-      const { data: openedEmails } = await supabase
-        .from("sent_emails").select("sent_at")
-        .eq("user_id", userId).gte("sent_at", since)
-        .not("opened_at", "is", null);
+      // Best sending time — paginate to avoid 1000-row cap
+      const openedPages: any[] = [];
+      let opFrom = 0;
+      while (true) {
+        const { data: opPage } = await supabase
+          .from("sent_emails").select("sent_at")
+          .eq("user_id", userId).gte("sent_at", since)
+          .not("opened_at", "is", null)
+          .range(opFrom, opFrom + 4999);
+        if (!opPage || opPage.length === 0) break;
+        openedPages.push(...opPage);
+        if (opPage.length < 5000) break;
+        opFrom += 5000;
+      }
+      const openedEmails = openedPages;
 
       if (openedEmails && openedEmails.length > 0) {
         const hourMap = new Map<number, number>();

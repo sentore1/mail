@@ -23,41 +23,76 @@ export async function GET(request: NextRequest) {
   const service = createServiceClient();
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-  // ── Overall stats ─────────────────────────────────────────────────────────
-  let emailQuery = service
-    .from('sent_emails')
-    .select('id, status, opened_at, clicked_at, replied_at, sent_at, campaign_id')
-    .eq('user_id', user.id)
-    .gte('sent_at', since);
+  // ── Overall stats — use count queries instead of fetching all rows ─────────
+  // Fetching rows hits Supabase's 1000-row default limit; count queries don't.
 
-  if (campaignId) {
-    emailQuery = emailQuery.eq('campaign_id', campaignId);
-  }
-
-  const { data: emails } = await emailQuery;
-  const emailList = emails || [];
-
-  const stats = {
-    total_sent: emailList.length,
-    total_opened: emailList.filter(e => e.opened_at).length,
-    total_clicked: emailList.filter(e => e.clicked_at).length,
-    total_replied: emailList.filter(e => e.replied_at).length,
-    total_bounced: emailList.filter(e => e.status === 'bounced').length,
-    total_failed: emailList.filter(e => e.status === 'failed').length,
-    open_rate: 0,
-    click_rate: 0,
-    reply_rate: 0,
-    bounce_rate: 0,
+  const buildBase = () => {
+    let q = service
+      .from('sent_emails')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .gte('sent_at', since);
+    if (campaignId) q = q.eq('campaign_id', campaignId);
+    return q;
   };
 
-  if (stats.total_sent > 0) {
-    stats.open_rate = Math.round((stats.total_opened / stats.total_sent) * 100 * 10) / 10;
-    stats.click_rate = Math.round((stats.total_clicked / stats.total_sent) * 100 * 10) / 10;
-    stats.reply_rate = Math.round((stats.total_replied / stats.total_sent) * 100 * 10) / 10;
-    stats.bounce_rate = Math.round((stats.total_bounced / stats.total_sent) * 100 * 10) / 10;
+  const [
+    { count: totalSent },
+    { count: totalOpened },
+    { count: totalClicked },
+    { count: totalReplied },
+    { count: totalBounced },
+    { count: totalFailed },
+  ] = await Promise.all([
+    buildBase(),
+    buildBase().not('opened_at', 'is', null),
+    buildBase().not('clicked_at', 'is', null),
+    buildBase().not('replied_at', 'is', null),
+    buildBase().eq('status', 'bounced'),
+    buildBase().eq('status', 'failed'),
+  ]);
+
+  const ts = totalSent   ?? 0;
+  const to = totalOpened  ?? 0;
+  const tc = totalClicked ?? 0;
+  const tr = totalReplied ?? 0;
+  const tb = totalBounced ?? 0;
+  const tf = totalFailed  ?? 0;
+
+  const stats = {
+    total_sent:    ts,
+    total_opened:  to,
+    total_clicked: tc,
+    total_replied: tr,
+    total_bounced: tb,
+    total_failed:  tf,
+    open_rate:   ts > 0 ? Math.round((to / ts) * 1000) / 10 : 0,
+    click_rate:  ts > 0 ? Math.round((tc / ts) * 1000) / 10 : 0,
+    reply_rate:  ts > 0 ? Math.round((tr / ts) * 1000) / 10 : 0,
+    bounce_rate: ts > 0 ? Math.round((tb / ts) * 1000) / 10 : 0,
+  };
+
+  // ── Daily breakdown — use count to know real total, then paginate correctly ─
+  const PAGE = 1000; // match PostgREST's actual page size
+  const emailList: any[] = [];
+  const totalForDailyBreakdown = ts; // already fetched above
+  const totalDailyPages = Math.ceil(totalForDailyBreakdown / PAGE);
+
+  for (let page = 0; page < totalDailyPages; page++) {
+    const rangeFrom = page * PAGE;
+    const rangeTo   = rangeFrom + PAGE - 1;
+    let q = service
+      .from('sent_emails')
+      .select('sent_at, opened_at, replied_at, status, campaign_id')
+      .eq('user_id', user.id)
+      .gte('sent_at', since)
+      .order('sent_at', { ascending: true })
+      .range(rangeFrom, rangeTo);
+    if (campaignId) q = q.eq('campaign_id', campaignId);
+    const { data: pageData } = await q;
+    if (pageData && pageData.length > 0) emailList.push(...pageData);
   }
 
-  // ── Daily breakdown ───────────────────────────────────────────────────────
   const dailyMap = new Map<string, { sent: number; opened: number; replied: number; bounced: number }>();
 
   for (const email of emailList) {
