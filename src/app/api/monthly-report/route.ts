@@ -33,67 +33,53 @@ export async function GET(request: NextRequest) {
   const service = createServiceClient();
 
   try {
-    // ── 1. Get true total count first, then paginate correctly ──────────────
-    // Using count:'exact' with head:true bypasses the row cap entirely.
-    const { count: totalCount } = await service
-      .from("sent_emails")
-      .select("*", { count: "exact", head: true })
-      .eq("user_id", user.id)
-      .gte("sent_at", startOfMonth)
-      .lte("sent_at", endOfMonth);
+    // ── Use RPC function — bypasses PostgREST's max-rows limit entirely ──────
+    // The DB function runs as a SQL aggregate and returns one row with all counts.
+    const { data: rpcStats, error: rpcErr } = await service
+      .rpc("get_monthly_email_stats", {
+        p_user_id: user.id,
+        p_year:    year,
+        p_month:   month,
+      })
+      .single();
 
-    const REAL_TOTAL = totalCount ?? 0;
+    // Fall back to count queries if RPC not deployed yet
+    let REAL_TOTAL = 0;
+    let cOpened = 0, cClicked = 0, cReplied = 0, cBounced = 0, cFollowups = 0, cNotOpened = 0;
 
-    // ── Summary stats via count queries — NO rows fetched, bypasses cap ─────
-    const baseQ = () => service
-      .from("sent_emails")
-      .select("*", { count: "exact", head: true })
-      .eq("user_id", user.id)
-      .gte("sent_at", startOfMonth)
-      .lte("sent_at", endOfMonth);
-
-    const [
-      { count: cOpened },
-      { count: cClicked },
-      { count: cReplied },
-      { count: cBounced },
-      { count: cFollowups },
-      { count: cNotOpened },
-    ] = await Promise.all([
-      baseQ().not("opened_at", "is", null),
-      baseQ().not("clicked_at", "is", null),
-      baseQ().not("replied_at", "is", null),
-      baseQ().eq("status", "bounced"),
-      baseQ().eq("is_followup", true),
-      baseQ().is("opened_at", null).not("status", "in", '("bounced","failed")'),
-    ]);
-
-    // ── 2. Fetch ALL rows using range pagination ──────────────────────────────
-    // We know the real total from the count above, so we can paginate correctly.
-    const allEmails: any[] = [];
-    const PAGE_SIZE = 1000; // match PostgREST's actual page size
-    const totalPages = Math.ceil(REAL_TOTAL / PAGE_SIZE);
-
-    for (let page = 0; page < totalPages; page++) {
-      const rangeFrom = page * PAGE_SIZE;
-      const rangeTo   = rangeFrom + PAGE_SIZE - 1;
-      const { data: rows, error: pageErr } = await service
+    if (!rpcErr && rpcStats) {
+      REAL_TOTAL  = Number(rpcStats.total_sent)       || 0;
+      cOpened     = Number(rpcStats.total_opened)     || 0;
+      cClicked    = Number(rpcStats.total_clicked)    || 0;
+      cReplied    = Number(rpcStats.total_replied)    || 0;
+      cBounced    = Number(rpcStats.total_bounced)    || 0;
+      cFollowups  = Number(rpcStats.total_followups)  || 0;
+      cNotOpened  = Number(rpcStats.total_not_opened) || 0;
+    } else {
+      // RPC not available — fall back to count queries
+      const baseQ = () => service
         .from("sent_emails")
-        .select(`
-          id, to_email, subject,
-          sent_at, opened_at, clicked_at, replied_at,
-          status, bounce_reason,
-          is_followup, followup_number,
-          open_count, click_count,
-          campaign_id, lead_id
-        `)
+        .select("*", { count: "exact", head: true })
         .eq("user_id", user.id)
         .gte("sent_at", startOfMonth)
-        .lte("sent_at", endOfMonth)
-        .order("sent_at", { ascending: true })
-        .range(rangeFrom, rangeTo);
-      if (pageErr) throw new Error(`Page ${page} fetch failed: ${pageErr.message}`);
-      if (rows && rows.length > 0) allEmails.push(...rows);
+        .lte("sent_at", endOfMonth);
+
+      const [t, o, cl, r, b, fu, no] = await Promise.all([
+        baseQ(),
+        baseQ().not("opened_at", "is", null),
+        baseQ().not("clicked_at", "is", null),
+        baseQ().not("replied_at", "is", null),
+        baseQ().eq("status", "bounced"),
+        baseQ().eq("is_followup", true),
+        baseQ().is("opened_at", null).not("status", "in", '("bounced","failed")'),
+      ]);
+      REAL_TOTAL = t.count ?? 0;
+      cOpened    = o.count  ?? 0;
+      cClicked   = cl.count ?? 0;
+      cReplied   = r.count  ?? 0;
+      cBounced   = b.count  ?? 0;
+      cFollowups = fu.count ?? 0;
+      cNotOpened = no.count ?? 0;
     }
 
     // ── 2. Fetch lead info for company names ─────────────────────────────────
@@ -111,6 +97,30 @@ export async function GET(request: NextRequest) {
           .in("id", chunk);
         for (const l of leads ?? []) leadMap.set(l.id, l);
       }
+    }
+
+    // ── 2. Fetch ALL rows with pagination (for list displays) ────────────────
+    const allEmails: any[] = [];
+    const PAGE_SIZE = 1000;
+    const totalPages = Math.ceil(REAL_TOTAL / PAGE_SIZE);
+
+    for (let page = 0; page < totalPages; page++) {
+      const { data: rows } = await service
+        .from("sent_emails")
+        .select(`
+          id, to_email, subject,
+          sent_at, opened_at, clicked_at, replied_at,
+          status, bounce_reason,
+          is_followup, followup_number,
+          open_count, click_count,
+          campaign_id, lead_id
+        `)
+        .eq("user_id", user.id)
+        .gte("sent_at", startOfMonth)
+        .lte("sent_at", endOfMonth)
+        .order("sent_at", { ascending: true })
+        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+      if (rows && rows.length > 0) allEmails.push(...rows);
     }
 
     // ── 3. Replies for the month ──────────────────────────────────────────────

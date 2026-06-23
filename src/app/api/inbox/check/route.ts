@@ -362,46 +362,121 @@ async function processInbox(
     }
   }
 
-  // Update last_checked_at
-  await service
-    .from("email_inbox_config")
-    .update({ last_checked_at: new Date().toISOString() })
-    .eq("id", config.id);
+  // Update last_checked_at — works for both real inbox config and synthetic smtp config
+  const now = new Date().toISOString();
+  if (config.id.startsWith("smtp:")) {
+    // Synthetic config derived from smtp_accounts — update smtp_accounts table
+    const smtpId = config.id.replace("smtp:", "");
+    await service
+      .from("smtp_accounts")
+      .update({ last_imap_check: now })
+      .eq("id", smtpId)
+      .catch(() => {}); // column may not exist yet — non-fatal
+  } else {
+    // Real email_inbox_config row
+    await service
+      .from("email_inbox_config")
+      .update({ last_checked_at: now })
+      .eq("id", config.id);
+  }
 
   return result;
 }
 
 // ─── Route handlers ───────────────────────────────────────────────────────────
 
+/**
+ * Build InboxConfig objects from smtp_accounts.
+ * Gmail SMTP host = smtp.gmail.com  →  IMAP host = imap.gmail.com
+ * Outlook SMTP host = smtp.office365.com / smtp-mail.outlook.com → IMAP = outlook.office365.com
+ * The password (App Password) is the same for both SMTP and IMAP.
+ */
+function smtpToImapConfig(smtp: any): InboxConfig | null {
+  const host: string = (smtp.host ?? "").toLowerCase();
+  const email: string = smtp.email ?? "";
+  const user: string = smtp.user_name ?? smtp.email ?? "";
+  const pass: string = smtp.password ?? "";
+
+  if (!email || !pass) return null;
+
+  // Map SMTP host → IMAP host
+  let imapHost = "";
+  if (host.includes("gmail") || host.includes("google")) {
+    imapHost = "imap.gmail.com";
+  } else if (host.includes("outlook") || host.includes("office365") || host.includes("hotmail") || host.includes("live")) {
+    imapHost = "outlook.office365.com";
+  } else if (host.includes("yahoo")) {
+    imapHost = "imap.mail.yahoo.com";
+  } else if (host.includes("smtp.")) {
+    // Generic: replace smtp. with imap.
+    imapHost = host.replace("smtp.", "imap.");
+  } else {
+    // Can't reliably derive IMAP host — skip
+    return null;
+  }
+
+  return {
+    id: `smtp:${smtp.id}`, // synthetic id — not from email_inbox_config
+    user_id: smtp.user_id,
+    email_address: email,
+    provider: smtp.provider ?? "gmail",
+    imap_host: imapHost,
+    imap_port: 993,
+    imap_username: user,
+    imap_password: pass,
+    last_checked_at: smtp.last_imap_check ?? null,
+    auto_reply_enabled: false,
+  };
+}
+
 async function handleCheck(request: NextRequest, userId: string | null) {
   const service = createServiceClient();
 
-  // Fetch active inbox configs
-  let query = service
-    .from("email_inbox_config")
-    .select("*")
-    .eq("is_active", true);
+  // ── Source 1: dedicated email_inbox_config rows ──────────────────────────
+  let inboxQuery = service.from("email_inbox_config").select("*").eq("is_active", true);
+  if (userId) inboxQuery = inboxQuery.eq("user_id", userId);
+  const { data: inboxConfigs } = await inboxQuery;
 
-  if (userId) {
-    query = query.eq("user_id", userId);
+  // ── Source 2: smtp_accounts (auto-derive IMAP from SMTP creds) ──────────
+  let smtpQuery = service
+    .from("smtp_accounts")
+    .select("id, user_id, email, host, port, user_name, password, provider, last_imap_check, status")
+    .eq("status", "active");
+  if (userId) smtpQuery = smtpQuery.eq("user_id", userId);
+  const { data: smtpAccounts } = await smtpQuery;
+
+  // Build combined config list — smtp_accounts is primary source
+  const configs: InboxConfig[] = [];
+  const seenEmails = new Set<string>();
+
+  // Add dedicated inbox configs first
+  for (const c of inboxConfigs ?? []) {
+    seenEmails.add((c.email_address ?? "").toLowerCase());
+    configs.push(c as InboxConfig);
   }
 
-  const { data: configs, error } = await query;
-  if (error) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  // Add smtp_accounts that aren't already covered by a dedicated config
+  for (const smtp of smtpAccounts ?? []) {
+    const emailLower = (smtp.email ?? "").toLowerCase();
+    if (seenEmails.has(emailLower)) continue; // already have a dedicated config
+    const derived = smtpToImapConfig(smtp);
+    if (derived) {
+      seenEmails.add(emailLower);
+      configs.push(derived);
+    }
   }
 
-  if (!configs || configs.length === 0) {
+  if (configs.length === 0) {
     return NextResponse.json({
       success: true,
-      message: "No active inbox configs found",
+      message: "No SMTP accounts or inbox configs found",
       results: [],
       totalNewReplies: 0,
     });
   }
 
   const results: CheckResult[] = [];
-  for (const config of configs as InboxConfig[]) {
+  for (const config of configs) {
     const result = await processInbox(service, config);
     results.push(result);
   }

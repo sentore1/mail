@@ -23,41 +23,55 @@ export async function GET(request: NextRequest) {
   const service = createServiceClient();
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-  // ── Overall stats — use count queries instead of fetching all rows ─────────
-  // Fetching rows hits Supabase's 1000-row default limit; count queries don't.
+  // ── Overall stats — use RPC to bypass PostgREST max-rows entirely ──────────
+  // RPC functions run as SQL aggregates on the DB — return one row, no cap.
 
-  const buildBase = () => {
-    let q = service
-      .from('sent_emails')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', user.id)
-      .gte('sent_at', since);
-    if (campaignId) q = q.eq('campaign_id', campaignId);
-    return q;
-  };
+  const rpcResult = await service
+    .rpc('get_sent_email_stats', {
+      p_user_id:  user.id,
+      p_since:    since,
+      p_until:    null,
+      p_campaign: campaignId ?? null,
+    })
+    .single()
+    .catch(() => ({ data: null, error: 'rpc_unavailable' }));
 
-  const [
-    { count: totalSent },
-    { count: totalOpened },
-    { count: totalClicked },
-    { count: totalReplied },
-    { count: totalBounced },
-    { count: totalFailed },
-  ] = await Promise.all([
-    buildBase(),
-    buildBase().not('opened_at', 'is', null),
-    buildBase().not('clicked_at', 'is', null),
-    buildBase().not('replied_at', 'is', null),
-    buildBase().eq('status', 'bounced'),
-    buildBase().eq('status', 'failed'),
-  ]);
+  let ts = 0, to = 0, tc = 0, tr = 0, tb = 0, tf = 0;
 
-  const ts = totalSent   ?? 0;
-  const to = totalOpened  ?? 0;
-  const tc = totalClicked ?? 0;
-  const tr = totalReplied ?? 0;
-  const tb = totalBounced ?? 0;
-  const tf = totalFailed  ?? 0;
+  if (rpcResult.data) {
+    // RPC deployed — use real counts
+    ts = Number(rpcResult.data.total_sent)    || 0;
+    to = Number(rpcResult.data.total_opened)  || 0;
+    tc = Number(rpcResult.data.total_clicked) || 0;
+    tr = Number(rpcResult.data.total_replied) || 0;
+    tb = Number(rpcResult.data.total_bounced) || 0;
+    tf = Number(rpcResult.data.total_failed)  || 0;
+  } else {
+    // Fallback: parallel count queries (bypasses row limit, no rows fetched)
+    const buildBase = () => {
+      let q = service
+        .from('sent_emails')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .gte('sent_at', since);
+      if (campaignId) q = q.eq('campaign_id', campaignId);
+      return q;
+    };
+    const [c1, c2, c3, c4, c5, c6] = await Promise.all([
+      buildBase(),
+      buildBase().not('opened_at', 'is', null),
+      buildBase().not('clicked_at', 'is', null),
+      buildBase().not('replied_at', 'is', null),
+      buildBase().eq('status', 'bounced'),
+      buildBase().eq('status', 'failed'),
+    ]);
+    ts = c1.count ?? 0;
+    to = c2.count ?? 0;
+    tc = c3.count ?? 0;
+    tr = c4.count ?? 0;
+    tb = c5.count ?? 0;
+    tf = c6.count ?? 0;
+  }
 
   const stats = {
     total_sent:    ts,
@@ -72,42 +86,52 @@ export async function GET(request: NextRequest) {
     bounce_rate: ts > 0 ? Math.round((tb / ts) * 1000) / 10 : 0,
   };
 
-  // ── Daily breakdown — use count to know real total, then paginate correctly ─
-  const PAGE = 1000; // match PostgREST's actual page size
-  const emailList: any[] = [];
-  const totalForDailyBreakdown = ts; // already fetched above
-  const totalDailyPages = Math.ceil(totalForDailyBreakdown / PAGE);
+  // ── Daily breakdown — use RPC if available, else paginate ────────────────
+  let daily: any[] = [];
 
-  for (let page = 0; page < totalDailyPages; page++) {
-    const rangeFrom = page * PAGE;
-    const rangeTo   = rangeFrom + PAGE - 1;
-    let q = service
-      .from('sent_emails')
-      .select('sent_at, opened_at, replied_at, status, campaign_id')
-      .eq('user_id', user.id)
-      .gte('sent_at', since)
-      .order('sent_at', { ascending: true })
-      .range(rangeFrom, rangeTo);
-    if (campaignId) q = q.eq('campaign_id', campaignId);
-    const { data: pageData } = await q;
-    if (pageData && pageData.length > 0) emailList.push(...pageData);
+  const rpcDaily = await service
+    .rpc('get_daily_email_stats', { p_user_id: user.id, p_since: since })
+    .catch(() => ({ data: null }));
+
+  if (rpcDaily.data && Array.isArray(rpcDaily.data) && rpcDaily.data.length > 0) {
+    daily = (rpcDaily.data as any[]).map(r => ({
+      date:    r.day,
+      sent:    Number(r.sent)    || 0,
+      opened:  Number(r.opened)  || 0,
+      replied: Number(r.replied) || 0,
+      bounced: Number(r.bounced) || 0,
+    }));
+  } else {
+    // Fallback: paginate through all rows
+    const emailList: any[] = [];
+    const PAGE = 1000;
+    const totalPages = Math.ceil(ts / PAGE);
+    for (let page = 0; page < totalPages; page++) {
+      let q = service
+        .from('sent_emails')
+        .select('sent_at, opened_at, replied_at, status, campaign_id')
+        .eq('user_id', user.id)
+        .gte('sent_at', since)
+        .order('sent_at', { ascending: true })
+        .range(page * PAGE, (page + 1) * PAGE - 1);
+      if (campaignId) q = q.eq('campaign_id', campaignId);
+      const { data: pageData } = await q;
+      if (pageData && pageData.length > 0) emailList.push(...pageData);
+    }
+    const dailyMap = new Map<string, { sent: number; opened: number; replied: number; bounced: number }>();
+    for (const email of emailList) {
+      const day = email.sent_at.split('T')[0];
+      const existing = dailyMap.get(day) || { sent: 0, opened: 0, replied: 0, bounced: 0 };
+      existing.sent++;
+      if (email.opened_at) existing.opened++;
+      if (email.replied_at) existing.replied++;
+      if (email.status === 'bounced') existing.bounced++;
+      dailyMap.set(day, existing);
+    }
+    daily = Array.from(dailyMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, data]) => ({ date, ...data }));
   }
-
-  const dailyMap = new Map<string, { sent: number; opened: number; replied: number; bounced: number }>();
-
-  for (const email of emailList) {
-    const day = email.sent_at.split('T')[0];
-    const existing = dailyMap.get(day) || { sent: 0, opened: 0, replied: 0, bounced: 0 };
-    existing.sent++;
-    if (email.opened_at) existing.opened++;
-    if (email.replied_at) existing.replied++;
-    if (email.status === 'bounced') existing.bounced++;
-    dailyMap.set(day, existing);
-  }
-
-  const daily = Array.from(dailyMap.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, data]) => ({ date, ...data }));
 
   // ── Lead status breakdown ─────────────────────────────────────────────────
   const { data: leads } = await service

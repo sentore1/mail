@@ -1,7 +1,7 @@
 "use client";
 
 import { ActiveModule } from "@/types/platform";
-import { Radio, Mail, Settings, Layout, Server, Send, ShieldCheck, BarChart2, Zap, GitBranch, FlaskConical, Tag, Link2, MessageSquare, UserCircle, CreditCard, FileText } from "lucide-react";
+import { Radio, Mail, Settings, Layout, Server, Send, ShieldCheck, BarChart2, Zap, GitBranch, FlaskConical, Tag, Link2, MessageSquare, UserCircle, CreditCard, FileText, Inbox } from "lucide-react";
 
 interface SidebarProps {
   activeModule: ActiveModule;
@@ -15,6 +15,7 @@ const navGroups = [
       { id: "scraper" as ActiveModule,       label: "Scraper",        icon: Radio,          badge: null },
       { id: "email-writer" as ActiveModule,  label: "Email Writer",   icon: Mail,           badge: null },
       { id: "follow-up" as ActiveModule,     label: "Follow-Up",      icon: Send,           badge: null },
+      { id: "inbox" as ActiveModule,          label: "Inbox & Replies", icon: Inbox,          badge: null },
       { id: "sequences" as ActiveModule,     label: "Sequences",      icon: GitBranch,      badge: null },    ],
   },
   {
